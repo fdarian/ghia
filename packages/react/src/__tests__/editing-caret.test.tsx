@@ -265,6 +265,47 @@ describeNative("the caret of an editing host (React)", () => {
       expect(renderer.getPaintedFrameCount() - inactive, "window not key").toBe(0)
     })
 
+    /** Types into a caret that is in the phase it is out in, one frame after the edit's own. */
+    async function typedInOffPhase() {
+      const { texts, renderer } = await focused(["hello"])
+      document.getSelection().collapse(texts[0]!, 5)
+      await shown(renderer)
+      renderer.simulateEditingInput("insertText", "x")
+      await shown(renderer)
+      renderer.advanceTime(BLINK)
+      renderer.drawFrame()
+      expect(renderer.getPaintedNodeSelection().caret!.lit, "out before the edit").toBe(false)
+      const before = renderer.getPatchCounters()
+      renderer.simulateEditingInput("insertText", "y")
+      await settle()
+      renderer.drawFrame()
+      return { renderer, before }
+    }
+
+    it("is solid right after typing in its off phase, and goes out one phase after the edit", async () => {
+      const { renderer } = await typedInOffPhase()
+      const lit = () => renderer.getPaintedNodeSelection().caret!.lit
+      expect(lit(), "typing lights it").toBe(true)
+      renderer.drawFrame()
+      renderer.advanceTime(BLINK - 1)
+      renderer.drawFrame()
+      expect(lit(), "just before the end of the phase that started with the edit").toBe(true)
+      renderer.advanceTime(1)
+      renderer.drawFrame()
+      expect(lit(), "at the end of it").toBe(false)
+      expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
+    })
+
+    counted("lights the caret in a frame that is a relayout patch", async () => {
+      const { renderer, before } = await typedInOffPhase()
+      const after = renderer.getPatchCounters()
+      expect(after.patchedFrames - before.patchedFrames, "the typing frame is patched").toBe(1)
+      expect(after.relayoutPatches - before.relayoutPatches, "and relays out").toBe(1)
+      expect(after.declines, "gpui declines nothing").toBe(before.declines)
+      expect(after.unpatchable, "nothing is left unpatched").toBe(before.unpatchable)
+      expect(renderer.getPaintedNodeSelection().caret!.lit).toBe(true)
+    })
+
     counted("blinks in patched frames that build the paragraph that holds the caret and nothing else", async () => {
       const lines = Array.from({ length: 40 }, (_, index) => `paragraph number ${index}`)
       const { texts, renderer } = await focused(lines)

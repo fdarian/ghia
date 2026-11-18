@@ -9081,6 +9081,16 @@ impl GpuixView {
         }
     }
 
+    /// Restarts the blink clock of the editing caret when the selection moved or the caret came into view,
+    /// before anything that paints it is built: by the frame built whole and by the patcher alike, or a
+    /// patch of the paragraph that holds it is built against the anchor of the edit before. Returns
+    /// whether the caret is shown.
+    pub(crate) fn sync_editing_caret(&self, tree: &RetainedTree, window: &gpui::Window, cx: &gpui::App) -> bool {
+        let shown = crate::editing::caret::is_shown(tree, &self.focus_handles, window);
+        self.editing_caret.sync(window.window_handle().window_id(), tree.node_selection.generation(), shown, cx.background_executor().now());
+        shown
+    }
+
     /// Whether the caret of the node selection is painted: its editing host has focus and the window is key.
     pub(crate) fn editing_caret_shown(&self, window: &gpui::Window) -> bool {
         let tree = self.tree.lock().unwrap();
@@ -10560,8 +10570,7 @@ impl gpui::Render for GpuixView {
         if !window.is_layout_pass() {
             self.tapes.begin_rows();
         }
-        let caret_shown = crate::editing::caret::is_shown(&tree, &self.focus_handles, window);
-        self.editing_caret.sync(window.window_handle().window_id(), tree.node_selection.generation(), caret_shown, cx.background_executor().now());
+        let caret_shown = self.sync_editing_caret(&tree, window, cx);
         self.retain.begin_frame(crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
