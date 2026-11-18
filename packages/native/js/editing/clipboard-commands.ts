@@ -46,21 +46,21 @@ export function isClipboardCommand(name: string | undefined): name is ClipboardC
 }
 
 /**
- * Where the event goes. The focused element when it is, or is inside, an editing host (the host
- * itself: nothing inside one takes focus); else the element that holds the focus end of the node
- * selection; else the focused element, which is `body` when nothing has focus.
+ * Where the event goes: the element that holds the start of the selection, and the focused element
+ * (`body` when nothing has focus) when there is no selection. Chrome's `FindEventTargetFrom` takes the
+ * selection's start whether or not it is editable, so a selection that code put on a hidden element
+ * (Lexical's node selection) is what the event is aimed at while an editing host has focus.
  */
 function eventTarget(): Element {
-  const focused = focusedNode() as Element
-  if (editingHostOf(focused) !== null) return focused
   if (holdsNodeSelection()) {
-    const end = getSelection().focusNode
-    if (end !== null) {
-      const element = end.nodeType === ELEMENT_NODE ? (end as Element) : end.parentElement
+    const selection = getSelection()
+    if (selection.rangeCount > 0) {
+      const start = selection.getRangeAt(0).startContainer
+      const element = start.nodeType === ELEMENT_NODE ? (start as Element) : start.parentElement
       if (element !== null) return element
     }
   }
-  return focused
+  return focusedNode() as Element
 }
 
 /** Dispatches the event and says whether a handler canceled it. */

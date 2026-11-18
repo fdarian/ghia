@@ -65,7 +65,7 @@ describeNative("the clipboard commands (React)", () => {
       document.getSelection().setBaseAndExtent(one, 4, three, 5)
       const seen = copyEvents(document, "copy", true)
       renderer.simulateKeystrokes("ControlOrMeta+c")
-      expect(seen).toEqual([{ target: host, mode: "writable", types: ["text/x-probe"] }])
+      expect(seen).toEqual([{ target: host.querySelector("p"), mode: "writable", types: ["text/x-probe"] }])
       expect(renderer.readClipboard()).toEqual([
         { type: "text/plain", data: "twothree" },
         { type: "text/html", data: "<meta charset='utf-8'><p>two</p><p>three</p>" },
@@ -139,6 +139,33 @@ describeNative("the clipboard commands (React)", () => {
       renderer.simulateKeystrokes("ControlOrMeta+c")
       expect(seen.map((event) => event.target)).toEqual([plain])
       expect(renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "plain" })
+    })
+
+    it("fires at the element that holds the start of the selection, a hidden one a node selection sits on included, while an editing host has focus", () => {
+      const { renderer, host, plain } = page()
+      const span = document.createElement("span")
+      span.textContent = "node"
+      plain.appendChild(span)
+      cleanups.push(() => span.remove())
+      host.focus()
+      document.getSelection().setBaseAndExtent(span, 0, span, 1)
+      const seen = copyEvents(document)
+      renderer.simulateKeystrokes("ControlOrMeta+c")
+      expect(document.execCommand("copy")).toBe(true)
+      expect(seen.map((event) => event.target)).toEqual([span, span])
+    })
+
+    it("fires at the paragraph a forward selection starts in, and at the one it starts in for a backward one", () => {
+      const { renderer, host, one, three } = page()
+      const [first, second] = [...host.querySelectorAll("p")]
+      host.focus()
+      const seen = copyEvents(document)
+      document.getSelection().setBaseAndExtent(one, 2, three, 3)
+      renderer.simulateKeystrokes("ControlOrMeta+c")
+      document.getSelection().setBaseAndExtent(three, 3, one, 2)
+      renderer.simulateKeystrokes("ControlOrMeta+c")
+      expect(seen.map((event) => event.target)).toEqual([first, first])
+      expect(second).not.toBe(first)
     })
 
     it("fires at the focused element with no selection, and at the body with no focus", () => {
@@ -232,7 +259,7 @@ describeNative("the clipboard commands (React)", () => {
       renderer.simulateKeystrokes("ControlOrMeta+v")
       expect(seen).toEqual([
         {
-          target: host,
+          target: host.querySelector("p"),
           types: ["text/plain", "text/html", "application/x-custom"],
           plain: "pasted",
           html: "<b>pasted</b>",
