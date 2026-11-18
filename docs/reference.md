@@ -5314,9 +5314,28 @@ A `keydown` that was not prevented, with no Ctrl, Alt or Cmd, on a focused editi
 
 The platform does not type these keys as text as well: Enter makes no line feed in the text.
 
+**Keys that move the selection.** The same keys, with Ctrl, Alt or Cmd, on a focused editing host whose node selection is inside it, move the caret and delete by a unit of text. The table is Chrome's on macOS (the AppKit key bindings that Chrome runs). Each is a `keydown` default: a handler that calls `preventDefault()` stops it, and one that performs it tells the platform so, so nothing else is typed or scrolled for the key. A key that is not in the table is left to the platform.
+
+| Keys | Does |
+|---|---|
+| Left, Right | `selection.modify("move", ..., "character")`; a range collapses to its start (Left) or end (Right) |
+| Alt+Left, Alt+Right | by word |
+| Cmd+Left, Cmd+Right | to the start or end of the painted row (`lineboundary`) |
+| Up, Down | by painted row, keeping the column across rows (a range collapses to its start or end first); on the first or last row, to the start or end of the host's text |
+| Cmd+Up, Cmd+Down | to the start or end of the host (`documentboundary`) |
+| Shift with any of the above | `modify("extend", ...)` with the same granularity |
+| Shift+Home, Shift+End | extend to the start or end of the host |
+| Cmd+A | `selectAllChildren(host)`: the host's contents, not the document's |
+| Alt+Backspace, Alt+Delete | `deleteWordBackward`, `deleteWordForward` |
+| Cmd+Backspace | `deleteSoftLineBackward`, from the caret to the start of the painted row |
+| Ctrl+B, Ctrl+F; Ctrl+P, Ctrl+N (Shift extends) | the same as Left, Right; Up, Down |
+| Ctrl+H, Ctrl+D | the same as Backspace, Delete |
+
+A deletion fires `beforeinput` (cancelable) with `targetRanges` of the text it will remove, which is worked out from the caret without moving the selection, then changes the DOM and fires `input`; a selection that is not collapsed is deleted whole under the same `inputType`. Home and End alone do not move the caret: on macOS Chrome scrolls the document for them, and a focused editing host scrolls nothing here ([deviations.md](./fork/deviations.md#events-and-input)). The keys that are not done are listed there too.
+
 A selected range is replaced or deleted whole; a caret deletes one grapheme, into the neighbouring Text of the host when it sits at the edge of
 its own, or the whole `contenteditable="false"` element it is next to (one stop, whatever it holds). Text typed over a selection that spans two blocks goes into the block the selection began in. The caret ends after the inserted text, or at the deletion. `insertParagraph` and `insertLineBreak` fire `beforeinput` and change
-nothing. The other `inputType`s do nothing: see
+nothing, and so does a deletion whose range runs over a block edge. The other `inputType`s do nothing: see
 [deviations.md](./fork/deviations.md#events-and-input). Tab and Escape keep their usual actions. The scroll keys (arrows, Page Up and Down, Home, End, Space) do not scroll the page while an editing host or an element inside one has focus, as with a focused `<input>`.
 ### Listeners and DOM members on an element
 
