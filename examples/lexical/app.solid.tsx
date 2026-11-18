@@ -295,7 +295,10 @@ export function EditorApp(): JSX.Element {
               })
             }}
             class="floating"
-            role="toolbar" aria-label="Text formatting" testId="floating-toolbar">
+            role="toolbar"
+            aria-label="Text formatting"
+            testId="floating-toolbar"
+          >
             <For each={TEXT_FORMATS}>
               {(entry) => (
                 <ToolbarButton
