@@ -12,8 +12,8 @@
 //! query, a state, a transition, a motion, an animation, an overlay or the inherited text
 //! decoration made is a fresh value, and has no identity to be found by.
 //!
-//! The step resolves the `font-family` list against the fonts of an App, so an entry is kept per App and per set of
-//! installed fonts (`Fonts::stamp`).
+//! The step resolves the `font-family` list against the installed fonts, so an entry is kept per set of families the
+//! text system lists (`Fonts::stamp`): Apps with the same fonts share entries, one that registers another font does not.
 //!
 //! The step also reads the colour the element inherits (`currentColor`), which a retained
 //! element reports to the subtree around it (`color::reads`). A replay says the read again.
@@ -225,8 +225,12 @@ mod tests {
         let after = crate::perf_counters::snapshot();
         assert_eq!(after.style_applies_computed, replayed.style_applies_computed + 1, "another viewport is another context");
         let _ = applied(&shared, &colors, &small, &Fonts::for_tests());
-        let other_app = crate::perf_counters::snapshot();
-        assert_eq!(other_app.style_applies_computed, after.style_applies_computed + 1, "another App resolves font-family against its own fonts");
+        let same_fonts = crate::perf_counters::snapshot();
+        assert_eq!(same_fonts.style_applies_computed, after.style_applies_computed, "another App with the same fonts reuses the entry");
+        assert_eq!(same_fonts.style_applies_replayed, after.style_applies_replayed + 1);
+        let _ = applied(&shared, &colors, &small, &Fonts::for_tests_with(&["Registered Sans"]));
+        let other_fonts = crate::perf_counters::snapshot();
+        assert_eq!(other_fonts.style_applies_computed, same_fonts.style_applies_computed + 1, "an App with another registered font resolves font-family against it");
     }
 
     #[test]

@@ -9,10 +9,10 @@
 //! [`Fonts`] is one per App (a GPUI global): it holds what that App's text system has installed and the lists resolved
 //! against it, and starts over when fonts are added.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use gpui::{font, App, FontFallbacks, FontId, Global, SharedString, TextSystem};
@@ -24,13 +24,11 @@ pub(crate) struct Resolved {
     pub(crate) fallbacks: FontFallbacks,
 }
 
-/// What a resolution depended on: another App, or the same one with other fonts installed, resolves a list
-/// differently, so anything kept from a resolution is kept per stamp.
+/// What a resolution depended on: a text system with other fonts installed resolves a list differently, so anything
+/// kept from a resolution is kept per stamp. It names the families the text system lists, not the App or the number of
+/// times fonts were added, so two Apps with the same fonts share what is kept.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Stamp {
-    app: u64,
-    generation: u64,
-}
+pub(crate) struct Stamp(u64);
 
 #[derive(Clone)]
 pub(crate) struct Fonts(Rc<Shared>);
@@ -38,8 +36,11 @@ pub(crate) struct Fonts(Rc<Shared>);
 impl Global for Fonts {}
 
 struct Shared {
-    app: u64,
     text_system: Arc<TextSystem>,
+    /// The family names the text system lists: the platform's own and the ones fonts were added under.
+    families: Box<dyn Fn() -> Vec<String>>,
+    /// The stamp of a generation, read once: listing the families asks the platform.
+    stamp: Cell<Option<(u64, Stamp)>>,
     state: RefCell<Option<State>>,
 }
 
@@ -59,23 +60,44 @@ impl Fonts {
         if let Some(fonts) = cx.try_global::<Fonts>() {
             return fonts.clone();
         }
-        let fonts = Fonts::new(cx.text_system().clone());
+        let text_system = cx.text_system().clone();
+        let listed = text_system.clone();
+        let fonts = Fonts::new(text_system, Box::new(move || listed.all_font_names()));
         cx.set_global(fonts.clone());
         fonts
     }
 
-    fn new(text_system: Arc<TextSystem>) -> Fonts {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        Fonts(Rc::new(Shared { app: NEXT.fetch_add(1, Ordering::Relaxed), text_system, state: RefCell::new(None) }))
+    fn new(text_system: Arc<TextSystem>, families: Box<dyn Fn() -> Vec<String>>) -> Fonts {
+        Fonts(Rc::new(Shared { text_system, families, stamp: Cell::new(None), state: RefCell::new(None) }))
     }
 
     #[cfg(test)]
     pub(crate) fn for_tests() -> Fonts {
-        Fonts::new(Arc::new(TextSystem::new(Arc::new(gpui::NoopTextSystem::new()))))
+        Fonts::for_tests_with(&[])
+    }
+
+    /// A text system that lists `families` besides what a bare one does.
+    #[cfg(test)]
+    pub(crate) fn for_tests_with(families: &[&str]) -> Fonts {
+        let families: Vec<String> = families.iter().map(|family| family.to_string()).collect();
+        Fonts::new(Arc::new(TextSystem::new(Arc::new(gpui::NoopTextSystem::new()))), Box::new(move || families.clone()))
     }
 
     pub(crate) fn stamp(&self) -> Stamp {
-        Stamp { app: self.0.app, generation: self.0.text_system.font_generation() }
+        let generation = self.0.text_system.font_generation();
+        if let Some((read_at, stamp)) = self.0.stamp.get() {
+            if read_at == generation {
+                return stamp;
+            }
+        }
+        let mut families = (self.0.families)();
+        families.sort_unstable();
+        families.dedup();
+        let mut hasher = rustc_hash::FxHasher::default();
+        families.hash(&mut hasher);
+        let stamp = Stamp(hasher.finish());
+        self.0.stamp.set(Some((generation, stamp)));
+        stamp
     }
 
     /// The family and fallbacks of a `font-family` list.
