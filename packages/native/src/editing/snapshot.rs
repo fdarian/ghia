@@ -12,8 +12,9 @@
 
 use std::ops::Range;
 
+use super::geometry::is_inside;
 use super::node_selection::{order_key, Boundary, Walk};
-use super::positions::{self, DomPoint};
+use super::positions::{self, units_of, DomPoint};
 use crate::retained_tree::RetainedTree;
 use crate::text::inline::is_raw_text;
 
@@ -47,14 +48,6 @@ pub struct Snapshot {
     reversed: bool,
 }
 
-fn units_of(text: &str) -> usize {
-    text.chars().map(char::len_utf16).sum()
-}
-
-fn within(tree: &RetainedTree, node: u64, host: u64) -> bool {
-    std::iter::successors(Some(node), |id| tree.elements.get(id).and_then(|element| element.parent)).any(|id| id == host)
-}
-
 /// The paragraph that paints `node`, as the key that tells paragraphs apart and the `#text` nodes it holds.
 fn paragraph_texts(tree: &RetainedTree, node: u64) -> Option<((u64, usize), Vec<u64>)> {
     let located = positions::locate(tree, node)?;
@@ -69,7 +62,7 @@ impl Snapshot {
     pub fn of(tree: &RetainedTree, host: u64) -> Option<Self> {
         let selection = tree.node_selection.selection()?;
         let collapsed = selection.anchor == selection.focus;
-        let inside = if collapsed { selection.host == Some(host) } else { within(tree, selection.anchor.node, host) && within(tree, selection.focus.node, host) };
+        let inside = if collapsed { selection.host == Some(host) } else { is_inside(tree, selection.anchor.node, host) && is_inside(tree, selection.focus.node, host) };
         if !inside {
             return None;
         }
@@ -98,15 +91,19 @@ impl Snapshot {
             }
         }
         let mut snapshot = Self { text: String::new(), segments: Vec::new(), selection: 0..0, reversed };
+        let mut units = 0;
         for (index, (_, texts)) in paragraphs.iter().enumerate() {
             if index > 0 {
                 snapshot.text.push('\n');
+                units += 1;
             }
             for node in texts {
-                let data = tree.elements.get(node).and_then(|element| element.content.as_deref()).unwrap_or_default();
-                let start = units_of(&snapshot.text);
-                snapshot.segments.push(Segment { node: *node, start, units: units_of(data) });
+                // A paragraph lists only `#text` nodes whose data it holds, so a node with none is not here.
+                let Some(data) = tree.elements.get(node).and_then(|element| element.content.as_deref()) else { continue };
+                let node_units = units_of(data);
+                snapshot.segments.push(Segment { node: *node, start: units, units: node_units });
                 snapshot.text.push_str(data);
+                units += node_units;
             }
         }
         let from = snapshot.offset_of(start)?;

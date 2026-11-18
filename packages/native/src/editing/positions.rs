@@ -47,7 +47,7 @@ pub struct TextSource {
     pub map: SourceMap,
 }
 
-fn units_of(text: &str) -> usize {
+pub(crate) fn units_of(text: &str) -> usize {
     text.chars().map(char::len_utf16).sum()
 }
 

@@ -33,7 +33,7 @@ use gpui::{canvas, point, px, size, AnyElement, App, Bounds, FocusHandle, InputH
 
 use super::composition::Marked;
 use super::geometry;
-use super::positions::DomPoint;
+use super::positions::{units_of, DomPoint};
 use super::snapshot::{Edge, Snapshot};
 use crate::events::sync_dispatch;
 use crate::renderer::EventCallback;
@@ -58,10 +58,6 @@ impl Kind {
             Kind::Unmark => "unmark",
         }
     }
-}
-
-fn units_of(text: &str) -> usize {
-    text.chars().map(char::len_utf16).sum()
 }
 
 pub struct EditingInputHandler {

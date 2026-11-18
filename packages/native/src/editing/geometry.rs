@@ -26,6 +26,12 @@ pub struct TextRect {
     pub height: f64,
 }
 
+impl TextRect {
+    pub(crate) fn bounds(&self) -> Bounds<Pixels> {
+        Bounds::new(point(pixels(self.x), pixels(self.y)), size(pixels(self.width), pixels(self.height)))
+    }
+}
+
 /// A DOM position, with where its caret is.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
@@ -79,17 +85,24 @@ fn from_window(entry: &RegEntry, window: Point<Pixels>) -> Option<Point<Pixels>>
     Some(window_point_in(&entry.to_window, window)? - entry.layout.unsnapped_offset())
 }
 
-/// The window box of the rect `local` of the layout of `entry`: the smallest that holds its corners.
-pub(crate) fn window_rect(entry: &RegEntry, local: Bounds<Pixels>) -> Option<TextRect> {
+/// The window box of `local` under `to_window`: the smallest that holds its four corners, so a rotated
+/// or skewed transform gives the box a reader of `getBoundingClientRect` would. `None` when a corner
+/// has no window point.
+pub(crate) fn window_box(local: Bounds<Pixels>, to_window: impl Fn(Point<Pixels>) -> Option<Point<Pixels>>) -> Option<TextRect> {
     let corners = [local.origin, local.top_right(), local.bottom_left(), local.bottom_right()];
     let mut min = point(f64::MAX, f64::MAX);
     let mut max = point(f64::MIN, f64::MIN);
     for corner in corners {
-        let at = to_window(entry, corner)?;
+        let at = to_window(corner)?;
         min = point(min.x.min(number(at.x)), min.y.min(number(at.y)));
         max = point(max.x.max(number(at.x)), max.y.max(number(at.y)));
     }
     Some(TextRect { x: min.x, y: min.y, width: max.x - min.x, height: max.y - min.y })
+}
+
+/// The window box of the rect `local` of the layout of `entry`.
+pub(crate) fn window_rect(entry: &RegEntry, local: Bounds<Pixels>) -> Option<TextRect> {
+    window_box(local, |corner| to_window(entry, corner))
 }
 
 /// Where the quads of a wash over `range` of the text of `entry` went, in window coordinates. The
@@ -97,20 +110,7 @@ pub(crate) fn window_rect(entry: &RegEntry, local: Bounds<Pixels>) -> Option<Tex
 pub(crate) fn wash_rects(entry: &RegEntry, range: &std::ops::Range<usize>) -> Vec<TextRect> {
     let mut local = paint::range_rects(&entry.layout, range, 0.0, 0.0);
     crate::text::inline_insets::trim_wash(&entry.layout, &entry.text, range, &mut local);
-    local
-        .into_iter()
-        .filter_map(|rect| {
-            let corners = [rect.origin, rect.top_right(), rect.bottom_left(), rect.bottom_right()];
-            let mut min = point(f64::MAX, f64::MAX);
-            let mut max = point(f64::MIN, f64::MIN);
-            for corner in corners {
-                let at = window_point_from(&entry.to_window, corner)?;
-                min = point(min.x.min(number(at.x)), min.y.min(number(at.y)));
-                max = point(max.x.max(number(at.x)), max.y.max(number(at.y)));
-            }
-            Some(TextRect { x: min.x, y: min.y, width: max.x - min.x, height: max.y - min.y })
-        })
-        .collect()
+    local.into_iter().filter_map(|rect| window_box(rect, |corner| window_point_from(&entry.to_window, corner))).collect()
 }
 
 fn char_len_at(text: &str, byte: usize) -> usize {
@@ -307,7 +307,7 @@ pub fn caret_position_in_host(tree: &RetainedTree, window: WindowId, host: u64, 
     }
 }
 
-fn is_inside(tree: &RetainedTree, id: u64, ancestor: u64) -> bool {
+pub(crate) fn is_inside(tree: &RetainedTree, id: u64, ancestor: u64) -> bool {
     std::iter::successors(Some(id), |id| tree.elements.get(id).and_then(|element| element.parent)).any(|id| id == ancestor)
 }
 
