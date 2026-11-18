@@ -13,7 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use gpui::{font, App, FontFallbacks, FontId, Global, SharedString, TextSystem};
 
@@ -54,6 +54,17 @@ struct State {
     resolved: HashMap<String, Resolved>,
 }
 
+/// The families `text_system` lists. Asking CoreText for them takes ~70 ms, so a text system that no font was added to
+/// (every App's first generation) shares one answer for the process instead of asking again per App: each new App
+/// would otherwise spend that on its first frame, which a test's animation clock counts as elapsed time.
+fn installed_families(text_system: &TextSystem) -> Vec<String> {
+    static PLATFORM: OnceLock<Vec<String>> = OnceLock::new();
+    if text_system.font_generation() == 0 {
+        return PLATFORM.get_or_init(|| text_system.all_font_names()).clone();
+    }
+    text_system.all_font_names()
+}
+
 impl Fonts {
     /// The fonts of `cx`'s App, made on first use.
     pub(crate) fn of(cx: &mut App) -> Fonts {
@@ -62,9 +73,15 @@ impl Fonts {
         }
         let text_system = cx.text_system().clone();
         let listed = text_system.clone();
-        let fonts = Fonts::new(text_system, Box::new(move || listed.all_font_names()));
+        let fonts = Fonts::new(text_system, Box::new(move || installed_families(&listed)));
         cx.set_global(fonts.clone());
         fonts
+    }
+
+    /// Lists the installed families now, at window creation, so the first frame does not: that frame's clock is read
+    /// before it builds a style, and a test's animation would count the listing as elapsed time.
+    pub(crate) fn warm(cx: &mut App) {
+        Fonts::of(cx).stamp();
     }
 
     fn new(text_system: Arc<TextSystem>, families: Box<dyn Fn() -> Vec<String>>) -> Fonts {
