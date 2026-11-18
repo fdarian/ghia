@@ -43,6 +43,8 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "setWindowSize",
   "simulateComposition",
   "simulateKeystrokes",
+  // The menu item's action runs the same command as the key, through the same input path as simulateKeystrokes.
+  "simulateMenuAction",
   // Each delivers the event the scripted page reports to its handler, as dispatchNativeEvents does (the tab out
   // moves focus, which reports its focus events the same way).
   "simulateWebviewFail",
