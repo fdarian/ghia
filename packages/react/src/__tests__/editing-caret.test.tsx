@@ -243,6 +243,29 @@ describeNative("the caret of an editing host (React)", () => {
       expect(lit()).toBe(true)
     })
 
+    it("keeps the input method's bounds on an empty paragraph in both phases of the blink", async () => {
+      const { host, paragraphs, renderer, left, top } = await focused(["one", null, "three"])
+      document.getSelection().collapse(paragraphs[1]!, 0)
+      await shown(renderer)
+      const id = renderer.getFocusedElementId()!
+      const bounds = () => renderer.getInputMethodBounds(id, 0, 0)
+      const lit = () => renderer.getPaintedNodeSelection().caret!.lit
+      expect(lit()).toBe(true)
+      const inLit = bounds()
+      expect(inLit, "lit").not.toBeNull()
+      expect(inLit!.x).toBeCloseTo(left, 1)
+      expect(inLit!.y).toBeCloseTo(top + LINE, 1)
+      expect(inLit!.height).toBeCloseTo(LINE, 1)
+      renderer.advanceTime(BLINK)
+      renderer.drawFrame()
+      expect(lit(), "the phase without a colour").toBe(false)
+      expect(bounds(), "unlit").toEqual(inLit)
+      renderer.advanceTime(BLINK)
+      renderer.drawFrame()
+      expect(bounds(), "lit again").toEqual(inLit)
+      expect(host.isConnected).toBe(true)
+    })
+
     it("asks for no frame while the host has no focus or the window is not key", async () => {
       const { host, texts, renderer } = mount(["first line"])
       document.getSelection().collapse(texts[0]!, 2)
