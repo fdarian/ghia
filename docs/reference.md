@@ -927,12 +927,12 @@ paints an empty menu bar, and those shortcuts do not exist at all: AppKit only
 provides them through menu items.
 
 ```
-Apple    <executable>             Window
-         ├ Services               ├ (AppKit window tiling)
-         ├ Hide <appName>   ⌘H    ├ Minimize          ⌘M
-         ├ Hide Others     ⌥⌘H    ├ Zoom
-         ├ Show All               ├ Close Window      ⌘W
-         └ Quit <appName>   ⌘Q    └ (open windows)
+Apple    <executable>             Edit                  Window
+         ├ Services               ├ Cut        ⌘X       ├ (AppKit window tiling)
+         ├ Hide <appName>   ⌘H    ├ Copy       ⌘C       ├ Minimize          ⌘M
+         ├ Hide Others     ⌥⌘H    ├ Paste      ⌘V       ├ Zoom
+         ├ Show All               └ Select All ⌘A       ├ Close Window      ⌘W
+         └ Quit <appName>   ⌘Q                          └ (open windows)
 ```
 
 **`appName` does not set the title of the application menu.** macOS takes that
@@ -940,9 +940,12 @@ from the executable, so `bun app.tsx` shows `bun` during development and a
 `bun build --compile` binary shows its own file name. Only a real `.app` bundle
 changes it. `appName` reaches the items inside the menu, and nothing else.
 
-There is **no Edit menu**, on purpose. A menu key equivalent is consumed by
-AppKit before the window sees the key event, so an Edit menu carrying `⌘C`
-would take the keystroke away from text selection and from `<input>`.
+The **Edit menu** runs the same commands as the keys: the key window handles a
+key equivalent before the menu does, so `⌘C` still reaches the page's `keydown`
+first (a `preventDefault` there cancels the command, as in Chrome), then the
+focused `<input>`, then the page's [`copy` event](#clipboard-events). The menu
+fires for a click, and for a key nothing handled. Its items are enabled whenever
+the window is key.
 
 Use **`render()`**, not `createRenderer()`, in the app entry. A full reload
 under `ghia dev` re-runs the whole entry on save. `createRenderer()` plus `init()` would then
@@ -1369,10 +1372,32 @@ GPUI's, is in [events-and-input.md](fork/events-and-input.md#clipboard).
 builds one, `clipboardData` is a [`DataTransfer`](#datatransfer) or `null`, and `constructor.name` is
 `"ClipboardEvent"`, which is what a library such as Lexical checks. They are heard by
 `addEventListener('copy', …)` and by the `onCopy`, `onCut` and `onPaste` props (React and Solid, each with an
-`on…Capture` twin), and they bubble and can be cancelled. Ghia dispatches them on Cmd+C, Cmd+X and Cmd+V and from the
-Edit menu, at the focused element (the element of a node selection, else the active element, else `body`); a handler
-that calls `preventDefault()` stops the default. A script can dispatch one itself with
+`on…Capture` twin), and they bubble and can be cancelled. A script can dispatch one itself with
 `element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }))`.
+
+**When they fire.** Cmd+C, Cmd+X and Cmd+V and the Edit menu's Cut, Copy and Paste fire `copy`, `cut` and `paste`, after
+the `keydown` (which can cancel the command) and unless an `<input>` or `<textarea>` has focus. They fire in every
+context: `copy` fires in a read-only editing host and in text that is not editable, with or without a selection. The
+target is the focused element when it is, or is inside, an editing host; else the element that holds the focus end of the
+selection; else the focused element, which is `body` when nothing has focus. They bubble and are `composed`.
+
+**`clipboardData`.** For `copy` and `cut` it is a `DataTransfer` in read/write mode: a handler that calls `preventDefault()`
+makes the clipboard hold exactly what it put in (`setData`, `items.add`; the string items, in order), and a handler that
+cleared the data (`clearData()` or `items.clear()`, with no write after) and put nothing in empties the clipboard, or
+removes only the types it named. One that put nothing in and cleared nothing leaves the clipboard as it was. For `paste` it
+is read-only and holds the clipboard's types (`text/plain`, `text/html`, `text/uri-list`, and the rest, as
+[`readClipboard`](#typed-clipboard) returns them). After the event it is protected, so a handler that kept it reads
+nothing from it later.
+
+**The default of `copy`.** Not cancelled, with a node selection that is not collapsed: `text/plain` is
+`getSelection().toString()` and `text/html` is `<meta charset='utf-8'>` and the markup of `range.cloneContents()`. With no
+node selection, text a drag selected in the page is copied as plain text. The defaults of `cut` (copy, then delete with
+`beforeinput` `deleteByCut`) and `paste` (insert with `beforeinput` `insertFromPaste`) are not done yet: an editing host's
+Cut and Paste do nothing unless a handler cancels the event and does it itself. `<input>` and `<textarea>` copy and paste on
+their own, with no clipboard event ([deviations.md](fork/deviations.md#events-and-input)).
+
+**Select All** (Cmd+A, and the Edit menu's) selects the contents of the focused editing host (a `keydown` default there, as
+before) and, with focus elsewhere, the contents of `body`.
 
 #### DataTransfer
 

@@ -1062,6 +1062,12 @@ export declare class TestGpuixRenderer {
    * event for `Shift`, which the platform does not.
    */
   simulateModifiersChanged(modifiers?: string | undefined | null): void
+  /**
+   * Chooses the Edit menu item named `"copy"`, `"cut"`, `"paste"` or `"selectAll"`, as the
+   * menu bar does: the action is dispatched on the window only if `App::is_action_available`
+   * finds a listener for it (the menu greys the item out otherwise). Returns whether the item was enabled.
+   */
+  simulateMenuAction(name: string): boolean
   /** Dispatch one keyup (one press in the `simulate_keystrokes` grammar). */
   simulateKeyUp(keystroke: string): void
   /**

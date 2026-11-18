@@ -4,6 +4,7 @@ import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
 import { focusElementById, placeCaretOnFocusIn } from "./focus.js"
 import type { Element } from "./dom/nodes.js"
+import { CLIPBOARD_COMMAND_EVENT, isClipboardCommand, runClipboardCommand } from "./editing/clipboard-commands.js"
 import { EDIT_INPUT_EVENT, endCompositionOnBlur, runNativeEditInput } from "./editing/native-input.js"
 import { EDIT_POINTER_EVENT, runEditingPointer } from "./editing/pointer-selection.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
@@ -261,6 +262,27 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
   }
 
   /**
+   * Copy, cut, paste or select all that no text control took (`src/events/clipboard.rs`). It runs as a
+   * handler does, and its answer is whether native has nothing left to do.
+   */
+  const runNativeClipboardCommand = (root: ActiveRoot, received: EventPayload): boolean => {
+    if (!isClipboardCommand(received.value)) {
+      throw new Error(`A clipboardcommand of ${String(received.value)} is not one this version knows`)
+    }
+    const command = received.value
+    let handled: boolean | undefined
+    const run = () => {
+      handled = runClipboardCommand(command, renderer)
+    }
+    if (root.handlers.schedule) root.handlers.schedule(run)
+    else run()
+    if (handled === undefined) {
+      throw new Error("The schedule handler did not run the clipboard command before returning. Its answer is needed now, so schedule must call it synchronously.")
+    }
+    return handled
+  }
+
+  /**
    * A press, drag or release of the primary button in an editing host. The selection it makes is the
    * state the next event of the same press reads, so it runs before this returns, like an edit.
    */
@@ -378,6 +400,10 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         runNativePointer(root, received)
         return true
       }
+      if (received.eventType === CLIPBOARD_COMMAND_EVENT) {
+        runNativeClipboardCommand(root, received)
+        return true
+      }
       if (received.eventType === "focusin") {
         noteFocusEvent(renderer)
         placeCaretOnFocusIn(elementOf(renderer, received.elementId))
@@ -412,6 +438,10 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       if (received.eventType === EDIT_POINTER_EVENT) {
         if (root) runNativePointer(root, received)
         return { defaultPrevented: false, propagationStopped: false }
+      }
+      if (received.eventType === CLIPBOARD_COMMAND_EVENT) {
+        const handled = root ? runNativeClipboardCommand(root, received) : false
+        return { defaultPrevented: false, propagationStopped: false, handled }
       }
       if (received.eventType === "focusin") {
         noteFocusEvent(renderer)

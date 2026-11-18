@@ -54,12 +54,17 @@ export function focusedNode(): Node {
   return active
 }
 
+/** An `<input>` or `<textarea>`, which edit themselves and take the clipboard commands themselves. */
+export function isTextControl(node: Node): boolean {
+  return node.nodeType === ELEMENT_NODE && TEXT_CONTROLS.has((node as Element).localName)
+}
+
 /** The editing host that has focus, or `null` when focus is elsewhere or on an `<input>` or `<textarea>` (which edit themselves). */
 export function focusedEditingHost(): Element | null {
   const focused = focusedNode()
   const host = editingHostOf(focused)
   if (host === null) return null
-  if (focused.nodeType === ELEMENT_NODE && TEXT_CONTROLS.has((focused as Element).localName)) return null
+  if (isTextControl(focused)) return null
   return host
 }
 

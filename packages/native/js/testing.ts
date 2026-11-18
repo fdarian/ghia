@@ -307,6 +307,7 @@ interface NativeTestRendererApi
   ): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
+  simulateMenuAction(name: string): boolean
   simulateModifiersChanged(modifiers?: string): void
   simulateImeKeyDown(keystroke: string, action: string, text?: string): void
   simulateClick(x: number, y: number, button?: number, modifiers?: string): void
@@ -951,6 +952,19 @@ export class TestRenderer implements NativeRenderer {
     this.native.simulateKeystrokes(keystrokes)
     this.dispatchNativeEvents()
     this.native.flushIfDirty()
+  }
+
+  /** Chooses an Edit menu item (`"copy"`, `"cut"`, `"paste"` or `"selectAll"`) as the menu bar does,
+   *  for the focus the window has now. Returns false, and does nothing, when the item would be
+   *  greyed out (no listener for its action on the focus path or the window's root). */
+  simulateMenuAction(name: "copy" | "cut" | "paste" | "selectAll"): boolean {
+    flushPendingMutations(this)
+    this.native.flushIfDirty()
+    this.dispatchNativeEvents()
+    const enabled = this.native.simulateMenuAction(name)
+    this.dispatchNativeEvents()
+    this.native.flushIfDirty()
+    return enabled
   }
 
   /** One edit of the focused editing host (`<div contenteditable>`), as the browser makes it

@@ -241,3 +241,41 @@ describe("modes", () => {
     expect(dataTransfer.effectAllowed).toBe("uninitialized")
   })
 })
+
+describe("what a clipboard event learns of a cleared store", () => {
+  it("clearData() and items.clear() mark the store cleared, and a write undoes it", () => {
+    const dataTransfer = new DataTransfer()
+    const control = dataTransferControl(dataTransfer)
+    expect([control.clearWasCalled, control.typesToClear]).toEqual([false, []])
+    dataTransfer.clearData()
+    expect([control.clearWasCalled, control.typesToClear]).toEqual([true, []])
+    dataTransfer.setData("text/plain", "x")
+    expect(control.clearWasCalled).toBe(false)
+    dataTransfer.items.clear()
+    expect(control.clearWasCalled).toBe(true)
+    dataTransfer.items.add("y", "text/plain")
+    expect(control.clearWasCalled).toBe(false)
+  })
+
+  it("clearData(format) names a type, which only a write of that type takes off", () => {
+    const dataTransfer = new DataTransfer()
+    const control = dataTransferControl(dataTransfer)
+    dataTransfer.clearData("text")
+    dataTransfer.clearData("text/html")
+    expect([control.clearWasCalled, control.typesToClear]).toEqual([true, ["text/plain", "text/html"]])
+    dataTransfer.setData("application/x-other", "o")
+    expect(control.typesToClear).toEqual(["text/plain", "text/html"])
+    dataTransfer.setData("text/html", "<b></b>")
+    expect(control.typesToClear).toEqual(["text/plain"])
+    dataTransfer.setData("text", "t")
+    expect([control.clearWasCalled, control.typesToClear]).toEqual([false, []])
+  })
+
+  it("is not tracked outside read/write mode", () => {
+    const dataTransfer = withMode("readonly")
+    const control = dataTransferControl(dataTransfer)
+    dataTransfer.clearData()
+    dataTransfer.items.clear()
+    expect(control.clearWasCalled).toBe(false)
+  })
+})

@@ -62,6 +62,13 @@ export class DataTransferState {
   dropEffect: DropEffect = "none"
   readonly entries: Entry[] = []
   readonly itemOf = new WeakMap<Entry, DataTransferItem>()
+  /**
+   * What the Clipboard API's "fire a clipboard event" tracks while a handler may write: `clearData()` or
+   * `items.clear()` was called, and for which types (none: all of them). A write of a type takes it
+   * off again.
+   */
+  clearWasCalled = false
+  typesToClear: string[] = []
   private typesCache: readonly string[] | undefined
   private filesCache: FileListLike | undefined
   /** Set by the item list, which keeps its index properties in step. */
@@ -105,7 +112,25 @@ export class DataTransferState {
     this.changed()
   }
 
+  noteClear(type?: string): void {
+    this.clearWasCalled = true
+    if (type !== undefined) this.typesToClear.push(type)
+  }
+
+  private noteWrite(type: string): void {
+    if (!this.clearWasCalled) return
+    if (this.typesToClear.length === 0) {
+      this.clearWasCalled = false
+      return
+    }
+    const index = this.typesToClear.indexOf(type)
+    if (index === -1) return
+    this.typesToClear.splice(index, 1)
+    if (this.typesToClear.length === 0) this.clearWasCalled = false
+  }
+
   add(entry: Entry): DataTransferItem {
+    if (this.mode === "readwrite") this.noteWrite(entry.type)
     this.entries.push(entry)
     this.changed()
     return itemFor(this, entry)
@@ -214,7 +239,9 @@ export class DataTransferItemList {
   }
 
   clear(): void {
-    if (this.#state.mode !== "readwrite" || this.#state.entries.length === 0) return
+    if (this.#state.mode !== "readwrite") return
+    this.#state.noteClear()
+    if (this.#state.entries.length === 0) return
     this.#state.entries.length = 0
     this.#state.changed()
   }
@@ -291,6 +318,7 @@ export class DataTransfer {
 
   clearData(format?: string): void {
     if (this.#state.mode !== "readwrite") return
+    this.#state.noteClear(format === undefined ? undefined : normalizeFormat(format))
     // Files are kept: only `items.clear()` drops them.
     if (format === undefined) {
       for (const entry of this.#state.entries.filter((candidate) => candidate.kind === "string")) {
@@ -311,6 +339,10 @@ export interface DataTransferControl {
   mode: DataTransferMode
   /** Sets `effectAllowed` whatever the mode, which the setter does not. */
   effectAllowed: EffectAllowed
+  /** A handler cleared the store while it could write, and wrote nothing of a cleared type since (see `DataTransferState`). */
+  readonly clearWasCalled: boolean
+  /** The types it cleared, empty when it cleared them all. */
+  readonly typesToClear: readonly string[]
   addFile(file: DataTransferFile): void
 }
 
@@ -329,6 +361,12 @@ export function dataTransferControl(dataTransfer: DataTransfer): DataTransferCon
     },
     set effectAllowed(value) {
       state.effectAllowed = value
+    },
+    get clearWasCalled() {
+      return state.clearWasCalled
+    },
+    get typesToClear() {
+      return state.typesToClear
     },
     addFile(file) {
       state.add({ kind: "file", type: file.type, file })

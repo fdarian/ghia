@@ -392,7 +392,7 @@ describeNative("the key moves of an editing host (React)", () => {
       button.focus()
       const seen = log(host, ["beforeinput"])
       caret(texts[0]!, 5)
-      for (const key of ["ArrowRight", "Alt+ArrowRight", "Meta+ArrowLeft", "Meta+a", "Alt+Backspace", "Meta+Backspace", "Control+f", "Shift+Home"]) {
+      for (const key of ["ArrowRight", "Alt+ArrowRight", "Meta+ArrowLeft", "Alt+Backspace", "Meta+Backspace", "Control+f", "Shift+Home"]) {
         press(key)
         expect(state()).toEqual([texts[0], 5, texts[0], 5])
       }

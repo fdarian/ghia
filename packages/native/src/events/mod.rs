@@ -2,6 +2,7 @@
 //! synchronous dispatch and the window-level keyboard path.
 
 pub(crate) mod activation;
+pub(crate) mod clipboard;
 pub mod app_region;
 pub mod dispatcher;
 pub mod element_drag;

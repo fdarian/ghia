@@ -720,10 +720,10 @@ impl TestGpuixRenderer {
     }
 
     /// Runs one simulated key input on the window, then the executors.
-    fn key_input(
+    fn key_input<R>(
         &self,
-        input: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> std::result::Result<(), String>,
-    ) -> Result<()> {
+        input: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> std::result::Result<R, String>,
+    ) -> Result<R> {
         with_input_state(|cx, window, _view| {
             let result = cx
                 .update_window(window, |_, window, app| input(window, app))
@@ -781,6 +781,7 @@ impl TestGpuixRenderer {
         let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
             crate::custom_elements::input::init(cx);
+            crate::events::clipboard::init(cx);
             install_test_image_http_client(cx);
             crate::custom_elements::webview::install_test_pages(cx);
             cx.set_global(crate::custom_elements::nativeview::SurfaceLog::default());
@@ -1648,6 +1649,34 @@ impl TestGpuixRenderer {
                 },
             );
             Ok(())
+        })
+    }
+
+    /// Chooses the Edit menu item named `"copy"`, `"cut"`, `"paste"` or `"selectAll"`, as the
+    /// menu bar does: the action is dispatched on the window only if `App::is_action_available`
+    /// finds a listener for it (the menu greys the item out otherwise). Returns whether the item was enabled.
+    #[napi]
+    pub fn simulate_menu_action(&self, name: String) -> Result<bool> {
+        use gpui::Action as _;
+        use crate::events::clipboard::{Copy, Cut, Paste, SelectAll};
+        let action = match name.as_str() {
+            "copy" => Copy.boxed_clone(),
+            "cut" => Cut.boxed_clone(),
+            "paste" => Paste.boxed_clone(),
+            "selectAll" => SelectAll.boxed_clone(),
+            _ => {
+                return Err(Error::from_reason(format!(
+                    "{name:?} is not an Edit menu item. The items are copy, cut, paste and selectAll"
+                )))
+            }
+        };
+        self.key_input(|window, cx| {
+            // The menu asks the app, which counts the window's focus path and the global listeners.
+            if !cx.is_action_available(action.as_ref()) {
+                return Ok(false);
+            }
+            window.dispatch_action(action, cx);
+            Ok(true)
         })
     }
 

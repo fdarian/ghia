@@ -2211,6 +2211,7 @@ impl GpuixRenderer {
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             crate::custom_elements::input::init(cx);
             crate::custom_elements::img::init(cx);
+            crate::events::clipboard::init(cx);
             // After the other bindings: `set_menus` reads key equivalents out of
             // the keymap, so every binding must exist before it runs.
             crate::app_menu::init(&app_name, cx);
@@ -2367,6 +2368,7 @@ impl GpuixRenderer {
                         .run(move |cx| {
                             crate::custom_elements::input::init(cx);
                             crate::custom_elements::img::init(cx);
+                            crate::events::clipboard::init(cx);
                             cx.set_window_appearance(appearance);
                             let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
                             // A layer-shell surface is positioned by the compositor from its
@@ -10762,7 +10764,11 @@ impl gpui::Render for GpuixView {
             crate::css::word_break::set_defaults(root.text_style());
             root.text_style().hang_trailing_spaces =
                 Some(crate::text::white_space::WhiteSpace::default().hangs_trailing_spaces());
-            with_window_menu_actions(root)
+            crate::events::clipboard::with_actions(
+                with_window_menu_actions(root),
+                self.selection.clone(),
+                callback.clone(),
+            )
                 .child(crate::events::listeners::pointer_frame(
                     cx.weak_entity(),
                     crate::events::listeners::PointerDispatch {

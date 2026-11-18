@@ -36,6 +36,7 @@ use super::text_selection::{
 };
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::caret::{caret_rect, caret_visible, until_phase_change};
+use crate::events::clipboard::{Copy, Cut, Paste, SelectAll};
 use crate::events::keyboard::InputRouting;
 use crate::renderer::{emit_bubbling_event, EventCallback, GpuixView};
 use crate::retained_tree::RetainedTree;
@@ -54,7 +55,6 @@ actions!(
         SelectRight,
         SelectUp,
         SelectDown,
-        SelectAll,
         Home,
         End,
         DocStart,
@@ -71,9 +71,6 @@ actions!(
         DeleteWordRight,
         DeleteToLineStart,
         DeleteToLineEnd,
-        Copy,
-        Cut,
-        Paste,
         Undo,
         Redo,
         Newline,
