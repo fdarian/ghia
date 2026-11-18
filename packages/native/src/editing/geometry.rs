@@ -10,7 +10,9 @@ use gpui::{point, px, size, Bounds, Pixels, Point, TextLayout, TextRow, WindowId
 use crate::automation::{window_point_from, window_point_in};
 use crate::retained_tree::RetainedTree;
 use crate::text::inline_bounds;
+use crate::text::inline::{is_raw_text, Child};
 use crate::text::paint::{self, RegEntry};
+use crate::text::plan_cache;
 
 use super::positions::{self, Bias, DomPoint};
 
@@ -285,24 +287,86 @@ pub fn caret_position_from_point(tree: &RetainedTree, window: WindowId, x: f64, 
 
 /// [`caret_position_from_point`] among the paragraphs of the editable text of the editing host `host`,
 /// which is where a press or a drag in it puts the caret: text in a `contenteditable="false"` island
-/// is not a place for it, and a point outside the host is the nearest place inside.
+/// is not a place for it, and a point outside the host is the nearest place inside. An empty line
+/// (`<p><br></p>`) paints no text, so it is not among the paragraphs: it is a place by the box of its
+/// block, and the nearest of the two kinds wins. Its position is `(block, 0)`, the one that holds a
+/// caret in an empty line ([`super::caret::held_by_empty_line`]); the other positions are in a text.
 pub fn caret_position_in_host(tree: &RetainedTree, window: WindowId, host: u64, x: f64, y: f64) -> Option<CaretPoint> {
-    caret_position_among(tree, window, x, y, &|entry| {
+    let text = paint::painted_text_at_among(window, point(pixels(x), pixels(y)), &|entry| {
         positions::container_of_key(&entry.key).is_some_and(|container| {
-            crate::html::editing::is_editable(tree, container)
-                && std::iter::successors(Some(container), |id| tree.elements.get(id).and_then(|element| element.parent)).any(|id| id == host)
+            crate::html::editing::is_editable(tree, container) && is_inside(tree, container, host)
         })
-    })
+    });
+    let blank = nearest_blank_line(tree, window, host, x, y);
+    match (text, blank) {
+        (Some((entry, local, nearness)), blank) if blank.as_ref().is_none_or(|blank| nearness <= blank.nearness) => {
+            caret_point_in_text(tree, &entry, local)
+        }
+        (_, Some(blank)) => Some(blank.point),
+        (_, None) => None,
+    }
+}
+
+fn is_inside(tree: &RetainedTree, id: u64, ancestor: u64) -> bool {
+    std::iter::successors(Some(id), |id| tree.elements.get(id).and_then(|element| element.parent)).any(|id| id == ancestor)
+}
+
+/// An empty line of an editing host as a place for the caret.
+struct BlankLine {
+    point: CaretPoint,
+    /// Vertical then horizontal distance of the pointer from the line, as the painted texts measure it.
+    nearness: (f32, f32),
+}
+
+/// The blocks in `host` that are one empty line (a plan of nothing but a [`Child::BlankLine`]) and
+/// editable, and the one nearest the window point. Found in the tree and measured by the box the last
+/// frame recorded for the block (the content box: the line is all of it), which a replayed frame keeps
+/// right, where a registry of paint would have to be replayed too.
+fn nearest_blank_line(tree: &RetainedTree, window: WindowId, host: u64, x: f64, y: f64) -> Option<BlankLine> {
+    let mut best: Option<BlankLine> = None;
+    let mut pending = vec![host];
+    while let Some(id) = pending.pop() {
+        let Some(element) = tree.elements.get(&id) else { continue };
+        let children = || element.children.iter().filter_map(|child| tree.elements.get(child));
+        pending.extend(children().filter(|child| !is_raw_text(child)).map(|child| child.id).rev());
+        // A line feed is what an empty line is made of, so a block with none has no need of a plan.
+        let has_line_feed = children().any(|child| if is_raw_text(child) { child.content.as_deref().is_some_and(|text| text.contains('\n')) } else { child.element_type == "br" });
+        if !has_line_feed || !crate::html::editing::is_editable(tree, id) {
+            continue;
+        }
+        let planned = plan_cache::planned(tree, element);
+        if !matches!(planned.children.as_slice(), [(Child::BlankLine, _)]) {
+            continue;
+        }
+        let Some(bounds) = crate::automation::get_bounds(window, id).filter(|bounds| !bounds.culled) else { continue };
+        let Some((local_x, local_y)) = bounds.to_local(x, y) else { continue };
+        let left = bounds.x + bounds.client_left + bounds.padding_left;
+        let top = bounds.y + bounds.client_top + bounds.padding_top;
+        let right = bounds.x + bounds.width - bounds.border_right - bounds.padding_right;
+        let bottom = bounds.y + bounds.height - bounds.border_bottom - bounds.padding_bottom;
+        let outside = |value: f64, low: f64, high: f64| if value < low { low - value } else if value > high { value - high } else { 0.0 };
+        let nearness = (outside(local_y, top, bottom) as f32, outside(local_x, left, right) as f32);
+        if best.as_ref().is_some_and(|best| nearness > best.nearness) {
+            continue;
+        }
+        let Some(line_start) = window_point_from(&bounds.to_window, point(px(left as f32), px(((top + bottom) / 2.0) as f32))) else { continue };
+        best = Some(BlankLine { point: CaretPoint { node_id: id as f64, container_id: id as f64, offset: 0.0, x: number(line_start.x) }, nearness });
+    }
+    best
 }
 
 fn caret_position_among(tree: &RetainedTree, window: WindowId, x: f64, y: f64, allow: &dyn Fn(&RegEntry) -> bool) -> Option<CaretPoint> {
-    let (entry, local) = paint::painted_text_at_among(window, point(pixels(x), pixels(y)), allow)?;
+    let (entry, local, _) = paint::painted_text_at_among(window, point(pixels(x), pixels(y)), allow)?;
+    caret_point_in_text(tree, &entry, local)
+}
+
+fn caret_point_in_text(tree: &RetainedTree, entry: &RegEntry, local: Point<Pixels>) -> Option<CaretPoint> {
     let located = positions::locate_key(tree, &entry.key)?;
     let text: &str = &entry.text;
     let row = row_at(&entry.layout, text, local.y.clamp(entry.layout.bounds().top(), entry.layout.bounds().bottom() - px(0.5)))?;
     let byte = index_in_row(&entry.layout, text, &row, local.x);
     let caret = caret_at(&entry.layout, text, byte)?;
-    caret_point(&entry, &located, byte, Bias::After, caret.x)
+    caret_point(entry, &located, byte, Bias::After, caret.x)
 }
 
 /// The caret of `node`, `offset` moved along the lines of the painted text. `goal_x` is the window x a

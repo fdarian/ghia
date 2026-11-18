@@ -50,6 +50,23 @@ describeNative("the pointer in an editing host (React)", () => {
     return harness(root.renderer, host)
   }
 
+  /** [`mount`] where `null` is an empty paragraph (`<br>`). */
+  function mountWithEmpty(lines: Array<string | null>, columns = 40) {
+    const root = createTestRoot({ width: 600, height: 400 })
+    cleanups.push(() => root.unmount())
+    root.render(
+      <div style={{ padding: 20, ...TEXT }}>
+        <div contentEditable style={{ width: columns * COLUMN + 0.5 }}>
+          {lines.map((line, index) => (
+            <div key={index}>{line === null ? <br /> : line}</div>
+          ))}
+        </div>
+      </div>
+    )
+    const host = document.body!.querySelector("[contenteditable]") as HTMLElement
+    return harness(root.renderer, host)
+  }
+
   function harness(renderer: ReturnType<typeof createTestRoot>["renderer"], host: HTMLElement) {
     const rect = host.getBoundingClientRect()
     const selection = document.getSelection()
@@ -249,6 +266,81 @@ describeNative("the pointer in an editing host (React)", () => {
       click(at(1, 2))
       expect(document.activeElement).toBe(document.getElementById("inside"))
       expect(state()).toEqual([texts()[0], 2, texts()[0], 2])
+    })
+  })
+
+  describe("an empty paragraph", () => {
+    /** Three paragraphs, the middle one empty (`<p><br></p>`), in a host that is not focused. */
+    function emptyBetween() {
+      const mounted = mountWithEmpty(["one two", null, "three four"])
+      return { ...mounted, empty: mounted.host.children[1] as HTMLElement }
+    }
+
+    it("is where a click on it puts the caret, painted in it", () => {
+      const { host, empty, click, at, state, shown, renderer, rect } = emptyBetween()
+      host.focus()
+      click(at(1, 0))
+      expect(state()).toEqual([empty, 0, empty, 0])
+      shown()
+      const caret = renderer.getPaintedNodeSelection().caret!
+      expect(caret.rect.x).toBeCloseTo(rect.x, 1)
+      expect(caret.rect.y).toBeCloseTo(rect.y + LINE, 1)
+      expect(document.activeElement).toBe(host)
+    })
+
+    it("takes a click far to the right of the line, as a text row does", () => {
+      const { host, empty, click, at, state } = emptyBetween()
+      host.focus()
+      click([at(1, 0)[0] + 20 * COLUMN, at(1, 0)[1]])
+      expect(state()).toEqual([empty, 0, empty, 0])
+    })
+
+    it("does not take a click on the text above or below it", () => {
+      const { host, texts, click, at, state } = emptyBetween()
+      host.focus()
+      click(at(0, 3))
+      expect(state()).toEqual([texts()[0], 3, texts()[0], 3])
+      click(at(2, 5))
+      expect(state()).toEqual([texts()[2], 5, texts()[2], 5])
+    })
+
+    it("is the place a drag from text ends in, and a drag back out of it", () => {
+      const { host, empty, texts, down, move, up, at, state, shown } = emptyBetween()
+      host.focus()
+      down(at(0, 4))
+      move(at(1, 0))
+      expect(state()).toEqual([texts()[0], 4, empty, 0])
+      move(at(2, 5))
+      expect(state()).toEqual([texts()[0], 4, texts()[2], 5])
+      move(at(1, 0))
+      up(at(1, 0))
+      expect(state()).toEqual([texts()[0], 4, empty, 0])
+      shown()
+    })
+
+    it("is where a drag that began in it starts from", () => {
+      const { host, empty, texts, down, move, up, at, state } = emptyBetween()
+      host.focus()
+      down(at(1, 0))
+      move(at(2, 5))
+      up(at(2, 5))
+      expect(state()).toEqual([empty, 0, texts()[2], 5])
+    })
+
+    it("is the block a triple click selects, and a double click is a caret in it", () => {
+      const { host, empty, click, at, state } = emptyBetween()
+      host.focus()
+      click(at(1, 0), 2)
+      expect(state()).toEqual([empty, 0, empty, 0])
+      click(at(1, 0), 3)
+      expect(state()).toEqual([empty, 0, empty, 1])
+    })
+
+    it("is an editing host's own empty line when the host has nothing else", () => {
+      const mounted = mountWithEmpty([null])
+      mounted.host.focus()
+      mounted.click(mounted.at(0, 0))
+      expect(mounted.state()).toEqual([mounted.host.firstChild, 0, mounted.host.firstChild, 0])
     })
   })
 

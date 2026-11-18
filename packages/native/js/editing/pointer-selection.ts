@@ -11,7 +11,7 @@
 
 import { flushPendingMutations } from "../bounds.js"
 import type { EventPayload } from "../../index.js"
-import { indexOfNode, type Element, type Node, type Text } from "../dom/nodes.js"
+import { DOM_BINDING, indexOfNode, type Element, type ElementBinding, type Node, type Text } from "../dom/nodes.js"
 import { enclosingBlock } from "../dom/selection-movement.js"
 import { getSelection, holdsNodeSelection } from "../dom/selection.js"
 import { wordAt } from "../dom/text-segmentation.js"
@@ -23,6 +23,7 @@ import { textById } from "./native-input.js"
 export const EDIT_POINTER_EVENT = "editpointer"
 
 const TEXT_NODE = 3
+const ELEMENT_NODE = 1
 
 interface Place {
   node: Node
@@ -55,14 +56,30 @@ function islandAround(host: Element, node: Node): Element | null {
   return island
 }
 
+/** The element of `root`'s subtree, `root` included, that native knows as `id`: the block of an empty line. */
+function elementById(root: Element, id: number): Element | null {
+  if ((root[DOM_BINDING]() as ElementBinding).native?.id === id) return root
+  for (const child of root.childNodes) {
+    if (child.nodeType !== ELEMENT_NODE) continue
+    const found = elementById(child as Element, id)
+    if (found !== null) return found
+  }
+  return null
+}
+
 function placeOf(host: Element, event: EventPayload): Place {
   const range = event.editRange
   // A host that paints no text has no place under the pointer but its own start.
   if (range == null) return { node: host, offset: 0 }
   if (range.length !== 4) throw new Error(`An editpointer position has four numbers, not ${range.length}`)
-  const node = textById(host, range[0]!)
-  if (node === null) throw new Error(`The pointer named text node ${range[0]}, which the editing host does not have`)
   const offset = range[1]!
+  const node = textById(host, range[0]!)
+  if (node === null) {
+    // An empty line paints no text: native names its block, at the offset before its line break.
+    const block = elementById(host, range[0]!)
+    if (block === null) throw new Error(`The pointer named node ${range[0]}, which the editing host does not have`)
+    return { node: block, offset }
+  }
   // Text of an island that sits in a paragraph is painted with the rest of it, and no caret goes inside it:
   // it goes to the side of the island the point is nearer.
   const island = islandAround(host, node)

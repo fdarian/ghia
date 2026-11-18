@@ -296,4 +296,36 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     expect(painted()).toContain('one tXwo three')
     expect(uncaught).toEqual([])
   })
+
+  it('13. a click on an empty paragraph puts the caret in it: Lexical\'s selection is that paragraph and typing lands in it', async () => {
+    editor.update(() => {
+      const paragraph = (text: string) => {
+        const node = $createParagraphNode()
+        if (text !== '') node.append($createTextNode(text))
+        return node
+      }
+      $getRoot().clear().append(paragraph('one'), paragraph(''), paragraph('three'))
+    })
+    await nextTask()
+    await settle()
+    const empty = element.querySelectorAll('p')[1]
+    if (empty === undefined) throw new Error('no second paragraph')
+    expect(empty.textContent).toBe('')
+    const at = empty.getBoundingClientRect()
+    root.renderer.nativeSimulateMouseDown(at.x + 4, at.y + at.height / 2)
+    root.renderer.nativeSimulateMouseUp(at.x + 4, at.y + at.height / 2)
+    await nextTask()
+    await settle()
+    expect(editor.getEditorState().read(() => {
+      const selection = $getSelection()
+      return $isRangeSelection(selection) ? [selection.anchor.getNode().getKey() === $getRoot().getChildAtIndex(1)?.getKey(), selection.isCollapsed()] : null
+    })).toEqual([true, true])
+    await press('X')
+    await nextTask()
+    await settle()
+    expect(paragraphs()).toEqual(['one', 'X', 'three'])
+    expect(element.querySelectorAll('p')[1]?.textContent).toBe('X')
+    expect(painted()).toContain('X')
+    expect(uncaught).toEqual([])
+  })
 })

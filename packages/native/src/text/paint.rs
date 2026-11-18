@@ -1089,6 +1089,9 @@ struct RegistryHit {
     index: usize,
     /// The position in the space of the entry's layout.
     local: gpui::Point<gpui::Pixels>,
+    /// How far the position is from the text in the window's pixels, vertical then horizontal: `(0.0, 0.0)`
+    /// where a text contains it.
+    distance: (f32, f32),
 }
 
 /// The text a window position lands in, and the byte offset in it.
@@ -1166,11 +1169,14 @@ fn registry_point_among(
             }
         }
 
-        let (ei, local) = contained.or(nearest.map(|(ei, local, _)| (ei, local)))?;
+        let ((ei, local), distance) = match contained {
+            Some(hit) => (hit, (0.0, 0.0)),
+            None => nearest.map(|(ei, local, distance)| ((ei, local), distance))?,
+        };
         let index = match reg[ei].layout.index_for_position(local) {
             Ok(ix) | Err(ix) => ix,
         };
-        Some(RegistryHit { entry: ei, index, local })
+        Some(RegistryHit { entry: ei, index, local, distance })
     })
 }
 
@@ -1189,14 +1195,15 @@ pub(crate) fn painted_texts_in_document_order(window: WindowId) -> Vec<RegEntry>
 }
 
 /// The text a window position lands in, as [`registry_point`] finds it among the texts `allow` lets
-/// through (which must not read the painted frame), with the position in the space of its layout.
+/// through (which must not read the painted frame), with the position in the space of its layout and how
+/// far from the text it is (vertical, then horizontal, in the window's pixels).
 pub(crate) fn painted_text_at_among(
     window: WindowId,
     position: gpui::Point<gpui::Pixels>,
     allow: &dyn Fn(&RegEntry) -> bool,
-) -> Option<(RegEntry, gpui::Point<gpui::Pixels>)> {
+) -> Option<(RegEntry, gpui::Point<gpui::Pixels>, (f32, f32))> {
     let hit = registry_point_among(window, position, allow)?;
-    with_frame(window, |frame| frame.registry().get(hit.entry).cloned()).map(|entry| (entry, hit.local))
+    with_frame(window, |frame| frame.registry().get(hit.entry).cloned()).map(|entry| (entry, hit.local, hit.distance))
 }
 
 /// Like [`registry_point`], but only when the pointer shares a text's vertical
