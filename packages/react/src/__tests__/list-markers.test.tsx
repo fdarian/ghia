@@ -14,7 +14,7 @@ import { fileURLToPath } from "url"
 import { afterAll, describe, expect, it } from "vitest"
 import type { PublicInstance } from "../index"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
-import { readPixels, SHOTS_DIR, type Pixels } from "./test-utils.js"
+import { expectScreenshotsEqual, readPixels, SHOTS_DIR, type Pixels } from "./test-utils.js"
 import { styleOf } from "./oracle-html.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -224,3 +224,77 @@ describeNative("the marker of a list item, against Chrome", () => {
   }
 })
 
+
+/** What a list is: its items' text, and the props of the `ol`. */
+interface Scene {
+  items: string[]
+  list?: Record<string, unknown>
+  valueOf?: Record<string, number>
+  style?: Record<string, string>
+}
+
+function list(scene: Scene) {
+  return (
+    <div style={{ width: 300, height: 260, backgroundColor: "#ffffff", color: "#000000", fontSize: 16, lineHeight: "24px", fontFamily: "Helvetica" }}>
+      <ol {...scene.list} style={{ color: "#ff0000", ...scene.style }}>
+        {scene.items.map((text) => (
+          <li key={text} value={scene.valueOf?.[text]}>
+            <span style={{ color: "#000000" }}>{text}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+function shot(root: ReturnType<typeof createTestRoot>, name: string): string {
+  root.renderer.dispatchNativeEvents()
+  const file = path.join(SHOTS_DIR, `list-markers-${name}.png`)
+  root.renderer.captureScreenshot(file)
+  return file
+}
+
+/** A change to a list is drawn as a list that never had the old state is: the numbers a frame replays are renumbered. */
+const CHANGES: [string, Scene, Scene][] = [
+  ["an item is inserted in the middle", { items: ["a", "b", "c"] }, { items: ["a", "x", "b", "c"] }],
+  ["the first item is removed", { items: ["a", "b", "c", "d"] }, { items: ["b", "c", "d"] }],
+  ["the items are reordered", { items: ["a", "b", "c"] }, { items: ["c", "a", "b"] }],
+  ["an item is appended", { items: ["a", "b"] }, { items: ["a", "b", "c"] }],
+  ["`start` changes", { items: ["a", "b", "c"] }, { items: ["a", "b", "c"], list: { start: 7 } }],
+  ["`reversed` is set", { items: ["a", "b", "c"] }, { items: ["a", "b", "c"], list: { reversed: true } }],
+  ["an item of a reversed list is added", { items: ["a", "b"], list: { reversed: true } }, { items: ["a", "b", "c"], list: { reversed: true } }],
+  ["an item gets a `value`", { items: ["a", "b", "c"] }, { items: ["a", "b", "c"], valueOf: { b: 20 } }],
+  ["the type changes", { items: ["a", "b", "c"] }, { items: ["a", "b", "c"], style: { listStyleType: "upper-roman" } }],
+  ["the position changes", { items: ["a", "b"] }, { items: ["a", "b"], style: { listStylePosition: "inside" } }],
+]
+
+describeNative("list markers follow the list", () => {
+  for (const scale of [1, 2] as const) {
+    for (const [name, before, after] of CHANGES) {
+      it(`${name}, at scale ${scale}`, () => {
+        // The window is one per thread: the list of the final state is drawn first, then dropped.
+        const fresh = createTestRoot({ width: 300, height: 260, scaleFactor: scale })
+        let expected: string
+        try {
+          fresh.render(list(after))
+          expected = shot(fresh, `change-${scale}-fresh`)
+        } finally {
+          fresh.unmount()
+        }
+        const changed = createTestRoot({ width: 300, height: 260, scaleFactor: scale })
+        try {
+          changed.render(list(before))
+          const first = shot(changed, `change-${scale}-before`)
+          expect(inkBox(readPixels(first), [0, 0, 300 * scale, 260 * scale], [255, 0, 0]).area, "the first state has markers").toBeGreaterThan(0)
+          changed.render(list(after))
+          expectScreenshotsEqual(shot(changed, `change-${scale}-after`), expected)
+          // A second frame of the same state replays what the first drew.
+          changed.render(list(after))
+          expectScreenshotsEqual(shot(changed, `change-${scale}-replayed`), expected)
+        } finally {
+          changed.unmount()
+        }
+      })
+    }
+  }
+})

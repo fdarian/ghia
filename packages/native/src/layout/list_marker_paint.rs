@@ -285,3 +285,24 @@ fn paint(marker: &Marker, border_left: Pixels, bounds: Bounds<Pixels>, window: &
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The numbers headless Chrome paints for Helvetica at 16px and 32px (`list-markers-oracle`): the ink of
+    /// a disc is 5 and 10 device pixels wide, 7 and 15 under the top of the content area.
+    #[test]
+    fn a_symbol_is_sized_from_the_ascent_in_whole_device_pixels() {
+        assert_eq!(Symbol::of(14), Symbol { offset: 9, shape: 5, top: 7 });
+        assert_eq!(Symbol::of(30), Symbol { offset: 20, shape: 10, top: 15 });
+        assert_eq!(Symbol::of(8), Symbol { offset: 5, shape: 3, top: 4 });
+    }
+
+    #[test]
+    fn an_inside_symbol_takes_its_width_and_a_font_size_less_the_pixel_it_starts_before_the_item() {
+        assert_eq!(inside_symbol_advance(14, 16), 22);
+        assert_eq!(inside_symbol_advance(30, 32), 43);
+        assert_eq!(inside_symbol_advance(8, 9), 13);
+    }
+}
