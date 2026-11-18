@@ -93,6 +93,23 @@ pub(crate) fn layout(entries: &[ClipboardData]) -> PasteboardLayout {
     PasteboardLayout { typed, custom }
 }
 
+/// The text of the bytes a pasteboard holds for `uti`. Another app can leave anything there: invalid
+/// UTF-8 becomes U+FFFD, and `public.html` from some apps is UTF-16 with a byte order mark.
+pub(crate) fn decode_text(uti: &str, bytes: &[u8]) -> String {
+    if uti == UTI_HTML {
+        let utf16 = |units: &[u8], read: fn([u8; 2]) -> u16| {
+            let units: Vec<u16> = units.chunks_exact(2).map(|pair| read([pair[0], pair[1]])).collect();
+            String::from_utf16_lossy(&units)
+        };
+        match bytes {
+            [0xFF, 0xFE, rest @ ..] => return utf16(rest, u16::from_le_bytes),
+            [0xFE, 0xFF, rest @ ..] => return utf16(rest, u16::from_be_bytes),
+            _ => {}
+        }
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 /// The first line of a `text/uri-list` that is not blank or a `#` comment.
 fn first_url(list: &str) -> Option<&str> {
     list.lines()
@@ -353,6 +370,20 @@ mod tests {
 
     fn pair(mime_type: &str, data: &str) -> (String, String) {
         (mime_type.to_string(), data.to_string())
+    }
+
+    #[test]
+    fn text_decodes_whatever_another_app_left() {
+        assert_eq!(decode_text(UTI_PLAIN_TEXT, "a\0b é".as_bytes()), "a\0b é");
+        assert_eq!(decode_text(UTI_PLAIN_TEXT, &[b'a', 0xFF, 0xC0, b'b']), "a\u{FFFD}\u{FFFD}b");
+        let units: Vec<u16> = "<b>é\u{1F30D}</b>".encode_utf16().collect();
+        let little: Vec<u8> = [0xFF, 0xFE].into_iter().chain(units.iter().flat_map(|unit| unit.to_le_bytes())).collect();
+        let big: Vec<u8> = [0xFE, 0xFF].into_iter().chain(units.iter().flat_map(|unit| unit.to_be_bytes())).collect();
+        assert_eq!(decode_text(UTI_HTML, &little), "<b>é\u{1F30D}</b>");
+        assert_eq!(decode_text(UTI_HTML, &big), "<b>é\u{1F30D}</b>");
+        assert_eq!(decode_text(UTI_HTML, b"<i>x</i>"), "<i>x</i>");
+        assert_eq!(decode_text(UTI_HTML, &[0xFF, 0xFE, 0x61]), "");
+        assert_eq!(decode_text(UTI_PLAIN_TEXT, &[0xFF, 0xFE, 0x61, 0x00]), "\u{FFFD}\u{FFFD}a\0");
     }
 
     #[test]

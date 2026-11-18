@@ -2,7 +2,7 @@
 //! one type. How the web's types lay out on the pasteboard is in `crate::clipboard`.
 //!
 //! Nothing here needs the GPUI app, so it is safe inside a handler that holds it.
-use std::ffi::{c_void, CStr};
+use std::ffi::c_void;
 
 use objc2::{
     class, msg_send,
@@ -11,7 +11,7 @@ use objc2::{
 };
 
 use crate::clipboard::{
-    assemble, decode_custom_data, encode_custom_data, layout, ClipboardData, UTI_CUSTOM_DATA,
+    assemble, decode_custom_data, decode_text, encode_custom_data, layout, ClipboardData, UTI_CUSTOM_DATA,
     UTI_HTML, UTI_PLAIN_TEXT, UTI_URL,
 };
 
@@ -58,13 +58,28 @@ fn ns_string(text: &str) -> Retained<AnyObject> {
     }
 }
 
-/// The text of an `NSString`, `None` for nil.
+/// The text of an `NSString`, `None` for nil. For a name; a pasteboard's contents are read as bytes
+/// (`string_for`), because `UTF8String` stops at a NUL.
 unsafe fn string_of(string: *mut AnyObject) -> Option<String> {
     if string.is_null() {
         return None;
     }
-    let bytes: *const std::ffi::c_char = unsafe { msg_send![string, UTF8String] };
-    Some(unsafe { CStr::from_ptr(bytes) }.to_string_lossy().into_owned())
+    let length: usize = unsafe { msg_send![string, lengthOfBytesUsingEncoding: UTF8] };
+    let bytes: *const u8 = unsafe { msg_send![string, UTF8String] };
+    if bytes.is_null() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(bytes, length) }).into_owned())
+}
+
+/// The bytes of an `NSData`.
+unsafe fn bytes_of(data: *mut AnyObject) -> Vec<u8> {
+    let length: usize = unsafe { msg_send![data, length] };
+    if length == 0 {
+        return Vec::new();
+    }
+    let bytes: *const c_void = unsafe { msg_send![data, bytes] };
+    unsafe { std::slice::from_raw_parts(bytes.cast::<u8>(), length) }.to_vec()
 }
 
 fn ns_data(bytes: &[u8]) -> Retained<AnyObject> {
@@ -126,9 +141,11 @@ pub(crate) fn write(pasteboard: &Pasteboard, entries: &[ClipboardData]) -> Resul
 
 fn string_for(pasteboard: &Pasteboard, uti: &'static str) -> Option<(&'static str, String)> {
     unsafe {
-        let string: *mut AnyObject =
-            msg_send![&**pasteboard, stringForType: &*ns_string(uti)];
-        string_of(string).map(|text| (uti, text))
+        let data: *mut AnyObject = msg_send![&**pasteboard, dataForType: &*ns_string(uti)];
+        if data.is_null() {
+            return None;
+        }
+        Some((uti, decode_text(uti, &bytes_of(data))))
     }
 }
 
@@ -139,15 +156,8 @@ fn custom_pairs(pasteboard: &Pasteboard) -> Vec<(String, String)> {
         if data.is_null() {
             return Vec::new();
         }
-        let length: usize = msg_send![data, length];
-        let bytes: *const c_void = msg_send![data, bytes];
-        let slice = if length == 0 {
-            &[][..]
-        } else {
-            std::slice::from_raw_parts(bytes.cast::<u8>(), length)
-        };
         // Another app's corrupt entry hides its custom data, not the text beside it.
-        decode_custom_data(slice).unwrap_or_else(|error| {
+        decode_custom_data(&bytes_of(data)).unwrap_or_else(|error| {
             log::warn!("ignoring the pasteboard's web custom data: {error}");
             Vec::new()
         })
@@ -205,6 +215,43 @@ mod tests {
             assert_eq!(read(pasteboard), vec![ClipboardData::new("text/plain", "b")]);
             write(pasteboard, &[]).unwrap();
             assert_eq!(read(pasteboard), Vec::new());
+        });
+    }
+
+    #[test]
+    fn a_string_with_a_nul_reads_back_whole() {
+        with_pasteboard(|pasteboard| {
+            let entries = vec![ClipboardData::new("text/plain", "before\0after")];
+            write(pasteboard, &entries).unwrap();
+            assert_eq!(read(pasteboard), entries);
+        });
+    }
+
+    fn set_raw(pasteboard: &Pasteboard, uti: &str, bytes: &[u8]) {
+        unsafe {
+            let set: bool = msg_send![
+                &**pasteboard,
+                setData: &*ns_data(bytes),
+                forType: &*ns_string(uti)
+            ];
+            assert!(set);
+        }
+    }
+
+    #[test]
+    fn bytes_another_app_wrote_that_are_not_utf8_read_without_a_panic() {
+        with_pasteboard(|pasteboard| unsafe {
+            let _: isize = msg_send![&**pasteboard, clearContents];
+            set_raw(pasteboard, UTI_PLAIN_TEXT, &[b'a', 0xFF, 0xC0, b'b']);
+            let units: Vec<u8> = "<b>é</b>".encode_utf16().flat_map(|unit| unit.to_le_bytes()).collect();
+            set_raw(pasteboard, UTI_HTML, &[&[0xFF, 0xFE][..], &units].concat());
+            assert_eq!(
+                read(pasteboard),
+                vec![
+                    ClipboardData::new("text/plain", "a\u{FFFD}\u{FFFD}b"),
+                    ClipboardData::new("text/html", "<b>é</b>"),
+                ]
+            );
         });
     }
 
