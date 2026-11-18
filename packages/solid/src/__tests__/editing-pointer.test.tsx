@@ -136,19 +136,32 @@ describe.skipIf(!hasNativeTestRenderer)("the pointer in an editing host (Solid)"
       expect(state()).toEqual([texts()[0], 13, texts()[0], 13])
     })
 
-    it("in a host that has no focus focuses it, with the caret at the point and not at the start", () => {
+    it("in a host that has no focus focuses it first, with the selection where it was, then puts the caret at the point", () => {
       const { host, texts, click, at, state, shown, renderer, rect } = mount(["hello world", "second line"])
-      const seen: Array<[Node | null, number]> = []
-      host.addEventListener("focusin", () => seen.push([document.getSelection().focusNode, document.getSelection().focusOffset]))
+      const outside = document.body!.querySelector("#outside")!.firstChild as Text
+      document.getSelection().collapse(outside, 3)
+      const seen: Array<[string, Node | null, number]> = []
+      for (const type of ["focus", "focusin"]) {
+        host.addEventListener(type, () => seen.push([type, document.getSelection().focusNode, document.getSelection().focusOffset]))
+      }
       expect(document.activeElement).not.toBe(host)
       click(at(0, 6))
       expect(document.activeElement).toBe(host)
+      // Chrome focuses with the selection untouched, then places the caret: the listeners saw the old one.
+      expect(seen).toEqual([["focus", outside, 3], ["focusin", outside, 3]])
       expect(state()).toEqual([texts()[0], 6, texts()[0], 6])
-      // The selection was already there when the focus event was delivered.
-      expect(seen).toEqual([[texts()[0], 6]])
       shown()
       const caret = renderer.getPaintedNodeSelection().caret!
       expect(caret.rect.x).toBeCloseTo(rect.x + 6 * COLUMN, 1)
+    })
+
+    it("does not put a caret at the start of the host while it focuses: no selection before is none during the focus", () => {
+      const { host, texts, click, at, state } = mount(["hello world"])
+      const seen: Array<Node | null> = []
+      host.addEventListener("focusin", () => seen.push(document.getSelection().focusNode))
+      click(at(0, 6))
+      expect(seen).toEqual([null])
+      expect(state()).toEqual([texts()[0], 6, texts()[0], 6])
     })
 
     it("at the end of a line, in the padding past it, goes to the line end", () => {

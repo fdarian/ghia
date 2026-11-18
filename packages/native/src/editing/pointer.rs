@@ -4,12 +4,16 @@
 //! Native only finds where the pointer is in the DOM: the painted text knows which character is under a
 //! window point, and JS owns the `Selection` (`js/editing/pointer-selection.ts`). Each phase is one
 //! internal sync event aimed at the host, `editpointer`, that no listener hears: `inputType` is the
-//! phase (`down`, `drag`, `up`), `detail` the click count of a `down`, `shiftKey` whether Shift was held,
+//! phase (`press`, `down`, `drag`, `up`), `detail` the click count of a `down`, `shiftKey` whether Shift was held,
 //! and `editRange` the DOM position under the pointer as a collapsed range
 //! (`[node, offset, node, offset]`), absent where the host paints no text.
 //!
 //! **The press is emitted from `PointerDispatch::press`,** after `mousedown`, because only there is the
-//! verdict of the page known: a prevented `mousedown` starts nothing. The drag and the release are
+//! verdict of the page known: a prevented `mousedown` starts nothing. It goes in two steps, as in Blink,
+//! which focuses with the selection untouched and then places the caret: `press` at once, which only tells
+//! JS that the focus the default of this press moves into the host is a pointer's (no caret at the start of
+//! the host), and `down` deferred behind the focus default, so a `focus` or `focusin` listener sees the
+//! selection the press found. The drag and the release are
 //! emitted from the window-level listeners of the painted selection (`text/paint.rs`), which hand the
 //! drag to this module while it holds one and then never touch the painted selection: the two never
 //! select at once.
@@ -30,6 +34,7 @@ pub const EDIT_POINTER_EVENT: &str = "editpointer";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
+    Press,
     Down,
     Drag,
     Up,
@@ -38,6 +43,7 @@ enum Phase {
 impl Phase {
     fn name(self) -> &'static str {
         match self {
+            Phase::Press => "press",
             Phase::Down => "down",
             Phase::Drag => "drag",
             Phase::Up => "up",
@@ -104,9 +110,14 @@ impl EditingPointer {
             self.state.drag.borrow_mut().take();
             return false;
         };
-        let place = self.place(window, host, position);
-        *self.state.drag.borrow_mut() = Some(Drag { host, last: place });
-        self.emit(Phase::Down, host, place, click_count, shift, window, cx);
+        self.emit(Phase::Press, host, None, 0, shift, window, cx);
+        let this = self.clone();
+        // Queued after the focus default of this press (`defer_mouse_down_default`), which the caller queued first.
+        window.defer(cx, move |window, cx| {
+            let place = this.place(window, host, position);
+            *this.state.drag.borrow_mut() = Some(Drag { host, last: place });
+            this.emit(Phase::Down, host, place, click_count, shift, window, cx);
+        });
         true
     }
 

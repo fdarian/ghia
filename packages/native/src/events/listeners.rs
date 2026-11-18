@@ -211,7 +211,7 @@ impl PointerDispatch {
         } else {
             self.activation.routing.modality().note_press();
         }
-        // Before the focus default, which is deferred: the host has its caret when it hears of its focus.
+        // The caret is placed after the focus default, which is deferred before this: `pressed` queues its own step behind it.
         if let (0, PointerAction::Down { click_count, .. }) = (button, &sample.action) {
             if mouse_down_prevented || sample.modifiers.ctrl {
                 self.editing.cancelled();

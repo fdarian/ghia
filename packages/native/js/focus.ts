@@ -40,14 +40,26 @@ export function focusHostElement(element: ObservableElement, options?: FocusOpti
   if (!options?.preventScroll) scrollFocusIntoView(renderer, element.nativeId)
 }
 
+/** The editing host a press is about to focus, between native's `press` and `down` of the pointer. */
+let pointerFocusHost: object | null = null
+
+/**
+ * A press of the primary button in `host` begins (`null`: it has ended). Chrome focuses with the selection untouched
+ * and then places the caret at the point, so the `focusin` of this press puts no caret at the start of the host.
+ */
+export function setPointerFocusHost(host: object | null): void {
+  pointerFocusHost = host
+}
+
 /**
  * A `focusin` that native reported: focus moved to an editing host by Tab or a click, not by `focus()`,
  * which places the caret itself. Chrome puts the caret at the start of the host unless the selection is
- * already in it. Runs before the event is delivered, so its listeners see the selection.
+ * already in it; a click does not, it places the caret at the point after the focus. Runs before the event is
+ * delivered, so its listeners see the selection.
  */
 export function placeCaretOnFocusIn(element: object | undefined): void {
   // The root dropped the element between the focus change and this event.
-  if (element === undefined) return
+  if (element === undefined || element === pointerFocusHost) return
   if (isEditingHost(element as Element)) placeCaretInEditingHost(element as Element)
 }
 

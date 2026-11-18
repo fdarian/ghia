@@ -4,7 +4,9 @@
  * block, and a drag that went on from either extends by words or blocks.
  *
  * Native finds the DOM position under the pointer in the painted text and sends one internal
- * `editpointer` event per phase (`src/editing/pointer.rs`); this is the `Selection` half. It is not a DOM
+ * `editpointer` event per phase (`src/editing/pointer.rs`); this is the `Selection` half. `press` comes before
+ * the focus default of the press and only keeps the focus from putting a caret at the start of the host; `down`
+ * comes after it, so a focus listener sees the old selection. It is not a DOM
  * event: no listener hears it, and it runs only when `mousedown` was not prevented, which native
  * decides. The flush at the end sends the selection to native, so the wash and the caret follow.
  */
@@ -13,6 +15,7 @@ import { flushPendingMutations } from "../bounds.js"
 import type { EventPayload } from "../../index.js"
 import { DOM_BINDING, indexOfNode, type Element, type ElementBinding, type Node, type Text } from "../dom/nodes.js"
 import { enclosingBlock } from "../dom/selection-movement.js"
+import { setPointerFocusHost } from "../focus.js"
 import { getSelection, holdsNodeSelection } from "../dom/selection.js"
 import { wordAt } from "../dom/text-segmentation.js"
 import { comparePoints, isInclusiveAncestor } from "../dom/tree-order.js"
@@ -125,7 +128,8 @@ function anchorIn(host: Element): Place | null {
 }
 
 function press(host: Element, event: EventPayload): void {
-  const granularity = granularityOf(event.detail ?? 1)
+  if (event.detail === undefined) throw new Error("An editpointer down carries the click count of the press")
+  const granularity = granularityOf(event.detail)
   const place = placeOf(host, event)
   const extended = granularity === "caret" && event.shiftKey === true ? anchorIn(host) : null
   const anchor: Unit = extended === null ? unitAt(host, place, granularity) : { start: extended, end: extended }
@@ -149,10 +153,15 @@ function extend(held: Drag, event: EventPayload): void {
 export function runEditingPointer(event: EventPayload, host: Element | undefined, renderer: NativeRenderer): void {
   if (host === undefined) {
     drag = null
+    setPointerFocusHost(null)
     return
   }
   switch (event.inputType) {
+    case "press":
+      setPointerFocusHost(host)
+      return
     case "down":
+      setPointerFocusHost(null)
       press(host, event)
       break
     case "drag":
