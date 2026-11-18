@@ -4,8 +4,8 @@
  * a `MutationObserver` records it and live ranges and the selection move as they would in Chrome.
  *
  * Phase 1 edits text only. A paragraph or line break fires `beforeinput` and changes nothing; an
- * edit that would join two blocks or remove a `<br>` (a Backspace over a block edge) fires
- * `beforeinput` and changes nothing, and text typed over a selection that spans two blocks goes
+ * edit that would join two blocks or remove a `<br>` (a Backspace over a block edge, a word deletion
+ * that reaches into the block before) fires `beforeinput` and changes nothing, and text typed over a selection that spans two blocks goes
  * into the block it began in without joining them; an emptied Text node stays in the tree. A
  * Backspace or Delete next to a `contenteditable="false"` element removes it whole.
  */
@@ -13,12 +13,15 @@
 import { Node, type Element, type Text } from "../dom/nodes.js"
 import { createTextFor, Range, StaticRange } from "../dom/range.js"
 import { getSelection, holdsNodeSelection } from "../dom/selection.js"
-import { stepPoint } from "../dom/selection-movement.js"
+import { crossesBlock, stepPoint } from "../dom/selection-movement.js"
 import { CompositionEvent, InputEvent } from "../events/classes.js"
 import { document } from "../events/window-target.js"
 import { editingHostOf } from "./host.js"
+import { moveToLineBoundary } from "./line-movement.js"
 
 const TEXT_NODE = 3
+const ELEMENT_NODE = 1
+const TEXT_CONTROLS: ReadonlySet<string> = new Set(["input", "textarea"])
 
 export interface EditingInputOptions {
   isComposing?: boolean
@@ -49,6 +52,15 @@ export function focusedNode(): Node {
   const active: unknown = document.activeElement
   if (!(active instanceof Node)) throw new Error("document.activeElement is not a DOM node")
   return active
+}
+
+/** The editing host that has focus, or `null` when focus is elsewhere or on an `<input>` or `<textarea>` (which edit themselves). */
+export function focusedEditingHost(): Element | null {
+  const focused = focusedNode()
+  const host = editingHostOf(focused)
+  if (host === null) return null
+  if (focused.nodeType === ELEMENT_NODE && TEXT_CONTROLS.has((focused as Element).localName)) return null
+  return host
 }
 
 function editingTarget(): EditingTarget | null {
@@ -83,23 +95,54 @@ interface Deletion {
   range: Range
   /** The range is a `contenteditable="false"` element, which goes whole. */
   island: boolean
+  /** The range runs over the edge of a block: phase 1 does not join blocks, so the DOM is left as it is. */
+  joinsBlocks: boolean
 }
 
-/** What one Backspace or Delete removes: the selection, or one character from the caret, or the whole non-editable element the caret is next to. */
-function deletionRange(host: Element, selected: Range, forward: boolean): Deletion {
-  if (!selected.collapsed) return { range: selected, island: false }
+interface DeletionKind {
+  forward: boolean
+  granularity: "character" | "word" | "line"
+}
+
+const DELETIONS: Readonly<Record<string, DeletionKind>> = {
+  deleteContentBackward: { forward: false, granularity: "character" },
+  deleteContentForward: { forward: true, granularity: "character" },
+  deleteWordBackward: { forward: false, granularity: "word" },
+  deleteWordForward: { forward: true, granularity: "word" },
+  deleteSoftLineBackward: { forward: false, granularity: "line" },
+  deleteSoftLineForward: { forward: true, granularity: "line" },
+}
+
+/**
+ * What one deletion removes: the selection, or from the caret one character, one word or to the end
+ * of the painted line, or the whole non-editable element the caret is next to. The caret is moved on
+ * a copy of the selection's boundary, so `beforeinput` sees the range before anything has changed.
+ */
+function deletionRange(host: Element, selected: Range, kind: DeletionKind): Deletion {
+  const unchanged = { range: selected, island: false, joinsBlocks: false }
+  if (!selected.collapsed) return unchanged
   const node = selected.startContainer
   const offset = selected.startOffset
-  const step = stepPoint(host, node, offset, forward, "character")
-  if (step === null) return { range: selected, island: false }
+  if (kind.granularity === "line") {
+    const moved = moveToLineBoundary(node, offset, kind.forward)
+    if (moved === null) return unchanged
+    return {
+      range: kind.forward ? rangeBetween(node, offset, moved.node, moved.offset) : rangeBetween(moved.node, moved.offset, node, offset),
+      island: false,
+      joinsBlocks: crossesBlock(host, node, moved.node),
+    }
+  }
+  const step = stepPoint(host, node, offset, kind.forward, kind.granularity)
+  if (step === null) return unchanged
   if (step.island !== null) {
     const island = new Range()
     island.selectNode(step.island)
-    return { range: island, island: true }
+    return { range: island, island: true, joinsBlocks: false }
   }
   return {
-    range: forward ? rangeBetween(node, offset, step.node, step.offset) : rangeBetween(step.node, step.offset, node, offset),
+    range: kind.forward ? rangeBetween(node, offset, step.node, step.offset) : rangeBetween(step.node, step.offset, node, offset),
     island: false,
+    joinsBlocks: crossesBlock(host, node, step.node),
   }
 }
 
@@ -155,6 +198,7 @@ export function runEditingInput(inputType: string, data: string | null, options:
 
   let range: Range
   let removesIsland = false
+  let joinsBlocks = false
   switch (inputType) {
     case "insertText":
     case "insertReplacementText":
@@ -164,10 +208,15 @@ export function runEditingInput(inputType: string, data: string | null, options:
       range = options.replacing === undefined ? target.range : options.replacing
       break
     case "deleteContentBackward":
-    case "deleteContentForward": {
-      const deletion = deletionRange(host, target.range, inputType === "deleteContentForward")
+    case "deleteContentForward":
+    case "deleteWordBackward":
+    case "deleteWordForward":
+    case "deleteSoftLineBackward":
+    case "deleteSoftLineForward": {
+      const deletion = deletionRange(host, target.range, DELETIONS[inputType]!)
       range = deletion.range
       removesIsland = deletion.island
+      joinsBlocks = deletion.joinsBlocks
       break
     }
     default:
@@ -200,8 +249,12 @@ export function runEditingInput(inputType: string, data: string | null, options:
       break
     }
     case "deleteContentBackward":
-    case "deleteContentForward": {
-      if (!removesIsland && range.toString() === "") return { handled: true, canceled: false, changed: false }
+    case "deleteContentForward":
+    case "deleteWordBackward":
+    case "deleteWordForward":
+    case "deleteSoftLineBackward":
+    case "deleteSoftLineForward": {
+      if (joinsBlocks || (!removesIsland && range.toString() === "")) return { handled: true, canceled: false, changed: false }
       // deleteContents leaves a range over several nodes at their parent; the caret belongs where the removed text began.
       const startNode = range.startContainer
       const startOffset = range.startOffset

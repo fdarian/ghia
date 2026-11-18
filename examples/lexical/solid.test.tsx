@@ -4,6 +4,7 @@ import {
   $createParagraphNode,
   $createTextNode,
   $getRoot,
+  $getSelection,
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
   createEditor,
@@ -233,6 +234,35 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     await nextTask()
     await settle()
     expect(paragraphs()).toEqual(['Updatedかな!'])
+    expect(uncaught).toEqual([])
+  })
+
+  it('11. Option+Backspace deletes a word and Shift+ArrowLeft extends: Lexical and the DOM agree', async () => {
+    editor.update(() => {
+      const paragraph = $createParagraphNode()
+      paragraph.append($createTextNode('one two three'))
+      $getRoot().clear().append(paragraph)
+    })
+    await nextTask()
+    await settle()
+    const textNode = element.querySelector('span')?.firstChild
+    if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(textNode, 13, textNode, 13)
+    await nextTask()
+    await settle()
+    await press('Alt+Backspace')
+    await nextTask()
+    await settle()
+    expect(paragraphs()).toEqual(['one two '])
+    expect(element.textContent).toBe('one two ')
+    expect(painted()).toContain('one two ')
+    await press('Shift+ArrowLeft Shift+ArrowLeft')
+    await nextTask()
+    await settle()
+    expect(editor.getEditorState().read(() => $getSelection()?.getTextContent())).toBe('o ')
+    expect(selection.toString()).toBe('o ')
     expect(uncaught).toEqual([])
   })
 })

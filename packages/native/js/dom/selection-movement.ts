@@ -124,6 +124,11 @@ function enclosingBlock(node: Node, scope: Node): Node {
   return scope
 }
 
+/** Whether two points under `scope` are in different blocks, so a range between them runs over a block edge. */
+export function crossesBlock(scope: Node, a: Node, b: Node): boolean {
+  return enclosingBlock(a, scope) !== enclosingBlock(b, scope)
+}
+
 /** The offset in `flat.text` of a boundary point, or `undefined` when the text has no segment the point belongs to. */
 function offsetOf(flat: Flat, scope: Node, node: Node, offset: number): number | undefined {
   if (flat.segments.length === 0) return undefined

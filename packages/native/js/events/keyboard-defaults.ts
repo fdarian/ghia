@@ -15,10 +15,9 @@ import {
   type PublicEventFields,
   type RootEvent,
 } from "./dispatch.js"
-import type { Element } from "../dom/nodes.js"
 import { paintedSelectionTookOver } from "../dom/selection.js"
-import { editingHostOf } from "../editing/host.js"
-import { focusedNode, runEditingInput } from "../editing/input.js"
+import { focusedEditingHost, runEditingInput } from "../editing/input.js"
+import { runKeyBinding } from "../editing/key-moves.js"
 import { scrollKeyName } from "../scroll.js"
 import { moveFocusByTab } from "../focus.js"
 import { isDragEvent } from "./drag.js"
@@ -159,9 +158,6 @@ export function runRootEvent(
   return result
 }
 
-const ELEMENT_NODE = 1
-const TEXT_CONTROLS: ReadonlySet<string> = new Set(["input", "textarea"])
-
 /**
  * The edit a key makes in an editing host as its own default action: a paragraph or line break and the
  * deletions. A key that types text is not here: native gives the text to the host through the platform's
@@ -180,22 +176,20 @@ function editInEditingHost(event: DomEvent): boolean {
   if (event.isComposing) return false
   const inputType = editingInputOf(event.key, Boolean(event.modifiers?.shift))
   if (inputType === undefined) return false
-  const focused = focusedNode()
-  if (editingHostOf(focused) === null || (focused.nodeType === ELEMENT_NODE && TEXT_CONTROLS.has((focused as Element).localName))) {
-    return false
-  }
+  if (focusedEditingHost() === null) return false
   return runEditingInput(inputType, null).handled
 }
 
 // The default actions of a key run after every handler had the chance to
 // call preventDefault().
 function runKeyDefault(root: ActiveRoot, event: DomEvent, context: RootEventContext): boolean {
-  if (hasCommandModifier(event)) return false
-  if (editInEditingHost(event)) {
+  const performed = runKeyBinding(event) || (!hasCommandModifier(event) && editInEditingHost(event))
+  if (performed) {
     // The next thing the platform asks (the selection, the next key's insert) reads the new tree.
     flushPendingMutations(context.renderer)
     return true
   }
+  if (hasCommandModifier(event)) return false
   if (event.key === "Escape") {
     context.topLayer()?.onEscapeKeyDown(event as KeyEvent)
   } else if (event.key === "Tab" && root.handlers.tabNavigation !== false) {
