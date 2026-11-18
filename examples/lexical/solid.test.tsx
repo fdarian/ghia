@@ -5,6 +5,7 @@ import {
   $createTextNode,
   $getRoot,
   $getSelection,
+  $isRangeSelection,
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
   createEditor,
@@ -168,21 +169,21 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     expect(uncaught).toEqual([])
   })
 
-  it('7. a click on the editable is harmless: the selection stays where it was put and typing goes there', async () => {
-    // Put the caret at the start explicitly, so nothing depends on where an earlier step left it.
+  it('7. a click on the editable puts the caret where it landed: the selection moves there and typing goes there', async () => {
     const textNode = element.querySelector('span')?.firstChild
     if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
     const selection = getSelection()
     if (selection === null) throw new Error('getSelection() returned null')
-    selection.setBaseAndExtent(textNode, 0, textNode, 0)
+    // The caret is at the end, so a click that does nothing leaves it there.
+    const length = (textNode as Text).data.length
+    selection.setBaseAndExtent(textNode, length, textNode, length)
     await settle()
     const first = paragraphs()[0]
     const box = element.getBoundingClientRect()
-    root.renderer.nativeSimulateMouseDown(box.x + 10, box.y + 8)
-    root.renderer.nativeSimulateMouseUp(box.x + 10, box.y + 8)
+    root.renderer.nativeSimulateMouseDown(box.x + 1, box.y + 8)
+    root.renderer.nativeSimulateMouseUp(box.x + 1, box.y + 8)
     await settle()
     expect(uncaught).toEqual([])
-    // A click in an editing host does not move the node selection yet (deviations.md), so it still sits at the start.
     expect([selection.anchorNode === textNode, selection.anchorOffset, selection.isCollapsed]).toEqual([true, 0, true])
     expect(document.activeElement === element).toBe(true)
     await press('z')
@@ -263,6 +264,36 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     await settle()
     expect(editor.getEditorState().read(() => $getSelection()?.getTextContent())).toBe('o ')
     expect(selection.toString()).toBe('o ')
+    expect(uncaught).toEqual([])
+  })
+
+  it('12. a click into the middle of a word puts the caret there: Lexical\'s selection is at the offset and typing lands in it', async () => {
+    editor.update(() => {
+      const paragraph = $createParagraphNode()
+      paragraph.append($createTextNode('one two three'))
+      $getRoot().clear().append(paragraph)
+    })
+    await nextTask()
+    await settle()
+    const textNode = element.querySelector('span')?.firstChild
+    if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
+    // Where the caret is painted at offset 5, between `t` and `wo`; a click a pixel to its right is nearest to it.
+    const range = document.createRange()
+    range.setStart(textNode, 5)
+    range.collapse(true)
+    const at = range.getBoundingClientRect()
+    root.renderer.nativeSimulateMouseDown(at.x + 1, at.y + at.height / 2)
+    root.renderer.nativeSimulateMouseUp(at.x + 1, at.y + at.height / 2)
+    await settle()
+    expect(editor.getEditorState().read(() => {
+      const selection = $getSelection()
+      return $isRangeSelection(selection) ? [selection.anchor.offset, selection.focus.offset, selection.isCollapsed()] : null
+    })).toEqual([5, 5, true])
+    await press('X')
+    await settle()
+    expect(paragraphs()).toEqual(['one tXwo three'])
+    expect(element.textContent).toBe('one tXwo three')
+    expect(painted()).toContain('one tXwo three')
     expect(uncaught).toEqual([])
   })
 })
