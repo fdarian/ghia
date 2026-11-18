@@ -298,3 +298,66 @@ describeNative("list markers follow the list", () => {
     }
   }
 })
+
+describeNative("the members that number a list", () => {
+  it("`li.value`, `ol.start` and `ol.reversed` reflect their attributes as the DOM's do", () => {
+    const root = createTestRoot({ width: 300, height: 260 })
+    try {
+      let ol: HTMLOListElement | undefined
+      let li: HTMLLIElement | undefined
+      root.render(
+        <ol ref={(instance) => void (ol = instance as unknown as HTMLOListElement)}>
+          <li ref={(instance) => void (li = instance as unknown as HTMLLIElement)}>a</li>
+        </ol>
+      )
+      expect([ol!.start, ol!.reversed, li!.value]).toEqual([1, false, 0])
+      ol!.start = 7
+      ol!.reversed = true
+      li!.value = 3.9
+      expect([ol!.getAttribute("start"), ol!.getAttribute("reversed"), li!.getAttribute("value")]).toEqual(["7", "", "3"])
+      expect([ol!.start, ol!.reversed, li!.value]).toEqual([7, true, 3])
+      ol!.reversed = false
+      expect([ol!.getAttribute("reversed"), ol!.reversed]).toEqual([null, false])
+      ol!.setAttribute("start", "-2abc")
+      li!.setAttribute("value", "x")
+      expect([ol!.start, li!.value]).toEqual([-2, 0])
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("an assignment to them numbers the markers as the attribute does", () => {
+    const written = createTestRoot({ width: 300, height: 260 })
+    let assigned: string
+    try {
+      const items: HTMLLIElement[] = []
+      let ol: HTMLOListElement | undefined
+      written.render(
+        <div style={{ width: 300, height: 260, backgroundColor: "#ffffff", color: "#000000", fontSize: 16, lineHeight: "24px", fontFamily: "Helvetica" }}>
+          <ol ref={(instance) => void (ol = instance as unknown as HTMLOListElement)} style={{ color: "#ff0000" }}>
+            {["a", "b", "c"].map((text, at) => (
+              <li key={text} ref={(instance) => void (items[at] = instance as unknown as HTMLLIElement)}>
+                <span style={{ color: "#000000" }}>{text}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )
+      shot(written, "members-before")
+      ol!.start = 7
+      items[1]!.value = 20
+      assigned = shot(written, "members-assigned")
+      const text = readPixels(assigned)
+      expect(inkBox(text, [0, 0, 300, 260], [255, 0, 0]).area).toBeGreaterThan(0)
+    } finally {
+      written.unmount()
+    }
+    const attributes = createTestRoot({ width: 300, height: 260 })
+    try {
+      attributes.render(list({ items: ["a", "b", "c"], list: { start: 7 }, valueOf: { b: 20 } }))
+      expectScreenshotsEqual(assigned, shot(attributes, "members-props"))
+    } finally {
+      attributes.unmount()
+    }
+  })
+})

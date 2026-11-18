@@ -9,6 +9,7 @@ import {
   $selectAll,
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
+  INDENT_CONTENT_COMMAND,
   createEditor,
   type ElementNode,
   type LexicalEditor,
@@ -589,8 +590,9 @@ describeNative('vanilla Lexical in @ghia/solid: clipboard between two editors on
   })
 })
 
-// Lists made through Lexical's own commands paint the marker of each item: Lexical writes `<ul>` and `<ol>` with
-// `<li value="n">`, and the number or bullet is Ghia's, not Lexical's.
+// Lists made through Lexical's own commands paint the marker of each item: Lexical writes the number of an item as the
+// `value` property of its `<li>` (`dom.value = n`, which skips the item that holds a nested list), and the number or bullet
+// is Ghia's, not Lexical's.
 describeNative('vanilla Lexical lists in @ghia/solid on Ghia', () => {
   let window: ReturnType<typeof createTestRoot>
   let disposeUi: () => void
@@ -679,6 +681,27 @@ describeNative('vanilla Lexical lists in @ghia/solid on Ghia', () => {
     expect(numbered.ink.every((ink) => ink > 0), `a number in front of every item: ${numbered.ink}`).toBe(true)
     expect(new Set(numbered.shapes).size, 'every number is another').toBe(3)
     expect(numbered.shapes).not.toEqual(bulleted.shapes)
+    expect(uncaught).toEqual([])
+  })
+
+  it('numbers an item by the value Lexical assigns to its li, which skips the item that holds a nested list', async () => {
+    const before = markers('before-indent')
+    expect(items().length).toBe(3)
+    target.update(() => {
+      $getRoot().getFirstChildOrThrow<ListNode>().getChildAtIndex<ListItemNode>(1)!.selectStart()
+    })
+    await idle()
+    target.dispatchCommand(INDENT_CONTENT_COMMAND, undefined)
+    await idle()
+    // The list item of "first", the item that holds the nested list, "second" inside it, and "third".
+    expect(items().length).toBe(4)
+    const third = items()[3]! as HTMLLIElement
+    expect(third.textContent).toBe('third')
+    expect(third.value, 'Lexical assigned li.value').toBe(2)
+    expect(third.getAttribute('value')).toBe('2')
+    const after = markers('after-indent')
+    expect(after.shapes[3], 'third is numbered 2, as second was before it moved in').toEqual(before.shapes[1])
+    expect(after.shapes[3]).not.toEqual(before.shapes[2])
     expect(uncaught).toEqual([])
   })
 })

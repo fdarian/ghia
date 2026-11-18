@@ -160,3 +160,28 @@ describe.skipIf(!hasNativeTestRenderer)("the marker of a list item in Solid, aga
     })
   }
 })
+
+describe.skipIf(!hasNativeTestRenderer)("the members that number a list in Solid", () => {
+  it("`li.value`, `ol.start` and `ol.reversed` reflect their attributes as the DOM's do", () => {
+    const app = createTestRoot({ width: 300, height: 260 })
+    try {
+      let ol!: HTMLOListElement
+      let li!: HTMLLIElement
+      app.render(() => (
+        <ol ref={(element) => (ol = element as unknown as HTMLOListElement)}>
+          <li ref={(element) => (li = element as unknown as HTMLLIElement)}>a</li>
+        </ol>
+      ))
+      expect([ol.start, ol.reversed, li.value]).toEqual([1, false, 0])
+      ol.start = 7
+      ol.reversed = true
+      li.value = 3.9
+      expect([ol.getAttribute("start"), ol.getAttribute("reversed"), li.getAttribute("value")]).toEqual(["7", "", "3"])
+      expect([ol.start, ol.reversed, li.value]).toEqual([7, true, 3])
+      ol.reversed = false
+      expect([ol.getAttribute("reversed"), ol.reversed]).toEqual([null, false])
+    } finally {
+      app.unmount()
+    }
+  })
+})

@@ -1,6 +1,6 @@
 /**
  * The members of an element that are its attributes under another name or a fixed answer:
- * `hidden`, `tabIndex`, `disabled`, `htmlFor`, `type`, `contentEditable`, `isContentEditable`, `shadowRoot` and `assignedSlot`. They read and write
+ * `hidden`, `tabIndex`, `disabled`, `htmlFor`, `type`, `contentEditable`, `isContentEditable`, `shadowRoot` and `assignedSlot`, and the `start` and `reversed` of an `<ol>` (`list-members.ts`). They read and write
  * through `getAttribute` and `setAttribute`, so they follow a prop a framework committed and
  * a write reaches native as the attribute would.
  */
@@ -8,6 +8,7 @@
 import { contentEditableKeyword, isContentEditable, isEditingHost, ownContentEditable } from "../editing/host.js"
 import { normalizedInputType } from "./input-type.js"
 import type { Element } from "./nodes.js"
+import { defineListMembers, parseHtmlInteger } from "./list-members.js"
 import { onTags } from "./tag-members.js"
 
 /** The tags whose `tabIndex` is 0 without an attribute, from the HTML standard. Ghia's own `select` is one. */
@@ -31,17 +32,6 @@ const LABEL_TAG: ReadonlySet<string> = new Set(["label"])
 const TYPED_TAGS: ReadonlySet<string> = new Set(["button", "input", "textarea"])
 
 const BUTTON_TYPES: ReadonlySet<string> = new Set(["submit", "reset", "button"])
-
-/** The DOM's "rules for parsing integers": leading white space, a sign, digits, and anything after them ignored. */
-const LEADING_INTEGER = /^[ \t\n\f\r]*([+-]?\d+)/
-const INT32_MAX = 2147483647
-
-function parseTabIndex(text: string): number | undefined {
-  const match = LEADING_INTEGER.exec(text)
-  if (match === null) return undefined
-  const value = Number(match[1])
-  return value >= -INT32_MAX - 1 && value <= INT32_MAX ? value : undefined
-}
 
 /** A `summary` that is the first one in its `details` is a tab stop. */
 function isMainSummary(element: Element): boolean {
@@ -67,6 +57,10 @@ export interface ReflectedMembers {
   contentEditable: string
   /** Whether the element is editable, by its own `contenteditable` or the nearest ancestor's. */
   readonly isContentEditable: boolean
+  /** The `start` attribute of an `<ol>` as an integer, `1` without a valid one; `undefined` on any other element. */
+  start: number
+  /** The `reversed` attribute of an `<ol>`; `undefined` on any other element. */
+  reversed: boolean
   /** Always `null`: there is no shadow DOM. */
   readonly shadowRoot: null
   /** Always `null`: there are no slots. */
@@ -75,6 +69,7 @@ export interface ReflectedMembers {
 
 /** Defines the members on `target`, which is the prototype of `Element`. */
 export function defineReflectedMembers(target: object): void {
+  defineListMembers(target)
   Object.defineProperties(target, {
     hidden: {
       configurable: true,
@@ -94,7 +89,7 @@ export function defineReflectedMembers(target: object): void {
       get(this: Element) {
         const text = this.getAttribute("tabindex")
         if (text !== null) {
-          const parsed = parseTabIndex(text)
+          const parsed = parseHtmlInteger(text)
           if (parsed !== undefined) return parsed
         }
         return FOCUSABLE_TAGS.has(this.localName) || isMainSummary(this) || isEditingHost(this) ? 0 : -1
