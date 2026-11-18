@@ -1991,7 +1991,7 @@ export interface EventPayload {
    * `deleteContentBackward`, `historyUndo`, ...), `""` for the number
    * stepper. `data` is the inserted text for the insert types and absent
    * otherwise; `isComposing` says the edit belongs to a composition. For an
-   * `editpointer` it is the phase: `down`, `drag` or `up`.
+   * `editpointer` it is the phase: `press`, `down`, `drag` or `up`.
    * Populated for: change, editinput, editpointer.
    */
   inputType?: string
