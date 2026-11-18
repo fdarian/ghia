@@ -1683,7 +1683,7 @@ mod tests {
     fn the_boxes_the_line_layout_hears_of_are_the_shifted_ones_and_those_around_them() {
         let paragraph_of = |tree: &RetainedTree| match plan_children(tree, &tree.elements[&1]).remove(0) {
             Child::Paragraph(paragraph) => paragraph,
-            Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine => panic!("a paragraph"),
+            Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine | Child::BlankLine => panic!("a paragraph"),
         };
         let ids = |tree: &RetainedTree, shifted: &[u64]| {
             let paragraph = paragraph_of(tree);
@@ -1706,7 +1706,7 @@ mod tests {
     fn a_span_around_an_atomic_is_listed_for_its_strut_when_its_font_or_line_height_is_its_own() {
         let paragraph_of = |tree: &RetainedTree| match plan_children(tree, &tree.elements[&1]).remove(0) {
             Child::Paragraph(paragraph) => paragraph,
-            Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine => panic!("a paragraph"),
+            Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine | Child::BlankLine => panic!("a paragraph"),
         };
         let ids = |style: serde_json::Value| {
             let tree = tree_with_atomic(&[(3, style)]);
@@ -1749,7 +1749,7 @@ mod tests {
             let tree = tree_with(styles);
             let paragraph = match plan_children(&tree, &tree.elements[&1]).remove(0) {
                 Child::Paragraph(paragraph) => paragraph,
-                Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine => panic!("a paragraph"),
+                Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine | Child::BlankLine => panic!("a paragraph"),
             };
             let styles = styles_of(&tree);
             listed_boxes(&paragraph, &styles.boxes, &HashSet::new())

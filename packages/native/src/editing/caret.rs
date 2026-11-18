@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use gpui::{
-    canvas, div, fill, point, px, size, transparent_black, AnyElement, Bounds, Context, FocusHandle, Hsla, IntoElement, ParentElement, Pixels, Styled, Task,
+    canvas, div, fill, point, px, size, transparent_black, AnyElement, Bounds, Context, FocusHandle, Hsla, IntoElement, ParentElement, Pixels, SharedString, Styled, Task,
     TextLayout, Window, WindowId,
 };
 use web_time::Instant;
@@ -217,7 +217,7 @@ pub fn held_by_empty_line(
     if caret.at.node != container || crate::text::inline::is_raw_text(element) {
         return None;
     }
-    let lines = |index: usize| matches!(plan[index].0, Child::EmptyLine);
+    let lines = |index: usize| matches!(plan[index].0, Child::EmptyLine | Child::BlankLine);
     let first = (0..plan.len()).find(|index| lines(*index))?;
     let in_a_paragraph = plan
         .iter()
@@ -230,9 +230,15 @@ pub fn held_by_empty_line(
     })
 }
 
-/// The empty line, with the caret in it: a block of no size, as it is without one, and a canvas at its start
-/// that paints the caret as tall as the line of the text style it is in.
-pub fn empty_line(caret: CaretPaint) -> AnyElement {
+/// The line of a block whose only content is a line feed: no text, one line of the text style it is in.
+pub fn blank_line() -> AnyElement {
+    div().child(SharedString::default()).into_any_element()
+}
+
+/// The empty line, with the caret in it: `line` is what it is without one (a [`blank_line`], or nothing
+/// for a line of no size), and a canvas at its start paints the caret as tall as the line of the text
+/// style it is in.
+pub fn empty_line(caret: CaretPaint, line: Option<AnyElement>) -> AnyElement {
     let at = canvas(
         |_, _, _| (),
         move |bounds, _, window, cx| {
@@ -242,10 +248,12 @@ pub fn empty_line(caret: CaretPaint) -> AnyElement {
     )
     .keeps_no_position()
     .absolute()
+    .top(px(0.0))
+    .left(px(0.0))
     .unlifted()
     .w(CARET_WIDTH)
     .h(px(0.0));
-    div().relative().unlifted().child(at).into_any_element()
+    div().relative().unlifted().children(line).child(at).into_any_element()
 }
 
 thread_local! {

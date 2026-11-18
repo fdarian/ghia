@@ -121,6 +121,10 @@ describeNative("the caret of an editing host (React)", () => {
       expect(caret.rect.x).toBeCloseTo(left, 1)
       expect(caret.rect.y).toBeCloseTo(top + LINE, 1)
       expect(caret.rect.height).toBeCloseTo(LINE, 1)
+      // The paragraph is that one line, so the caret fills it and the next paragraph starts below it.
+      const [empty, after] = [paragraphs[1]!, paragraphs[2]!].map((paragraph) => paragraph.getBoundingClientRect())
+      expect(empty!.height).toBeCloseTo(caret.rect.height, 1)
+      expect(after!.y).toBeCloseTo(caret.rect.y + caret.rect.height, 1)
     })
 
     it("is between two <br>, at the element boundary that no text is next to", async () => {

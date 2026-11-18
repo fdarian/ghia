@@ -13291,18 +13291,19 @@ fn build_plan(
                     ctx.inherited = outside;
                 }
             }
-            crate::text::inline::Child::EmptyLine => {
+            crate::text::inline::Child::EmptyLine | crate::text::inline::Child::BlankLine => {
                 placements.push(Placement { rank: 0, document: at });
                 let caret = crate::editing::caret::held_by_empty_line(&ctx.editing_caret, ctx.tree, ctx.focus_handles, element.id, plan, index, window);
+                let line = matches!(child, crate::text::inline::Child::BlankLine).then(crate::editing::caret::blank_line);
                 content_elements.push(match caret {
                     Some(caret) => {
                         ctx.retain.blinks();
                         if caret.shown {
                             caret.state.keep_blinking(window, cx);
                         }
-                        crate::editing::caret::empty_line(caret)
+                        crate::editing::caret::empty_line(caret, line)
                     }
-                    None => gpui::div().into_any_element(),
+                    None => line.unwrap_or_else(|| gpui::div().into_any_element()),
                 });
             }
             crate::text::inline::Child::AnonymousCell(_) | crate::text::inline::Child::AnonymousTable(_) => {

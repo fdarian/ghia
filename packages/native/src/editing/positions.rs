@@ -193,7 +193,7 @@ pub fn paragraphs_of(planned: &Planned) -> Vec<&Paragraph> {
         match child {
             Child::Paragraph(paragraph) => out.push(paragraph),
             Child::AnonymousCell(cell) => cell.iter().for_each(|(child, _)| collect(child, out)),
-            Child::Block(_) | Child::AnonymousTable(_) | Child::EmptyLine => {}
+            Child::Block(_) | Child::AnonymousTable(_) | Child::EmptyLine | Child::BlankLine => {}
         }
     }
     let mut out = Vec::new();

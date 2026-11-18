@@ -282,6 +282,12 @@ pub enum Child {
     /// the container has a child, which a table cell's baseline reads. Text, search,
     /// accessibility and selection do not see it.
     EmptyLine,
+    /// An inline formatting context whose only content is one line feed (`<div><br></div>`, or `\n`
+    /// under `white-space: pre`): the line it ends, which a block of one line break holds as Blink
+    /// lays it out, one line of the block's line height with no text in it. A line feed after text
+    /// ends that text's line and starts none, so this is the one place a final line feed is a line.
+    /// Text, search, accessibility and selection do not see it.
+    BlankLine,
     /// The children of a table, row group or row that are not table parts, wrapped in the one
     /// cell CSS 2.1 section 17.2.1 puts around consecutive ones. It has no element: it is a
     /// plain block with the role of a cell.
@@ -569,13 +575,17 @@ impl Builder {
 
     /// Ends the paragraph. A collapsible space at its end is removed, and so is
     /// a single final line feed, which ends the last line and starts no new
-    /// one. A paragraph with nothing left generates no box, unless an inline box was entered:
-    /// that is an empty line.
+    /// one (unless it is the only character: that is a [`Child::BlankLine`]). A paragraph
+    /// with nothing left generates no box, unless an inline box was entered: that is an empty line.
     fn finish(&mut self, out: &mut Vec<(Child, u32)>) {
         let mut next = Self::new(self.container, self.modes[0], self.blockified);
         next.index = self.index;
         let mut builder = std::mem::replace(self, next);
         let empty_line = builder.boxed && !builder.blockified;
+        if builder.text == "\n" && !(builder.blockified && builder.only_whitespace) {
+            out.push((Child::BlankLine, builder.at.unwrap_or(0)));
+            return;
+        }
         if !builder.has_text {
             if empty_line {
                 out.push((Child::EmptyLine, builder.at.unwrap_or(0)));
@@ -756,7 +766,7 @@ pub fn accessible_text<'a>(plan: impl IntoIterator<Item = &'a Child>) -> Option<
                 )
             }
             Child::AnonymousCell(cell) => cell.iter().for_each(|(child, _)| collect(child, text)),
-            Child::Block(_) | Child::AnonymousTable(_) | Child::EmptyLine => {}
+            Child::Block(_) | Child::AnonymousTable(_) | Child::EmptyLine | Child::BlankLine => {}
         }
     }
     let mut text = String::new();
@@ -768,7 +778,7 @@ pub fn accessible_text<'a>(plan: impl IntoIterator<Item = &'a Child>) -> Option<
 /// or a table: those are read as the elements they are, and each paragraph beside them is its own
 /// node (`accessibility::paragraph_label`).
 pub fn sole_paragraph_text<'a>(plan: impl IntoIterator<Item = &'a Child> + Clone) -> Option<String> {
-    let only_paragraphs = plan.clone().into_iter().all(|child| matches!(child, Child::Paragraph(_) | Child::EmptyLine));
+    let only_paragraphs = plan.clone().into_iter().all(|child| matches!(child, Child::Paragraph(_) | Child::EmptyLine | Child::BlankLine));
     only_paragraphs.then(|| accessible_text(plan)).flatten()
 }
 
@@ -818,7 +828,7 @@ mod tests {
         plan.iter()
             .filter_map(|child| match child {
                 Child::Paragraph(paragraph) => Some(paragraph),
-                Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine => None,
+                Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine | Child::BlankLine => None,
             })
             .collect()
     }
@@ -1054,6 +1064,54 @@ mod tests {
         f.add(1, 2, "span").add(1, 3, "div");
         f.add(1, 4, "span");
         assert_eq!(f.plan(1), vec![Child::EmptyLine, Child::Block(3), Child::EmptyLine]);
+    }
+
+    #[test]
+    fn a_line_feed_alone_is_a_blank_line() {
+        // `<div><br></div>`, with a collapsible space either side of the break and in nested boxes.
+        let mut f = Fixture::new();
+        f.add(1, 2, "br");
+        assert_eq!(f.plan(1), vec![Child::BlankLine]);
+        let mut f = Fixture::new();
+        f.text(1, 2, " ").add(1, 3, "br");
+        f.text(1, 4, " ");
+        assert_eq!(f.plan(1), vec![Child::BlankLine]);
+        let mut f = Fixture::new();
+        f.add(1, 2, "span").add(2, 3, "br");
+        assert_eq!(f.plan(1), vec![Child::BlankLine]);
+        // A preserved line feed is a line too.
+        let mut f = Fixture::new();
+        f.text(1, 2, "\n");
+        f.styled(1, serde_json::json!({"whiteSpace": "pre"}));
+        assert_eq!(f.plan(1), vec![Child::BlankLine]);
+        // A blank line on each side of a block.
+        let mut f = Fixture::new();
+        f.add(1, 2, "br").add(1, 3, "div");
+        f.add(1, 4, "br");
+        assert_eq!(f.plan(1), vec![Child::BlankLine, Child::Block(3), Child::BlankLine]);
+    }
+
+    #[test]
+    fn a_line_feed_after_text_ends_its_line_and_starts_none() {
+        let mut f = Fixture::new();
+        f.text(1, 2, "a").add(1, 3, "br");
+        let plan = f.plan(1);
+        assert_eq!(paragraphs(&plan)[0].text, "a");
+        assert_eq!(plan.len(), 1);
+        // Two breaks are two lines: the first is the line feed the text keeps.
+        let mut f = Fixture::new();
+        f.add(1, 2, "br").add(1, 3, "br");
+        let plan = f.plan(1);
+        assert_eq!(plan.len(), 1);
+        assert_eq!(paragraphs(&plan)[0].text, "\n");
+    }
+
+    #[test]
+    fn a_flex_item_of_one_collapsed_space_is_no_blank_line() {
+        let mut f = Fixture::new();
+        f.text(1, 2, "\n");
+        f.styled(1, serde_json::json!({"display": "flex", "whiteSpace": "pre"}));
+        assert_eq!(f.plan(1), vec![]);
     }
 
     #[test]
@@ -1789,6 +1847,7 @@ mod tests {
                     Child::AnonymousCell(_) => "cell",
                     Child::AnonymousTable(_) => "table",
                     Child::EmptyLine => "empty line",
+                    Child::BlankLine => "blank line",
                 })
                 .collect()
         };
