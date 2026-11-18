@@ -716,16 +716,20 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { AvailableUpdate, GpuixRenderer, RowOracle, TestGpuixRenderer, checkUpdate, debugDecodeWireBatch, getAllDisplays, getPrimaryDisplay, hasTestGpuixRenderer, measureMotionAnimation, validateKeyframes } = nativeBinding
+const { AvailableUpdate, GpuixRenderer, RowOracle, TestGpuixRenderer, checkUpdate, createTestPasteboard, debugDecodeWireBatch, getAllDisplays, getPrimaryDisplay, hasTestGpuixRenderer, measureMotionAnimation, readClipboardFrom, releaseTestPasteboard, validateKeyframes, writeClipboardTo } = nativeBinding
 export { AvailableUpdate }
 export { GpuixRenderer }
 export { RowOracle }
 export { TestGpuixRenderer }
 export { checkUpdate }
+export { createTestPasteboard }
 export { debugDecodeWireBatch }
 export { getAllDisplays }
 export { getPrimaryDisplay }
 export { hasTestGpuixRenderer }
 export { measureMotionAnimation }
+export { readClipboardFrom }
+export { releaseTestPasteboard }
 export { validateKeyframes }
+export { writeClipboardTo }
 export const __napiBindingTarget = __napiLoadedBindingTarget

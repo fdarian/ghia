@@ -35,8 +35,8 @@ describeNative("renderer calls from a keydown handler", () => {
   it("writes and reads the clipboard", async () => {
     const reads: Array<Promise<string>> = []
     const { press } = mount((_event, testRoot) => {
-      testRoot.renderer.writeClipboardText("direct")
-      expect(testRoot.renderer.readClipboardText()).toBe("direct")
+      testRoot.renderer.writeClipboard([{ type: "text/plain", data: "direct" }])
+      expect(testRoot.renderer.readClipboard()).toEqual([{ type: "text/plain", data: "direct" }])
       reads.push(clipboard.writeText("from handler").then(() => clipboard.readText()))
     })
     press()

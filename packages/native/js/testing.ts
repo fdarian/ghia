@@ -15,6 +15,7 @@ import {
   TestGpuixRenderer,
   measureMotionAnimation,
   validateKeyframes,
+  type ClipboardData,
   type ElementWebAnimationInfo,
   type EventPayload,
   type InputChoiceState,
@@ -260,8 +261,8 @@ interface NativeTestRendererApi
     MotionValueHost,
     KeyframesHost {
   promptForPaths(options?: PathPromptOptions): Promise<string[] | null>
-  writeClipboardText(text: string): void
-  readClipboardText(): string | null
+  writeClipboard(items: ClipboardData[]): void
+  readClipboard(): ClipboardData[]
   flush(): void
   flushIfDirty(): void
   drainEvents(): EventPayload[]
@@ -724,8 +725,8 @@ export class TestRenderer implements NativeRenderer {
   readonly focusPrevious: () => void
   readonly promptForPaths: NonNullable<NativeRenderer["promptForPaths"]>
   /** The test window's own clipboard. It never touches the system's. */
-  readonly writeClipboardText: NonNullable<NativeRenderer["writeClipboardText"]>
-  readonly readClipboardText: NonNullable<NativeRenderer["readClipboardText"]>
+  readonly writeClipboard: NonNullable<NativeRenderer["writeClipboard"]>
+  readonly readClipboard: NonNullable<NativeRenderer["readClipboard"]>
   readonly setWindowSelectionChange: NonNullable<
     NativeRenderer["setWindowSelectionChange"]
   >
@@ -768,8 +769,8 @@ export class TestRenderer implements NativeRenderer {
     this.focusNext = this.native.focusNext.bind(this.native)
     this.focusPrevious = this.native.focusPrevious.bind(this.native)
     this.promptForPaths = this.native.promptForPaths.bind(this.native)
-    this.writeClipboardText = this.native.writeClipboardText.bind(this.native)
-    this.readClipboardText = this.native.readClipboardText.bind(this.native)
+    this.writeClipboard = this.native.writeClipboard.bind(this.native)
+    this.readClipboard = this.native.readClipboard.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
     this.setWindowEventListeners = this.native.setWindowEventListeners.bind(
       this.native

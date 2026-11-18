@@ -19,6 +19,7 @@ mod automation;
 mod background_images;
 pub mod batch;
 mod caret;
+mod clipboard;
 mod color;
 mod css;
 mod custom_elements;

@@ -1331,16 +1331,41 @@ const text = await clipboard.readText() // '' when the clipboard has no text
 When a renderer is created and the runtime has no `navigator.clipboard`,
 Ghia installs `clipboard` there so code written for the web runs unchanged. An existing
 `navigator.clipboard` is never replaced. It always talks to the renderer
-created last. Only text is supported, not images or `ClipboardItem`s; the
-browser build leaves the browser's own `navigator.clipboard` alone.
+created last. Only text is supported through it, not images or `ClipboardItem`s; the
+browser build leaves the browser's own `navigator.clipboard` alone. `writeText` replaces
+the whole clipboard, as in Chrome.
 
 `@ghia/native` also declares `Navigator.clipboard` globally, so a project whose
 `tsconfig` has no DOM lib (`lib: ["ESNext"]`) type-checks `navigator.clipboard`
 too. With the DOM lib the declaration is identical to its own and merges.
 
-`TestRenderer` has its own in-memory clipboard, so a test can
-`writeText()` then paste into an `<input>`, or copy out of one and
-`readText()`, without touching the system pasteboard.
+#### Typed clipboard
+
+The renderer's `writeClipboard(items)` and `readClipboard()` take and return the
+entries of a `DataTransfer`, `{ type: string, data: string }[]` (`data` is a
+`DOMString`). A write replaces the whole clipboard. On macOS these types round-trip
+through the system pasteboard:
+
+| MIME type | Pasteboard |
+|---|---|
+| `text/plain` | `public.utf8-plain-text` |
+| `text/html` | `public.html` |
+| `text/uri-list` | `public.url` (the first URL, for native apps) and the web custom data (the whole list) |
+| any other type, such as `application/x-lexical-editor` | the `org.chromium.web-custom-data` entry |
+
+The custom-data entry is the pickle Chrome writes and reads, so what a page in Chrome
+puts there is what a page in Ghia reads, and the reverse. A custom entry that Chrome
+wrote is read in full whatever its size; a corrupt one is skipped with a warning and the
+types beside it are still read. The system pasteboard lower-cases a type on write, as a `DataTransfer` does.
+`readClipboard` returns `text/plain`, `text/html`, `text/uri-list`, then the custom
+types, which is the pasteboard's order and not always the order of the write. Files and
+images are not read or written. Windows and Linux hold `text/plain` only, and a write of
+another type throws there. How the clipboard is laid out, and why it is Ghia's and not
+GPUI's, is in [events-and-input.md](fork/events-and-input.md#clipboard).
+
+`TestRenderer` has its own in-memory clipboard behind the same two calls, so a test can
+write several types and read them back, `writeText()` then paste into an `<input>`, or
+copy out of one and `readText()`, without touching the system pasteboard.
 
 ### EyeDropper
 

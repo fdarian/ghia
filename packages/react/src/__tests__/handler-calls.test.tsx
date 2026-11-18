@@ -199,7 +199,7 @@ function calls(r, ids) {
     matchesFocus: () => r.matchesFocus(ids.field, ":focus"),
     pointerLockElement: () => r.pointerLockElement(),
     probeElementBounds: () => r.probeElementBounds(ids.box),
-    readClipboardText: () => r.readClipboardText(),
+    readClipboard: () => r.readClipboard(),
     registerFont: () => r.registerFont(SQUARE_FONT),
     releaseAnimation: () => r.releaseAnimation(r.getAnimations(ids.box)[0].id),
     releasePointerCapture: () => r.releasePointerCapture(ids.box, 1),
@@ -274,7 +274,7 @@ function calls(r, ids) {
     webviewState: () => r.webviewState(ids.webview),
     takeSimulatedWindowActions: () => r.takeSimulatedWindowActions(),
     toJSON: () => r.toJSON(),
-    writeClipboardText: () => r.writeClipboardText("x"),
+    writeClipboard: () => r.writeClipboard([{ type: "text/plain", data: "x" }]),
     writeInputFlag: () => r.writeInputFlag(ids.check, "indeterminate", true),
     writeRangeValue: () => r.writeRangeValue(ids.range, "5"),
     // Last: a cancelled animation is not listed, which the calls above read.

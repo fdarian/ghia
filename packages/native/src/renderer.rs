@@ -2964,14 +2964,31 @@ impl GpuixRenderer {
         Ok(promise)
     }
 
-    /// Replace the system clipboard's contents with plain text.
+    /// Replace the system clipboard's contents with `items`. `text/plain`, `text/html` and
+    /// `text/uri-list` take their native pasteboard types, every other type goes into the web
+    /// custom data that Chrome reads (`docs/fork/events-and-input.md#clipboard`). Windows and
+    /// Linux hold `text/plain` only.
     #[napi]
-    pub fn write_clipboard_text(&self, text: String) -> Result<()> {
+    pub fn write_clipboard(&self, items: Vec<crate::clipboard::ClipboardData>) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_app(|cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(text)));
+        return crate::platform::pasteboard_macos::write(
+            &crate::platform::pasteboard_macos::general(),
+            &items,
+        )
+        .map_err(Error::from_reason);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
+            if let Some(other) = items
+                .iter()
+                .find(|item| item.mime_type != crate::clipboard::TEXT_PLAIN)
+            {
+                return Err(Error::from_reason(format!(
+                    "The clipboard holds text/plain only on this platform, not {}",
+                    other.mime_type
+                )));
+            }
+            let text = items.into_iter().next().map(|item| item.data).unwrap_or_default();
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::WriteClipboardText { text, response })?;
             return recv_ui_response(receiver, "the clipboard write");
@@ -2986,17 +3003,27 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    /// The system clipboard's text, or null when it holds none.
+    /// Every type of the system clipboard that `writeClipboard` writes, in `DataTransfer` order:
+    /// `text/plain`, `text/html`, `text/uri-list`, then each custom type.
     #[napi]
-    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
+    pub fn read_clipboard(&self) -> Result<Vec<crate::clipboard::ClipboardData>> {
         #[cfg(target_os = "macos")]
-        return update_app(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
+        return Ok(crate::platform::pasteboard_macos::read(
+            &crate::platform::pasteboard_macos::general(),
+        ));
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::ReadClipboardText { response })?;
-            return recv_ui_response(receiver, "the clipboard read");
+            let text = recv_ui_response(receiver, "the clipboard read")?;
+            return Ok(text
+                .map(|data| crate::clipboard::ClipboardData {
+                    mime_type: crate::clipboard::TEXT_PLAIN.to_string(),
+                    data,
+                })
+                .into_iter()
+                .collect());
         }
 
         #[cfg(not(any(

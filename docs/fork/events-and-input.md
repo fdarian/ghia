@@ -178,11 +178,30 @@ The test renderer's tree dump reports a descendant of an `aria-hidden` or `inert
 
 ## Platform APIs
 
-- `navigator.clipboard.writeText`/`readText`, attached to an existing `navigator` and never creating one. `@ghia/native` declares the global `Clipboard` type once for both adapters.
+- `navigator.clipboard.writeText`/`readText`, attached to an existing `navigator` and never creating one, on top of the typed clipboard ([below](#clipboard)). `@ghia/native` declares the global `Clipboard` type once for both adapters.
 - File picker `accept` filters (a zed commit).
 - `EyeDropper` on macOS.
 
 The Solid `DialogPortal` used to build its children twice; that is fixed, along with the same pattern in the floating components.
+
+### Clipboard
+
+`writeClipboard(items)` and `readClipboard()` on both renderers carry the entries of a `DataTransfer` (`{ type, data }`, `data` a string). The live renderer talks to the general `NSPasteboard` itself (`platform/pasteboard_macos.rs`, the layout and the pickle in `clipboard.rs`), and does not go through the GPUI app, so it works inside a handler that holds it.
+
+| MIME type | Pasteboard type |
+|---|---|
+| `text/plain` | `public.utf8-plain-text` |
+| `text/html` | `public.html` |
+| `text/uri-list` | `public.url` (its first URL) and the custom data (the whole list, which is where Chrome puts it) |
+| anything else | one `org.chromium.web-custom-data` entry |
+
+The custom data is a `base::Pickle` as `ui::WriteCustomDataToPickle` writes it (`ui/base/clipboard/custom_data_helper.cc`): a u32 payload size, a u32 pair count, then per pair two strings, each an i32 length in UTF-16 units and the units as little-endian u16, zero-padded to 4 bytes (the padding is in the payload size). The reader takes the header to be what the payload size leaves of the buffer, as Chrome's does, and keeps a lone surrogate as U+FFFD. A write clears the pasteboard and declares every type in one `declareTypes:owner:` before any is set. A read returns each native type that is present, then the custom pairs; a custom `text/uri-list` replaces `public.url`'s single URL, and a custom pair that names `text/plain`, `text/html` or `text/uri-list` is ignored. Files are not read.
+
+Why it is not GPUI's clipboard: `ClipboardItem` writes one type on macOS (a string or one image) and reads one, with no `public.html` and no arbitrary type. Upstream's attempt, zed-industries/zed#56452 (`ClipboardEntry::Html`), was closed on 2026-10-31 for its surface area and not declined in principle, and zed-industries/zed#61966 is open. A new `ClipboardEntry` variant would touch every match in zed, so the fork keeps GPUI's clipboard for what it already does (an `<input>`'s copy and paste, the painted-text copy: plain text) and puts the typed one beside it. Both read the same pasteboard, so a write of `text/plain` is what an `<input>` pastes.
+
+The test renderer keeps the entries in memory, in the order written, and writes the `text/plain` among them to the window's GPUI clipboard too, since an `<input>` pastes from there. When an `<input>` copies afterwards the GPUI clipboard's text no longer matches the one the entries were written with, and a read returns that text alone, as the system pasteboard would after another owner replaced it.
+
+The live test is `clipboard-pasteboard.test.ts`, on a pasteboard made by `createTestPasteboard` (`NSPasteboard pasteboardWithUniqueName`, released after); `readClipboardFrom` and `writeClipboardTo` take only such a name, never the general pasteboard's. A test or a script must never write the general pasteboard: it is the person's clipboard.
 
 ## State styles from pointer and focus
 

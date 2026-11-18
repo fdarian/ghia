@@ -1778,15 +1778,27 @@ impl TestGpuixRenderer {
         AsyncTask::new(PromptForPathsTask::new(receiver))
     }
 
-    /// The test window's own in-memory clipboard, never the system's.
+    /// The test window's own in-memory clipboard, never the system's. It holds the entries as
+    /// written, in order; its `text/plain` is also the GPUI clipboard's text, which an `<input>`
+    /// copies to and pastes from.
     #[napi]
-    pub fn write_clipboard_text(&self, text: String) -> Result<()> {
-        window_call(|_window, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(text)))
+    pub fn write_clipboard(&self, items: Vec<crate::clipboard::ClipboardData>) -> Result<()> {
+        window_call(|_window, cx| {
+            let store = crate::clipboard::TypedClipboard::new(items);
+            cx.write_to_clipboard(match store.text() {
+                Some(text) => gpui::ClipboardItem::new_string(text.to_string()),
+                None => gpui::ClipboardItem { entries: Vec::new() },
+            });
+            cx.set_global(store);
+        })
     }
 
     #[napi]
-    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
-        window_call(|_window, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+    pub fn read_clipboard(&self) -> Result<Vec<crate::clipboard::ClipboardData>> {
+        window_call(|_window, cx| {
+            let text = cx.read_from_clipboard().and_then(|item| item.text());
+            cx.default_global::<crate::clipboard::TypedClipboard>().read(text)
+        })
     }
 
     #[napi]
