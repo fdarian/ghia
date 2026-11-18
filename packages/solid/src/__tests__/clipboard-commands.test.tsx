@@ -65,7 +65,7 @@ describe.skipIf(!hasNativeTestRenderer)("the clipboard commands (Solid)", () => 
       renderer.simulateKeystrokes("ControlOrMeta+c")
       expect(seen).toEqual([{ target: host.querySelector("p"), mode: "writable", types: ["text/x-probe"] }])
       expect(renderer.readClipboard()).toEqual([
-        { type: "text/plain", data: "twothree" },
+        { type: "text/plain", data: "two\n\nthree" },
         { type: "text/html", data: "<meta charset='utf-8'><p>two</p><p>three</p>" },
       ])
     })
@@ -245,6 +245,62 @@ describe.skipIf(!hasNativeTestRenderer)("the clipboard commands (Solid)", () => 
     })
   })
 
+  describe("the text of the default copy", () => {
+    it("breaks lines between blocks and at a <br>, as Chrome's clipboard text does", () => {
+      const root = mount(() => (
+        <div id="lines" contenteditable>
+          <p>a</p>
+          <p>
+            b<br />c
+          </p>
+        </div>
+      ))
+      const host = document.body!.querySelector("#lines") as HTMLElement
+      host.focus()
+      document.getSelection().selectAllChildren(host)
+      root.renderer.simulateKeystrokes("ControlOrMeta+c")
+      expect(root.renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "a\n\nb\nc" })
+      // Selection.toString is not that text (docs/fork/deviations.md).
+      expect(document.getSelection().toString()).toBe("abc")
+    })
+
+    it("clips the ends of the range, collapses white space and keeps it in preformatted text", () => {
+      const root = mount(() => (
+        <div id="mixed" contenteditable>
+          <div>{"abcd     e"}</div>
+          <p>fgh</p>
+          <div>
+            <pre>{"  x   y"}</pre>
+            wxyz
+          </div>
+        </div>
+      ))
+      const host = document.body!.querySelector("#mixed") as HTMLElement
+      host.focus()
+      const head = host.firstElementChild!.firstChild!
+      const tail = host.lastElementChild!.lastChild!
+      document.getSelection().setBaseAndExtent(head, 2, tail, 3)
+      root.renderer.simulateKeystrokes("ControlOrMeta+c")
+      expect(root.renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "cd e\n\nfgh\n\n  x   y\nwxy" })
+    })
+
+    it("innerText is the same text, and setting it makes lines with <br>", () => {
+      mount(() => (
+        <div id="lines" contenteditable>
+          <p>a</p>
+          <p>
+            b<br />c
+          </p>
+        </div>
+      ))
+      const host = document.body!.querySelector("#lines") as HTMLElement
+      expect(host.innerText).toBe("a\n\nb\nc")
+      host.innerText = "x\ny"
+      expect(host.innerHTML).toBe("x<br>y")
+      expect(host.innerText).toBe("x\ny")
+    })
+  })
+
   describe("paste and cut", () => {
     it("paste fires with the clipboard's types readable, and a canceled one is done", () => {
       const { renderer, host, one } = page()
@@ -359,7 +415,7 @@ describe.skipIf(!hasNativeTestRenderer)("the clipboard commands (Solid)", () => 
       host.focus()
       document.getSelection().setBaseAndExtent(one, 4, three, 5)
       renderer.simulateKeystrokes("ControlOrMeta+x")
-      expect(renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "twothree" })
+      expect(renderer.readClipboard()[0]).toEqual({ type: "text/plain", data: "two\n\nthree" })
       expect(host.textContent).toBe("one  four")
     })
 

@@ -22,6 +22,7 @@ import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
 import { DOMParser } from "./dom/html/dom-parser.js"
 import { Comment } from "./dom/html/inert-nodes.js"
 import { defineHtmlMembers } from "./dom/html/members.js"
+import { defineInnerTextMember } from "./dom/inner-text.js"
 import { StyleSheetList } from "./dom/html/style-sheet-list.js"
 import { HTMLCollection, NodeList } from "./dom/html-collection.js"
 import { HTMLButtonElement, HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
@@ -154,6 +155,7 @@ function install(): void {
   })
   installWindowMembers()
   defineHtmlMembers(Element.prototype)
+  defineInnerTextMember(Element.prototype)
   // A runtime that has its own keeps it, which is what a library that takes `window.ResizeObserver` gets elsewhere.
   for (const name of Object.keys(DOM_FUNCTIONS)) {
     if (Reflect.get(globalThis, name) !== undefined) continue

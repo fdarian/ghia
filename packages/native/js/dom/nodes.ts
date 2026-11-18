@@ -512,6 +512,9 @@ abstract class ElementClass extends NodeClass {
   declare outerHTML: string
   declare insertAdjacentHTML: (where: string, markup: string) => void
 
+  /** The text as a browser renders it, with line breaks between blocks (`dom/inner-text.ts`). Defined on the prototype by `dom-globals`. */
+  declare innerText: string
+
   /** Dispatches an event an app built at the element. The adapters' DOM members (`defineDomMembers`) define it on their prototypes. */
   declare dispatchEvent: (event: Event) => boolean
 

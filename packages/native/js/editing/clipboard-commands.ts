@@ -11,6 +11,7 @@
 
 import { dataTransferControl, DataTransfer } from "../dom/data-transfer.js"
 import { serializeChildren } from "../dom/html/parse.js"
+import { rangeInnerText } from "../dom/inner-text.js"
 import { Node, type Element } from "../dom/nodes.js"
 import { getSelection, holdsNodeSelection } from "../dom/selection.js"
 import { ClipboardEvent } from "../events/classes.js"
@@ -105,14 +106,18 @@ function writeCanceled(data: DataTransfer, clipboard: ClipboardAccess): void {
   clipboard.writeClipboard(clipboard.readClipboard().filter((entry) => !cleared.has(entry.type)))
 }
 
-/** Chrome's own copy of the node selection: its text, and its markup under a `<meta charset>`. False when there is none. */
+/**
+ * Chrome's own copy of the node selection: its text, with a line break between blocks and at a `<br>`
+ * (`rangeInnerText`; `Selection.toString` has none), and its markup under a `<meta charset>`. False
+ * when there is none.
+ */
 function copyNodeSelection(clipboard: ClipboardAccess): boolean {
   if (!holdsNodeSelection()) return false
   const selection = getSelection()
   if (selection.isCollapsed) return false
   const markup = serializeChildren(selection.getRangeAt(0).cloneContents())
   clipboard.writeClipboard([
-    { type: "text/plain", data: selection.toString() },
+    { type: "text/plain", data: rangeInnerText(selection.getRangeAt(0)) },
     { type: "text/html", data: `<meta charset='utf-8'>${markup}` },
   ])
   return true
