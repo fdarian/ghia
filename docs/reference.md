@@ -1363,6 +1363,43 @@ images are not read or written. Windows and Linux hold `text/plain` only, and a 
 another type throws there. How the clipboard is laid out, and why it is Ghia's and not
 GPUI's, is in [events-and-input.md](fork/events-and-input.md#clipboard).
 
+#### Clipboard events
+
+`copy`, `cut` and `paste` are `ClipboardEvent`s: `new ClipboardEvent(type, { clipboardData, bubbles, cancelable, composed })`
+builds one, `clipboardData` is a [`DataTransfer`](#datatransfer) or `null`, and `constructor.name` is
+`"ClipboardEvent"`, which is what a library such as Lexical checks. They are heard by
+`addEventListener('copy', …)` and by the `onCopy`, `onCut` and `onPaste` props (React and Solid, each with an
+`on…Capture` twin), and they bubble and can be cancelled. Ghia dispatches them on Cmd+C, Cmd+X and Cmd+V and from the
+Edit menu, at the focused element (the element of a node selection, else the active element, else `body`); a handler
+that calls `preventDefault()` stops the default. A script can dispatch one itself with
+`element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }))`.
+
+#### DataTransfer
+
+`DataTransfer`, `DataTransferItemList` and `DataTransferItem` are globals (HTML, "The DataTransfer interface"), installed
+where the runtime has none; the browser build keeps the browser's. A `DragEvent`'s `dataTransfer` and a
+`ClipboardEvent`'s `clipboardData` are instances of it, and `new DataTransfer()` is an empty store in read/write mode that
+an app fills itself (a library builds one to dispatch a `paste` or `drop`).
+
+- `getData(format)`, `setData(format, data)` and `clearData(format?)`: the format is lower-cased, `"text"` is
+  `text/plain` and `"url"` is `text/uri-list`; `getData("url")` returns the first URL of the list (a line that is not a
+  comment). `setData` replaces the data of a type and moves it to the end. `clearData()` removes every string and keeps the files.
+- `types`: a frozen array of the types of the strings in order, then `"Files"` when there is a file. It is the same array
+  until the data changes.
+- `files`: a frozen `FileList`-like (`length`, index access, `item(i)`).
+- `items`: a `DataTransferItemList` with `length`, index access, iteration, `add(data, type)`, `add(file)`, `remove(index)`
+  and `clear()`; each `DataTransferItem` has `kind` (`"string"` or `"file"`), `type`, `getAsString(callback)` (the callback
+  runs in a microtask) and `getAsFile()`. `add` of a type already present throws `NotSupportedError`, and `items` and the
+  methods above always agree.
+- `dropEffect`, `effectAllowed` (`"none"` for a constructed one) and `setDragImage`, which does nothing: there is no drag image.
+
+A `DataTransfer` has a mode, as the DOM's drag data store does. In read/write mode everything above works. In read-only
+mode (`paste`, and `drop`) `getData` and `types` work and every write does nothing: `setData`, `clearData`, `effectAllowed`
+and `items.add` do nothing (`add` returns `null`), `items.clear()` does nothing and `items.remove()` throws
+`InvalidStateError`. In protected mode (every other drag event) `getData` returns `""`, `getAsString` never calls back and
+`types` and `items` are still listed. A script cannot change the mode of the one a handler gets, and a `DataTransfer` it
+builds is read/write. A drag of files from the OS lists its `files` in every mode, which the DOM does not in protected mode.
+
 `TestRenderer` has its own in-memory clipboard behind the same two calls, so a test can
 write several types and read them back, `writeText()` then paste into an `<input>`, or
 copy out of one and `readText()`, without touching the system pasteboard.
@@ -7610,6 +7647,7 @@ The details for a library author, with a minimal addon, are in
 | Key down | `onKeyDown`, `onKeyDownCapture` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
 | Key up | `onKeyUp`, `onKeyUpCapture` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
 | Composition | `onCompositionStart`, `onCompositionUpdate`, `onCompositionEnd` | `data` — bubble from the `<input>` or `<textarea>` being composed in, not cancelable. See [Input method composition](#input-method-composition) |
+| Clipboard | `onCopy`, `onCut`, `onPaste`, with `on…Capture` twins | `clipboardData`, a `DataTransfer`. Bubble from the focused element, cancelable. See [Clipboard events](#clipboard-events) |
 | Focus | `onFocus`, `onFocusCapture` | `focusVisible`, `relatedTarget`. See [Focus events](#focus-events) |
 | Blur | `onBlur`, `onBlurCapture` | `focusVisible`, `relatedTarget` |
 | Focus in | `onFocusIn`, `onFocusInCapture` (Solid; React's `onFocus`, `onFocusCapture`) | `focusVisible`, `relatedTarget`. Bubbles |
@@ -7695,7 +7733,7 @@ drag events, delivered along the path under the pointer:
 />
 ```
 
-`event.dataTransfer` is one object for the whole drag. `files` entries carry
+`event.dataTransfer` is one [`DataTransfer`](#datatransfer) for the whole drag. `files` entries carry
 `path` (absolute), `name`, `size` in bytes, `type` and `lastModified` in
 milliseconds since the epoch. `type` is a MIME type guessed from the extension,
 or `""`. A file that is not valid UTF-8 or cannot be read is left out, and a
@@ -7756,7 +7794,7 @@ more than 4px (logical pixels, from the press) starts a drag:
 - A drag does not start while another element holds pointer capture. If the source itself
   holds it, it is released (`lostpointercapture`) as the drag starts.
 
-`event.dataTransfer` is one object for the whole drag, in DOM protected mode:
+`event.dataTransfer` is one [`DataTransfer`](#datatransfer) for the whole drag, in DOM protected mode:
 `setData`, `getData`, `clearData`, `types`, `effectAllowed` and `dropEffect`.
 `setData` and `effectAllowed` work in `dragstart` only. `getData` works in
 `dragstart` and `drop` and returns `""` in every other event, `dragover` included.
@@ -7830,7 +7868,7 @@ events reads the DOM event from (a React synthetic event has the same member).
 
 ### Event classes
 
-Every event Ghia delivers is an instance of the DOM class of its type, and of `Event`: a `click`, `auxclick`, `contextmenu` and every `pointer*` type is a `PointerEvent`; the other mouse types a `MouseEvent`; `wheel` a `WheelEvent`; the drag types a `DragEvent`; `keydown` and `keyup` a `KeyboardEvent`; `focus`, `blur`, `focusin` and `focusout` a `FocusEvent`; `input` and `beforeinput` an `InputEvent`; the composition types a `CompositionEvent`; the transition types a `TransitionEvent` and the animation types an `AnimationEvent`. Any other type is a plain `Event`. The classes are exported by `@ghia/native/host` and installed as globals where the runtime has none (`UIEvent`, `MouseEvent`, `PointerEvent`, `WheelEvent`, `DragEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent`, `CompositionEvent`, `TransitionEvent`, `AnimationEvent`), so `event instanceof PointerEvent` and `new (element.ownerDocument.defaultView.PointerEvent)('click', { bubbles: true, shiftKey: true })` work as they do in a browser. Each takes the DOM's constructor arguments (the type and an init dictionary with the DOM's defaults: `new MouseEvent('click')` has `clientX` 0 and `relatedTarget` `null`), and is a subclass of the runtime's own `Event`, so `Event`, `CustomEvent` and `EventTarget` are untouched. Pass one to [`dispatchEvent`](#listeners-and-dom-members-on-an-element) to send it through the tree.
+Every event Ghia delivers is an instance of the DOM class of its type, and of `Event`: a `click`, `auxclick`, `contextmenu` and every `pointer*` type is a `PointerEvent`; the other mouse types a `MouseEvent`; `wheel` a `WheelEvent`; the drag types a `DragEvent`; `keydown` and `keyup` a `KeyboardEvent`; `focus`, `blur`, `focusin` and `focusout` a `FocusEvent`; `input` and `beforeinput` an `InputEvent`; the composition types a `CompositionEvent`; `copy`, `cut` and `paste` a `ClipboardEvent`; the transition types a `TransitionEvent` and the animation types an `AnimationEvent`. Any other type is a plain `Event`. The classes are exported by `@ghia/native/host` and installed as globals where the runtime has none (`UIEvent`, `MouseEvent`, `PointerEvent`, `WheelEvent`, `DragEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent`, `CompositionEvent`, `ClipboardEvent`, `TransitionEvent`, `AnimationEvent`), so `event instanceof PointerEvent` and `new (element.ownerDocument.defaultView.PointerEvent)('click', { bubbles: true, shiftKey: true })` work as they do in a browser. Each takes the DOM's constructor arguments (the type and an init dictionary with the DOM's defaults: `new MouseEvent('click')` has `clientX` 0 and `relatedTarget` `null`), and is a subclass of the runtime's own `Event`, so `Event`, `CustomEvent` and `EventTarget` are untouched. Pass one to [`dispatchEvent`](#listeners-and-dom-members-on-an-element) to send it through the tree.
 
 `getModifierState(key)` is on `MouseEvent` (so on pointer, wheel and drag events) and `KeyboardEvent`: `"Shift"`, `"Control"`, `"Alt"` and `"Meta"` read the four modifier fields (`shiftKey`, `ctrlKey`, `altKey`, `metaKey`, which every mouse and key event has), and any other key (`"CapsLock"`, `"NumLock"`) is `false` on a delivered event, since no platform reports them to Ghia. A constructed event answers for the `modifier*` members of its init (`new KeyboardEvent('keydown', { modifierCapsLock: true })`).
 
