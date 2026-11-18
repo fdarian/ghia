@@ -6,7 +6,7 @@ import React from "react"
 import { describe, expect, it } from "vitest"
 import { document } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
-import { expectScreenshotsEqual, readLogicalPixels, SHOTS_DIR } from "./test-utils.js"
+import { expectScreenshotsEqual, SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -87,21 +87,24 @@ describeNative("the pointer over an outside marker", () => {
     )
   })
 
-  it("the item's hover style applies over the bullet", () => {
+  it("the item is hovered over its bullet", () => {
+    let item: { matches(selector: string): boolean } | undefined
     withRoot(
       (root) =>
         root.render(
           <div style={PAGE}>
             <ul style={{ margin: 0, paddingLeft: 40 }}>
-              <li style={{ backgroundColor: "#ff0000", hover: { backgroundColor: "#0000ff" } }}>text</li>
+              <li ref={(instance) => void (item = instance as unknown as typeof item)}>text</li>
             </ul>
           </div>
         ),
       (root) => {
         root.renderer.nativeSimulateMouseMove(250, 100)
-        expect(readLogicalPixels(shot(root, "hover-off"), root.renderer).at(150, 12)).toEqual([255, 0, 0, 255])
+        expect(item!.matches(":hover")).toBe(false)
         root.renderer.nativeSimulateMouseMove(BULLET.x, BULLET.y)
-        expect(readLogicalPixels(shot(root, "hover-on"), root.renderer).at(150, 12)).toEqual([0, 0, 255, 255])
+        expect(item!.matches(":hover")).toBe(true)
+        root.renderer.nativeSimulateMouseMove(12, BULLET.y)
+        expect(item!.matches(":hover")).toBe(false)
       }
     )
   })
