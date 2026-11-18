@@ -114,7 +114,7 @@ What it does not change: the window is still not key and the app is not activate
 
 ### Focus on mousedown
 
-The focus default (`focus.rs`, `defer_mouse_down_default`) uses the dispatcher's target path, not the topmost hit, and blurs when nothing on the path is focusable. A `preventDefault` from any `mousedown` handler on the path cancels both the focus move and the blur, including an input editor's own focus; `pointerdown` does not cancel it, as in Chrome. The order is `pointerdown`, `mousedown`, `blur`, `focusout`, `focus`, `focusin`, pinned in `focus.test.tsx`. There is no second mousedown emission.
+The focus default (`focus.rs`, `defer_mouse_down_default`) uses the dispatcher's target path, not the topmost hit, and blurs when nothing on the path is focusable. A `preventDefault` from any `mousedown` handler on the path cancels both the focus move and the blur, including an input editor's own focus; `pointerdown` does not cancel it, as in Chrome. The order is `pointerdown`, `mousedown`, `blur`, `focusout`, `focus`, `focusin`, pinned in `focus.test.tsx`. There is no second mousedown emission. A press that lands in an editing host sends one more internal event after `mousedown` and before the focus default, `editpointer`, which puts the caret at the point ([editing.md](editing.md#the-pointer-in-an-editing-host)); it is not a DOM event and is sent only when `mousedown` was not prevented.
 
 Because `autoFocus` focuses in the commit, a `mousedown` handler that mounts an `autoFocus` popup must call `preventDefault()` to keep focus there; the press takes focus after the handlers, as on the web.
 
