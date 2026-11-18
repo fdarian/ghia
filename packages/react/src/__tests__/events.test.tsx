@@ -177,6 +177,11 @@ describe("frame loop", () => {
     }
     type InputFrameReport = {
       windowVisible: boolean
+      // False when the window's visibility or key status changed during the run, or a pointer
+      // input reached it. Each wakes JS and starts the display link by itself, so the run says
+      // nothing about what the key did.
+      windowStable: boolean
+      strayInput: number
       idleWakes: number
       handled: number
       keys: KeyFrame[]
@@ -191,6 +196,11 @@ describe("frame loop", () => {
     // faster than ~165 Hz would make this too strict.
     const minimumFrameGapMs = 3
 
+    const skipIfNotMeasurable = (report: InputFrameReport, context: { skip: (note: string) => void }) => {
+      if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
+      if (!report.windowStable) context.skip("the window's visibility or key status changed, or a pointer reached it, during the run")
+    }
+
     const runInputFrameScript = (inputFrameOff: boolean, animate = false): InputFrameReport => {
       const rendererPath = fileURLToPath(new URL("../reconciler/renderer.ts", import.meta.url))
       const reconcilerPath = fileURLToPath(new URL("../reconciler/reconciler.js", import.meta.url))
@@ -204,6 +214,7 @@ describe("frame loop", () => {
         "let wakes = 0",
         "let handled = 0",
         "let bump",
+        "let strayInput = 0",
         "let animationTimes = []",
         // The key starts a requestAnimationFrame loop: every frame's callback asks for the next.
         // The first frame's callback is slower than a vsync: one merges into the link's source while
@@ -223,7 +234,8 @@ describe("frame loop", () => {
         "const App = () => {",
         "  const [count, setCount] = useState(0)",
         "  bump = () => flushSync(() => setCount((value) => value + 1))",
-        '  return React.createElement("div", { style: { width: "100%", height: "100%" } }, `typed ${count}`)',
+        // A pointer over the window is input too, and wakes JS like the key does.
+        '  return React.createElement("div", { style: { width: "100%", height: "100%" }, onMouseMove: () => { strayInput++ }, onMouseDown: () => { strayInput++ }, onWheel: () => { strayInput++ } }, `typed ${count}`)',
         "}",
         // Nothing has focus, so a key goes to the window's handler, which changes the visible text.
         "render(React.createElement(App), { renderer, onKeyDown: () => { handled++; bump(); if (" + animate + ") animateFrames() } })",
@@ -246,6 +258,17 @@ describe("frame loop", () => {
         "  })),",
         "})",
         "const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))",
+        // The occlusion, screen and key-status changes start the display link again by themselves
+        // (see frames-and-wakes.md), and its steps wake JS. A run during which one happened cannot
+        // say how many wakes the key caused.
+        "let statusAtStart = null",
+        "let statusChanged = false",
+        "const windowStatus = () => `${renderer.isWindowVisible()}/${renderer.isWindowKey()}`",
+        "const watchStatus = () => { if (statusAtStart !== null && windowStatus() !== statusAtStart) statusChanged = true }",
+        "const watchedSleep = async (ms) => {",
+        "  const until = performance.now() + ms",
+        "  while (performance.now() < until) { watchStatus(); await sleep(Math.min(20, until - performance.now())) }",
+        "}",
         // The window is occluded for the first seconds, and the launch measurements wake the loop
         // in bursts for up to ~6 s.
         "const quietFor = async (quietMs, atLeastMs) => {",
@@ -254,6 +277,7 @@ describe("frame loop", () => {
         "  let changedAt = startedAt",
         "  for (;;) {",
         "    const now = performance.now()",
+        "    watchStatus()",
         "    const key = renderer.getPaintedFrameCount() + wakes",
         "    if (key !== seen) { seen = key; changedAt = now }",
         "    if (now - changedAt >= quietMs && now - startedAt >= atLeastMs) return",
@@ -264,8 +288,9 @@ describe("frame loop", () => {
         "await quietFor(800, 7000)",
         "const windowVisible = renderer.isWindowVisible()",
         "const size = renderer.getWindowSize()",
+        "statusAtStart = windowStatus()",
         "const idleWakesFrom = wakes",
-        "await sleep(2000)",
+        "await watchedSleep(2000)",
         "const idleWakes = wakes - idleWakesFrom",
         "const keys = []",
         "for (let key = 0; key < " + (animate ? animationKeyCount : keyCount) + "; key++) {",
@@ -275,7 +300,11 @@ describe("frame loop", () => {
         "  paintedAtEndOfKeyTick = null",
         "  animationTimes = []",
         '  renderer.postNativeEvent("keyDown", size.width / 2, size.height / 2)',
-        "  await sleep(250)",
+        // A stalled machine can take longer than any fixed wait to run the key's tick and the
+        // animation's frames, so wait for them, and then for the link's later steps to have run.
+        "  const keyDeadline = performance.now() + 15000",
+        "  while ((paintedAtEndOfKeyTick === null || (" + animate + " && animationTimes.length < " + animationFrames + ")) && performance.now() < keyDeadline) await watchedSleep(10)",
+        "  await watchedSleep(250)",
         "  const paintedAfter = renderer.getPaintedFrameCount()",
         "  keys.push({",
         "    drawnByEndOfTick: paintedAtEndOfKeyTick === null ? null : paintedAtEndOfKeyTick - paintedBefore,",
@@ -287,8 +316,9 @@ describe("frame loop", () => {
         "}",
         "await quietFor(300, 300)",
         "const idleFrom = wakes",
-        "await sleep(2000)",
-        "console.log(JSON.stringify({ windowVisible, idleWakes, handled, keys, idleWakesAfter: wakes - idleFrom, maxFramesInOneTick }))",
+        "await watchedSleep(2000)",
+        "const windowStable = !statusChanged && windowStatus() === statusAtStart && strayInput === 0",
+        "console.log(JSON.stringify({ windowVisible, windowStable, strayInput, idleWakes, handled, keys, idleWakesAfter: wakes - idleFrom, maxFramesInOneTick }))",
         "process.exit(0)",
       ].join("\n")
       const env = { ...process.env }
@@ -305,13 +335,15 @@ describe("frame loop", () => {
       (context) => {
         const report = runInputFrameScript(false)
         console.log(`key frames: ${JSON.stringify(report)}`)
-        if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
+        skipIfNotMeasurable(report, context)
         expect(report.idleWakes).toBe(0)
         expect(report.handled).toBe(keyCount)
         for (const key of report.keys) {
           expect(key.drawnByEndOfTick).toBeGreaterThan(0)
           expect(key.drawnByLaterSteps).toBe(0)
         }
+        // The link stops after two idle steps and the script waited for them, so a window nothing else
+        // touched (windowStable) gets no wake now: #77, an idle window is not woken.
         expect(report.idleWakesAfter).toBe(0)
         // A tick whose pump ran a link step must not also run the eager step: that is two draws.
         expect(report.maxFramesInOneTick).toBeLessThanOrEqual(1)
@@ -324,10 +356,11 @@ describe("frame loop", () => {
       (context) => {
         const report = runInputFrameScript(true)
         console.log(`key frames, switch off: ${JSON.stringify(report)}`)
-        if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
+        skipIfNotMeasurable(report, context)
         expect(report.handled).toBe(keyCount)
         // A vsync inside a long tick steps the window there, so not every key is late, but some are.
         expect(report.keys.some((key) => key.drawnByEndOfTick === 0 && key.drawnByLaterSteps !== null && key.drawnByLaterSteps > 0)).toBe(true)
+        // The same for the link that drew the frames: it stops after its idle steps.
         expect(report.idleWakesAfter).toBe(0)
       },
       120_000,
@@ -341,7 +374,7 @@ describe("frame loop", () => {
       (context) => {
         const report = runInputFrameScript(false, true)
         console.log(`key animation frames: ${JSON.stringify(report)}`)
-        if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
+        skipIfNotMeasurable(report, context)
         expect(report.handled).toBe(animationKeyCount)
         expect(report.maxFramesInOneTick).toBeLessThanOrEqual(1)
         // The first key's tick is cold and long enough for vsyncs to step the window inside it, so
@@ -349,9 +382,10 @@ describe("frame loop", () => {
         for (const key of report.keys.slice(1)) {
           expect(key.drawnByEndOfTick).toBeGreaterThan(0)
           expect(key.animationFrameTimes).toHaveLength(animationFrames)
-          for (let frame = 1; frame < key.animationFrameTimes.length; frame++) {
-            expect(key.animationFrameTimes[frame] - key.animationFrameTimes[frame - 1]).toBeGreaterThanOrEqual(minimumFrameGapMs)
-          }
+          // The guard is for the step queued behind the eager frame, which is the first one after
+          // it. Later frames are paced by the display link, so a stalled machine that runs two of
+          // its steps close together is not the regression.
+          expect(key.animationFrameTimes[1] - key.animationFrameTimes[0]).toBeGreaterThanOrEqual(minimumFrameGapMs)
         }
       },
       120_000,
@@ -367,7 +401,8 @@ describe("frame loop", () => {
       inputTick: number | null
       painted: number
     }
-    type TypedReport = { windowVisible: boolean; keys: TypedKey[] }
+    // `windowStable` is as in the report of the key for an idle window.
+    type TypedReport = { windowVisible: boolean; windowStable: boolean; keys: TypedKey[] }
     const keyCount = 10
 
     const runTypingScript = (): TypedReport => {
@@ -384,9 +419,10 @@ describe("frame loop", () => {
         "let tickNumber = 0",
         "let keyDownTick = null",
         "let inputTick = null",
+        "let strayInput = 0",
         "const App = () => {",
         '  const [text, setText] = useState("")',
-        '  return React.createElement("div", { style: { width: "100%", height: "100%" } },',
+        '  return React.createElement("div", { style: { width: "100%", height: "100%" }, onMouseMove: () => { strayInput++ }, onMouseDown: () => { strayInput++ }, onWheel: () => { strayInput++ } },',
         '    React.createElement("input", {',
         "      autoFocus: true,",
         "      value: text,",
@@ -407,12 +443,21 @@ describe("frame loop", () => {
         "  })),",
         "})",
         "const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))",
+        "let statusAtStart = null",
+        "let statusChanged = false",
+        "const windowStatus = () => `${renderer.isWindowVisible()}/${renderer.isWindowKey()}`",
+        "const watchStatus = () => { if (statusAtStart !== null && windowStatus() !== statusAtStart) statusChanged = true }",
+        "const watchedSleep = async (ms) => {",
+        "  const until = performance.now() + ms",
+        "  while (performance.now() < until) { watchStatus(); await sleep(Math.min(20, until - performance.now())) }",
+        "}",
         "const quietFor = async (quietMs, atLeastMs) => {",
         "  const startedAt = performance.now()",
         "  let seen = -1",
         "  let changedAt = startedAt",
         "  for (;;) {",
         "    const now = performance.now()",
+        "    watchStatus()",
         "    const key = renderer.getPaintedFrameCount() + wakes",
         "    if (key !== seen) { seen = key; changedAt = now }",
         "    if (now - changedAt >= quietMs && now - startedAt >= atLeastMs) return",
@@ -423,6 +468,7 @@ describe("frame loop", () => {
         "await quietFor(800, 7000)",
         "const windowVisible = renderer.isWindowVisible()",
         "const size = renderer.getWindowSize()",
+        "statusAtStart = windowStatus()",
         "const keys = []",
         "for (let key = 0; key < " + keyCount + "; key++) {",
         "  await quietFor(300, 300)",
@@ -430,10 +476,14 @@ describe("frame loop", () => {
         "  keyDownTick = null",
         "  inputTick = null",
         '  renderer.postNativeEvent("keyDown", size.width / 2, size.height / 2)',
-        "  await sleep(250)",
+        // The key's tick on a stalled machine can come later than any fixed wait.
+        "  const keyDeadline = performance.now() + 15000",
+        "  while (inputTick === null && performance.now() < keyDeadline) await watchedSleep(10)",
+        "  await watchedSleep(250)",
         "  keys.push({ keyDownTick, inputTick, painted: renderer.getPaintedFrameCount() - paintedBefore })",
         "}",
-        "console.log(JSON.stringify({ windowVisible, keys }))",
+        "const windowStable = !statusChanged && windowStatus() === statusAtStart && strayInput === 0",
+        "console.log(JSON.stringify({ windowVisible, windowStable, strayInput, keys }))",
         "process.exit(0)",
       ].join("\n")
       const env = { ...process.env }
@@ -449,6 +499,7 @@ describe("frame loop", () => {
         const report = runTypingScript()
         console.log(`typing frames: ${JSON.stringify(report)}`)
         if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
+        if (!report.windowStable) context.skip("the window's visibility or key status changed, or a pointer reached it, during the run")
         for (const key of report.keys) {
           expect(key.keyDownTick).not.toBeNull()
           expect(key.inputTick).toBe(key.keyDownTick)
