@@ -1,5 +1,67 @@
 # @ghia/solid
 
+## 0.14.0
+
+### Minor Changes
+
+- 698580c: ### Breaking changes
+  
+  - **`<code code=... language=...>` is now `<code-block ...>`, and `<code>` is HTML's inline element.** The syntax-highlighted block keeps its props (`code`, `language`, `path`, `showLineNumbers`, `theme`) under the new name, so rename the tag (`<code-block code={source} language="ts" />`), the JSX type `CodeProps` to `CodeBlockProps`, and `findByType("code")` to `findByType("code-block")`. A `<code>` now lays out as `<span>` with the user agent style of Chrome's `code`: the generic `monospace` family, drawn at 13px beside 16px text by Chrome's monospace size rule (see `docs/reference.md`, "Monospace size"), so code that renders text inline in a paragraph (Lexical's Code format) works unchanged.
+  - **`pre`, `kbd` and `samp` use the generic `monospace` at Chrome's size**, not `Menlo` at the inherited size: they are 13px where the text around them is 16px, unless an absolute `font-size` is inherited or the `font-family` is a longer list (`monospace, monospace`). `tt` is a tag too.
+  
+  ### Features
+  
+  - Chrome's monospace font-size rule: an element whose `font-family` becomes the generic `monospace` alone has its `font-size` scaled by 13/16 when that size is not an absolute length, and scaled back where the family stops being `monospace`.
+
+### Patch Changes
+
+- 5340a15: `Range`, `StaticRange` and `AbstractRange` exist, with `document.createRange()`. A `Range` is live: a tree change, including a React or Solid insert, removal or text update, and a data change move its boundary points as the DOM standard says. `CharacterData` has `substringData`, `appendData`, `insertData`, `deleteData` and `replaceData`, `Text` has `splitText` and `wholeText`, and `document.hasFocus()` answers.
+- 3ecd502: `Range.getClientRects()` and `getBoundingClientRect()` are the rects of the selected text, one for each painted line of each Text node and the border box of each element the range selects whole, and a collapsed range in text is the caret rect. `document.caretPositionFromPoint(x, y)` (with the `CaretPosition` global) and `document.caretRangeFromPoint(x, y)` give the text position nearest a point. `Selection.modify` takes the `line`, `lineboundary` and `documentboundary` granularities: moves by line keep the caret's x across a short line. Native has three new reads for them (`getTextRangeRects`, `caretPositionFromPoint`, `moveCaretVisually`).
+- c8a846d: `getSelection()` holds a live `Range` of nodes once code selects them: `anchorNode`, `focusNode`, `direction`, `getRangeAt`, `addRange`, `removeRange`, `collapse`, `extend`, `setBaseAndExtent`, `selectAllChildren`, `containsNode`, `deleteFromDocument`, `getComposedRanges` and `modify` by character and word, with the DOMExceptions of the standard. A node selection and the painted text a drag selects replace each other. `document` hears one coalesced `selectionchange` per burst of changes, including a move caused by a tree or data change. `focus()` on an editing host puts a caret at its start.
+- Updated dependencies [efdc58a]
+- Updated dependencies [32cb7c2]
+- Updated dependencies [dbd63d6]
+- Updated dependencies [698580c]
+- Updated dependencies [5493465]
+- Updated dependencies [08786e0]
+- Updated dependencies [1ab5788]
+- Updated dependencies [c8a846d]
+- Updated dependencies [76853dd]
+- Updated dependencies [5340a15]
+- Updated dependencies [40e4657]
+- Updated dependencies [d5d8a2c]
+- Updated dependencies [3ecd502]
+- Updated dependencies [f610c70]
+- Updated dependencies [c126e2d]
+- Updated dependencies [a6a5504]
+- Updated dependencies [d402189]
+- Updated dependencies [bb0bcaf]
+- Updated dependencies [7b8e480]
+- Updated dependencies [2e41294]
+- Updated dependencies [f926534]
+- Updated dependencies [b3097eb]
+- Updated dependencies [88ba15f]
+- Updated dependencies [b0e1a44]
+- Updated dependencies [08ab88f]
+- Updated dependencies [4a289c4]
+- Updated dependencies [a0347c3]
+- Updated dependencies [7f27601]
+- Updated dependencies [ed5fd5a]
+- Updated dependencies [c8a846d]
+- Updated dependencies [fe19c6a]
+- Updated dependencies [7c06a8a]
+- Updated dependencies [11ad59a]
+- Updated dependencies [8d56654]
+- Updated dependencies [3fce838]
+- Updated dependencies [97d4d8e]
+- Updated dependencies [fcc869d]
+- Updated dependencies [f807bac]
+- Updated dependencies [ad6380d]
+- Updated dependencies [8fdb2e6]
+- Updated dependencies [75882f5]
+  - @ghia/native@0.14.0
+  - ghia@0.14.0
+
 ## 0.13.0
 
 The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`, nodes are real `Node`, `Element` and `Text` objects, CSS stylesheets and HTML tags work, and code that is not the framework can build, query, style and observe the tree as it does in a browser. As a result these run unmodified: `@base-ui/react` (Checkbox, Switch, Radio, Slider, Field, Popover, Menu, Select), Kobalte and the Base UI Solid ports, the `@dnd-kit/dom` sortable (`@dnd-kit/solid` and `@dnd-kit/react` 0.5.3), floating-ui and TanStack Virtual.
