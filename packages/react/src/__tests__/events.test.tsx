@@ -27,6 +27,34 @@ import { expectScreenshotsDiffer, expectScreenshotsEqual, SHOTS_DIR } from "./te
 // All tests require the native GPUI test renderer (cargo build with test-support).
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
+// Script lines (for `bun -e`) that wait for a visible window to go quiet, and notice when its visibility
+// or key status changes, which starts the display link by itself. They need `renderer` and `wakes`.
+const WINDOW_SETTLE_SCRIPT = [
+  "const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))",
+  "let statusAtStart = null",
+  "let statusChanged = false",
+  "const windowStatus = () => `${renderer.isWindowVisible()}/${renderer.isWindowKey()}`",
+  "const watchStatus = () => { if (statusAtStart !== null && windowStatus() !== statusAtStart) statusChanged = true }",
+  "const watchedSleep = async (ms) => {",
+  "  const until = performance.now() + ms",
+  "  while (performance.now() < until) { watchStatus(); await sleep(Math.min(20, until - performance.now())) }",
+  "}",
+  "const quietFor = async (quietMs, atLeastMs) => {",
+  "  const startedAt = performance.now()",
+  "  let seen = -1",
+  "  let changedAt = startedAt",
+  "  for (;;) {",
+  "    const now = performance.now()",
+  "    watchStatus()",
+  "    const key = renderer.getPaintedFrameCount() + wakes",
+  "    if (key !== seen) { seen = key; changedAt = now }",
+  "    if (now - changedAt >= quietMs && now - startedAt >= atLeastMs) return",
+  '    if (now - startedAt > 20000) throw new Error("the window did not settle in 20 s")',
+  "    await sleep(20)",
+  "  }",
+  "}",
+]
+
 describe("frame loop", () => {
   it.skipIf(process.platform !== "darwin")(
     "drives the frame loop from real display-link wakes without blocking I/O",
@@ -163,15 +191,20 @@ describe("frame loop", () => {
   )
 
   // A key that reaches an idle window starts the stopped display link in the tick that dispatches
-  // it, and its frame is drawn by the tick itself, not by the link's first vsync (7 to 10 ms later
-  // at 120 Hz). A frame is counted when the window paints it; a real window draws only in a frame
-  // request, which presents. The vsync can land inside a long tick and step the window there, so
-  // one key proves nothing about main: the test sends many and asks whether every one was drawn
-  // by its own tick. A window that is occluded never starts a link, so the test skips itself then.
+  // it. The key's frame is drawn by the frame loop's frame call (`stepStartedLinks`) from a setImmediate
+  // after that tick and its microtasks, not by the link's first vsync (7 to 10 ms later at 120 Hz) and
+  // not by the tick. A frame is counted when the window paints it; a real window draws only in a frame
+  // request, which presents. The vsync can land inside a long tick and step the window there (the
+  // frame call then leaves it alone), so one key proves nothing about main: the test sends many and
+  // asks whether every one was drawn by the end of its own frame call. A window that is occluded never
+  // starts a link, so the test skips itself then.
   describe.skipIf(process.platform !== "darwin")("the frame of a key for an idle window", () => {
     type KeyFrame = {
-      drawnByEndOfTick: number | null
+      // Frames painted by the end of the key's frame call, or of its tick when no link was waiting for one.
+      drawnByEndOfKeyFrame: number | null
       drawnByLaterSteps: number | null
+      // Whether the frame call stepped a window for this key.
+      frameCallStepped: boolean
       // performance.now() of each requestAnimationFrame callback of the key's animation (animate mode).
       animationFrameTimes: number[]
     }
@@ -186,8 +219,9 @@ describe("frame loop", () => {
       handled: number
       keys: KeyFrame[]
       idleWakesAfter: number
-      // The most frames any one tick painted after the first key's (cold) tick.
+      // The most frames any one tick or frame call painted after the first key's (cold) tick.
       maxFramesInOneTick: number
+      maxFramesInOneFrameCall: number
     }
     const keyCount = 12
     const animationKeyCount = 30
@@ -240,17 +274,32 @@ describe("frame loop", () => {
         // Nothing has focus, so a key goes to the window's handler, which changes the visible text.
         "render(React.createElement(App), { renderer, onKeyDown: () => { handled++; bump(); if (" + animate + ") animateFrames() } })",
         "let handledAtLastKey = 0",
-        "let paintedAtEndOfKeyTick = null",
+        "let paintedAtEndOfKeyFrame = null",
         "let measuring = false",
         "let maxFramesInOneTick = 0",
+        "let maxFramesInOneFrameCall = 0",
+        "let keyTickSeen = false",
+        "let frameCallStepped = false",
         "startFrameLoop({",
         "  requiresTick: () => renderer.requiresTick(),",
         "  tick: () => {",
         "    const paintedBeforeTick = renderer.getPaintedFrameCount()",
         "    const running = renderer.tick()",
         "    if (measuring) maxFramesInOneTick = Math.max(maxFramesInOneTick, renderer.getPaintedFrameCount() - paintedBeforeTick)",
-        "    if (handled > handledAtLastKey && paintedAtEndOfKeyTick === null) paintedAtEndOfKeyTick = renderer.getPaintedFrameCount()",
+        "    if (handled > handledAtLastKey && !keyTickSeen) {",
+        "      keyTickSeen = true",
+        // No link is waiting for its first step: the key's frame is the pump's (or there is none to draw).
+        "      if (!renderer.startedLinksPending()) paintedAtEndOfKeyFrame = renderer.getPaintedFrameCount()",
+        "    }",
         "    return running",
+        "  },",
+        "  startedLinksPending: () => renderer.startedLinksPending(),",
+        "  stepStartedLinks: () => {",
+        "    const paintedBeforeCall = renderer.getPaintedFrameCount()",
+        "    const stepped = renderer.stepStartedLinks()",
+        "    if (measuring) maxFramesInOneFrameCall = Math.max(maxFramesInOneFrameCall, renderer.getPaintedFrameCount() - paintedBeforeCall)",
+        "    if (keyTickSeen && paintedAtEndOfKeyFrame === null) { paintedAtEndOfKeyFrame = renderer.getPaintedFrameCount(); frameCallStepped = stepped }",
+        "    return stepped",
         "  },",
         "  setFrameWakeCallback: (callback) => renderer.setFrameWakeCallback(callback && (() => {",
         "    wakes++",
@@ -297,18 +346,21 @@ describe("frame loop", () => {
         "  await quietFor(300, 300)",
         "  const paintedBefore = renderer.getPaintedFrameCount()",
         "  handledAtLastKey = handled",
-        "  paintedAtEndOfKeyTick = null",
+        "  paintedAtEndOfKeyFrame = null",
+        "  keyTickSeen = false",
+        "  frameCallStepped = false",
         "  animationTimes = []",
         '  renderer.postNativeEvent("keyDown", size.width / 2, size.height / 2)',
         // A stalled machine can take longer than any fixed wait to run the key's tick and the
         // animation's frames, so wait for them, and then for the link's later steps to have run.
         "  const keyDeadline = performance.now() + 15000",
-        "  while ((paintedAtEndOfKeyTick === null || (" + animate + " && animationTimes.length < " + animationFrames + ")) && performance.now() < keyDeadline) await watchedSleep(10)",
+        "  while ((paintedAtEndOfKeyFrame === null || (" + animate + " && animationTimes.length < " + animationFrames + ")) && performance.now() < keyDeadline) await watchedSleep(10)",
         "  await watchedSleep(250)",
         "  const paintedAfter = renderer.getPaintedFrameCount()",
         "  keys.push({",
-        "    drawnByEndOfTick: paintedAtEndOfKeyTick === null ? null : paintedAtEndOfKeyTick - paintedBefore,",
-        "    drawnByLaterSteps: paintedAtEndOfKeyTick === null ? null : paintedAfter - paintedAtEndOfKeyTick,",
+        "    drawnByEndOfKeyFrame: paintedAtEndOfKeyFrame === null ? null : paintedAtEndOfKeyFrame - paintedBefore,",
+        "    drawnByLaterSteps: paintedAtEndOfKeyFrame === null ? null : paintedAfter - paintedAtEndOfKeyFrame,",
+        "    frameCallStepped,",
         "    animationFrameTimes: animationTimes,",
         "  })",
         // The first key's tick is cold: it paints twice with the switch off as well.
@@ -318,7 +370,7 @@ describe("frame loop", () => {
         "const idleFrom = wakes",
         "await watchedSleep(2000)",
         "const windowStable = !statusChanged && windowStatus() === statusAtStart && strayInput === 0",
-        "console.log(JSON.stringify({ windowVisible, windowStable, strayInput, idleWakes, handled, keys, idleWakesAfter: wakes - idleFrom, maxFramesInOneTick }))",
+        "console.log(JSON.stringify({ windowVisible, windowStable, strayInput, idleWakes, handled, keys, idleWakesAfter: wakes - idleFrom, maxFramesInOneTick, maxFramesInOneFrameCall }))",
         "process.exit(0)",
       ].join("\n")
       const env = { ...process.env }
@@ -331,7 +383,7 @@ describe("frame loop", () => {
     }
 
     it(
-      "is drawn by the tick that dispatched the key, and the link's next steps draw nothing",
+      "is drawn by the frame call after the tick that dispatched the key, and the link's next steps draw nothing",
       (context) => {
         const report = runInputFrameScript(false)
         console.log(`key frames: ${JSON.stringify(report)}`)
@@ -339,34 +391,38 @@ describe("frame loop", () => {
         expect(report.idleWakes).toBe(0)
         expect(report.handled).toBe(keyCount)
         for (const key of report.keys) {
-          expect(key.drawnByEndOfTick).toBeGreaterThan(0)
+          expect(key.drawnByEndOfKeyFrame).toBeGreaterThan(0)
           expect(key.drawnByLaterSteps).toBe(0)
         }
+        // The tick only pumps, so the frame call drew the frame of nearly every key; a key's own tick is
+        // the exception when a vsync stepped the window inside it.
+        expect(report.keys.filter((key) => key.frameCallStepped).length).toBeGreaterThan(keyCount / 2)
         // The link stops after two idle steps and the script waited for them, so a window nothing else
         // touched (windowStable) gets no wake now: #77, an idle window is not woken.
         expect(report.idleWakesAfter).toBe(0)
-        // A tick whose pump ran a link step must not also run the eager step: that is two draws.
+        // A tick whose pump ran a link step must not be followed by a frame call that draws again: two draws.
         expect(report.maxFramesInOneTick).toBeLessThanOrEqual(1)
+        expect(report.maxFramesInOneFrameCall).toBeLessThanOrEqual(1)
       },
       120_000,
     )
 
     it(
-      "is left to the display link's first vsync with GPUIX_INPUT_FRAME_OFF",
+      "is left to the display link's first vsync with GPUIX_INPUT_FRAME_OFF (the frame call discards the list)",
       (context) => {
         const report = runInputFrameScript(true)
         console.log(`key frames, switch off: ${JSON.stringify(report)}`)
         skipIfNotMeasurable(report, context)
         expect(report.handled).toBe(keyCount)
         // A vsync inside a long tick steps the window there, so not every key is late, but some are.
-        expect(report.keys.some((key) => key.drawnByEndOfTick === 0 && key.drawnByLaterSteps !== null && key.drawnByLaterSteps > 0)).toBe(true)
+        expect(report.keys.some((key) => key.drawnByEndOfKeyFrame === 0 && key.drawnByLaterSteps !== null && key.drawnByLaterSteps > 0)).toBe(true)
         // The same for the link that drew the frames: it stops after its idle steps.
         expect(report.idleWakesAfter).toBe(0)
       },
       120_000,
     )
 
-    // A vsync that merges into the link's source while the eager frame draws leaves a step queued
+    // A vsync that merges into the link's source while the input frame draws leaves a step queued
     // right behind it. Without the pacing guard that step draws the animation's next frame 0 to
     // 3 ms after the eager one (the callbacks are timed when the slow first one is done).
     it(
@@ -377,10 +433,11 @@ describe("frame loop", () => {
         skipIfNotMeasurable(report, context)
         expect(report.handled).toBe(animationKeyCount)
         expect(report.maxFramesInOneTick).toBeLessThanOrEqual(1)
+        expect(report.maxFramesInOneFrameCall).toBeLessThanOrEqual(1)
         // The first key's tick is cold and long enough for vsyncs to step the window inside it, so
         // it is a warm-up and not judged.
         for (const key of report.keys.slice(1)) {
-          expect(key.drawnByEndOfTick).toBeGreaterThan(0)
+          expect(key.drawnByEndOfKeyFrame).toBeGreaterThan(0)
           expect(key.animationFrameTimes).toHaveLength(animationFrames)
           // The guard is for the step queued behind the eager frame, which is the first one after
           // it. Later frames are paced by the display link, so a stalled machine that runs two of
@@ -393,7 +450,7 @@ describe("frame loop", () => {
   })
 
   // The text editor's `input` is delivered after the edit and its lease, in the tick that dispatched
-  // the key, so the eager frame of that tick contains what the handler rendered: one paint per key.
+  // the key, so the input frame after that tick contains what the handler rendered: one paint per key.
   // Through the callback queue `input` came a tick later and a second frame painted what it changed.
   describe.skipIf(process.platform !== "darwin")("the frame of a key that types into an input", () => {
     type TypedKey = {
@@ -437,34 +494,14 @@ describe("frame loop", () => {
         "startFrameLoop({",
         "  requiresTick: () => renderer.requiresTick(),",
         "  tick: () => { tickNumber++; return renderer.tick() },",
+        "  startedLinksPending: () => renderer.startedLinksPending(),",
+        "  stepStartedLinks: () => renderer.stepStartedLinks(),",
         "  setFrameWakeCallback: (callback) => renderer.setFrameWakeCallback(callback && (() => {",
         "    wakes++",
         "    callback()",
         "  })),",
         "})",
-        "const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))",
-        "let statusAtStart = null",
-        "let statusChanged = false",
-        "const windowStatus = () => `${renderer.isWindowVisible()}/${renderer.isWindowKey()}`",
-        "const watchStatus = () => { if (statusAtStart !== null && windowStatus() !== statusAtStart) statusChanged = true }",
-        "const watchedSleep = async (ms) => {",
-        "  const until = performance.now() + ms",
-        "  while (performance.now() < until) { watchStatus(); await sleep(Math.min(20, until - performance.now())) }",
-        "}",
-        "const quietFor = async (quietMs, atLeastMs) => {",
-        "  const startedAt = performance.now()",
-        "  let seen = -1",
-        "  let changedAt = startedAt",
-        "  for (;;) {",
-        "    const now = performance.now()",
-        "    watchStatus()",
-        "    const key = renderer.getPaintedFrameCount() + wakes",
-        "    if (key !== seen) { seen = key; changedAt = now }",
-        "    if (now - changedAt >= quietMs && now - startedAt >= atLeastMs) return",
-        '    if (now - startedAt > 20000) throw new Error("the window did not settle in 20 s")',
-        "    await sleep(20)",
-        "  }",
-        "}",
+        ...WINDOW_SETTLE_SCRIPT,
         "await quietFor(800, 7000)",
         "const windowVisible = renderer.isWindowVisible()",
         "const size = renderer.getWindowSize()",
@@ -504,9 +541,162 @@ describe("frame loop", () => {
           expect(key.keyDownTick).not.toBeNull()
           expect(key.inputTick).toBe(key.keyDownTick)
         }
-        // The first key's tick is cold: it paints twice with the eager frame as well.
+        // The first key's tick is cold: it paints twice with the input frame as well.
         for (const key of report.keys.slice(1)) {
           expect(key.painted).toBe(1)
+        }
+      },
+      120_000,
+    )
+  })
+
+  // What a key's handlers queue in a microtask (Lexical commits its update in one) is in the key's frame:
+  // the tick that ran the handlers returns, the microtasks run, and then the frame loop's frame call
+  // draws, so the microtask's commit comes before the frame's requestAnimationFrame callbacks and the
+  // first frame paints it. Drawing inside the tick would paint the frame first and the microtask's change
+  // a frame later.
+  describe.skipIf(process.platform !== "darwin")("the frame of a key whose handler queues a microtask", () => {
+    type LogEntry = { event: string; painted: number; rendered: number; paintedText?: string }
+    type MicrotaskReport = {
+      windowVisible: boolean
+      windowStable: boolean
+      strayInput: number
+      keys: { log: LogEntry[]; painted: number }[]
+    }
+    const keyCount = 8
+
+    const runMicrotaskScript = (withSelectionChange: boolean): MicrotaskReport => {
+      const rendererPath = fileURLToPath(new URL("../reconciler/renderer.ts", import.meta.url))
+      const reconcilerPath = fileURLToPath(new URL("../reconciler/reconciler.js", import.meta.url))
+      const script = [
+        'import React, { useState } from "react"',
+        `import { createRenderer, render } from ${JSON.stringify(rendererPath)}`,
+        `import { flushSync } from ${JSON.stringify(reconcilerPath)}`,
+        'import { startFrameLoop } from "@ghia/native/runtime"',
+        'import { document } from "@ghia/native/host"',
+        "const renderer = createRenderer()",
+        "renderer.init({ focus: false })",
+        "let wakes = 0",
+        "let strayInput = 0",
+        "let keyNumber = 0",
+        "let keyInFlight = false",
+        "let renderedCount = 0",
+        "let log = []",
+        "const note = (event, paintedText) => { if (keyInFlight) log.push({ event, painted: renderer.getPaintedFrameCount(), rendered: renderedCount, paintedText }) }",
+        "let bump",
+        "const App = () => {",
+        "  const [count, setCount] = useState(0)",
+        "  renderedCount = count",
+        "  bump = () => flushSync(() => setCount((value) => value + 1))",
+        '  return React.createElement("div", { style: { width: "100%", height: "100%" }, onMouseMove: () => { strayInput++ }, onMouseDown: () => { strayInput++ }, onWheel: () => { strayInput++ } }, `typed ${count}`)',
+        "}",
+        "const onKeyDown = () => {",
+        '  note("keydown")',
+        '  requestAnimationFrame(() => note("raf"))',
+        '  queueMicrotask(() => { note("microtask"); bump() })',
+        "  if (" + withSelectionChange + ") {",
+        "    const selection = document.getSelection()",
+        "    if (keyNumber % 2 === 1) selection.selectAllChildren(document.body)",
+        "    else selection.removeAllRanges()",
+        "  }",
+        "}",
+        "render(React.createElement(App), { renderer, onKeyDown })",
+        'document.addEventListener("selectionchange", () => note("selectionchange"))',
+        "startFrameLoop({",
+        "  requiresTick: () => renderer.requiresTick(),",
+        "  tick: () => { const running = renderer.tick(); note(\"tick-end\"); return running },",
+        "  startedLinksPending: () => renderer.startedLinksPending(),",
+        "  stepStartedLinks: () => {",
+        "    const stepped = renderer.stepStartedLinks()",
+        '    note(stepped ? "frame-call" : "frame-call-skipped", renderer.getPaintedText().join("|"))',
+        "    return stepped",
+        "  },",
+        "  setFrameWakeCallback: (callback) => renderer.setFrameWakeCallback(callback && (() => {",
+        "    wakes++",
+        "    callback()",
+        "  })),",
+        "})",
+        ...WINDOW_SETTLE_SCRIPT,
+        'await quietFor(800, 7000)',
+        "const windowVisible = renderer.isWindowVisible()",
+        "const size = renderer.getWindowSize()",
+        "statusAtStart = windowStatus()",
+        "const keys = []",
+        "for (keyNumber = 0; keyNumber < " + keyCount + "; keyNumber++) {",
+        "  await quietFor(300, 300)",
+        "  const paintedBefore = renderer.getPaintedFrameCount()",
+        "  log = []",
+        "  keyInFlight = true",
+        '  renderer.postNativeEvent("keyDown", size.width / 2, size.height / 2)',
+        "  const keyDeadline = performance.now() + 15000",
+        '  while (!log.some((entry) => entry.event.startsWith("frame-call")) && performance.now() < keyDeadline) await watchedSleep(10)',
+        "  await watchedSleep(250)",
+        "  keyInFlight = false",
+        "  keys.push({ log, painted: renderer.getPaintedFrameCount() - paintedBefore })",
+        "}",
+        "const windowStable = !statusChanged && windowStatus() === statusAtStart && strayInput === 0",
+        "console.log(JSON.stringify({ windowVisible, windowStable, strayInput, keys }))",
+        "process.exit(0)",
+      ].join("\n")
+      const env = { ...process.env }
+      delete env.GPUIX_INPUT_FRAME_OFF
+      const result = spawnSync("bun", ["-e", script], { encoding: "utf8", timeout: 90_000, env })
+      expect(result.status, result.stderr || result.error?.message).toBe(0)
+      return JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "")
+    }
+
+    const skipIfNotMeasurable = (report: MicrotaskReport, context: { skip: (note: string) => void }) => {
+      if (!report.windowVisible) context.skip("the window is occluded, so no display link can start")
+      if (!report.windowStable) context.skip("the window's visibility or key status changed, or a pointer reached it, during the run")
+    }
+    const order = (log: LogEntry[]) => log.map((entry) => entry.event)
+
+    it(
+      "runs the microtask before the frame's rAF callbacks, paints its change in the first frame, and paints one frame",
+      (context) => {
+        const report = runMicrotaskScript(false)
+        console.log(`microtask frames: ${JSON.stringify(report)}`)
+        skipIfNotMeasurable(report, context)
+        // The first key's tick is cold: a vsync can step the window inside it.
+        for (const [index, key] of report.keys.slice(1).entries()) {
+          const keyNumber = index + 2
+          const events = order(key.log)
+          expect(events.slice(0, 3)).toEqual(["keydown", "tick-end", "microtask"])
+          expect(events.indexOf("microtask")).toBeLessThan(events.indexOf("raf"))
+          expect(events.indexOf("raf")).toBeLessThan(events.indexOf("frame-call"))
+          const raf = key.log[events.indexOf("raf")]
+          // The microtask's update was committed to the tree when the frame's callbacks ran, and the tick
+          // painted nothing before it.
+          expect(raf.rendered).toBe(keyNumber)
+          expect(key.log[events.indexOf("tick-end")].painted).toBe(key.log[0].painted)
+          const frameCall = key.log.find((entry) => entry.event === "frame-call")
+          expect(frameCall?.paintedText).toContain(`typed ${keyNumber}`)
+          expect(key.painted).toBe(1)
+        }
+      },
+      120_000,
+    )
+
+    // `selectionchange` is a coalesced `setTimeout(0)` (`dom/selection.ts`): a task of its own, queued by the
+    // handler. The input frame is a `setImmediate` queued after the tick, so which of the two runs first is up
+    // to the 1 ms timer: with a slow tick the timers phase comes first and `selectionchange` runs between the
+    // microtask and the frame, with a fast one the frame runs first (both happen in a run). Chrome dispatches
+    // selectionchange as its own task too, and a frame before it is a valid order there. What is pinned: it
+    // runs once per change, after the keydown's microtasks, and never between the frame's rAF callbacks and
+    // its draw.
+    it(
+      "delivers selectionchange once per change, in a task of its own, before or after the key's frame",
+      (context) => {
+        const report = runMicrotaskScript(true)
+        console.log(`selectionchange order: ${JSON.stringify(report.keys.map((key) => order(key.log)))}`)
+        skipIfNotMeasurable(report, context)
+        // The first key clears a selection that is not there.
+        for (const key of report.keys.slice(1)) {
+          const events = order(key.log)
+          expect(events.filter((event) => event === "selectionchange")).toHaveLength(1)
+          expect(events.indexOf("selectionchange")).toBeGreaterThan(events.indexOf("microtask"))
+          expect(events.indexOf("frame-call")).toBe(events.indexOf("raf") + 1)
+          expect(events.indexOf("microtask")).toBeLessThan(events.indexOf("raf"))
         }
       },
       120_000,

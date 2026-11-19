@@ -118,7 +118,16 @@ export interface FrameLoopOptions {
 }
 
 type FrameLoopRenderer = Pick<GpuixRenderer, "requiresTick" | "tick"> &
-  Partial<Pick<GpuixRenderer, "setFrameWakeCallback" | "setSyncEventHandler" | "keyEventPending">>
+  Partial<
+    Pick<
+      GpuixRenderer,
+      | "setFrameWakeCallback"
+      | "setSyncEventHandler"
+      | "keyEventPending"
+      | "startedLinksPending"
+      | "stepStartedLinks"
+    >
+  >
 
 /** The last window closed: the sync handler captures the renderer, so it has to be
  *  released for the renderer to be collectable. */
@@ -134,6 +143,7 @@ export function startFrameLoop(
   if (!renderer.requiresTick()) return { stop() {} }
   let timer: ReturnType<typeof setTimeout> | undefined
   let scheduledFrame: ReturnType<typeof setImmediate> | undefined
+  let scheduledInputFrame: ReturnType<typeof setImmediate> | undefined
   let stopped = false
   const stop = () => {
     if (stopped) return
@@ -143,6 +153,24 @@ export function startFrameLoop(
     timer = undefined
     if (scheduledFrame !== undefined) clearImmediate(scheduledFrame)
     scheduledFrame = undefined
+    if (scheduledInputFrame !== undefined) clearImmediate(scheduledInputFrame)
+    scheduledInputFrame = undefined
+  }
+  // The frame of an input draws from a task of its own, after the microtasks the tick's handlers
+  // queued (an editor that commits its update in one, Lexical), as a browser paints after the input
+  // task and its microtasks. Never from inside tick(), which pumps and draws no frame of its own.
+  const scheduleInputFrame = () => {
+    if (!renderer.stepStartedLinks || scheduledInputFrame !== undefined) return
+    if (!renderer.startedLinksPending?.()) return
+    scheduledInputFrame = setImmediate(() => {
+      scheduledInputFrame = undefined
+      if (stopped) return
+      try {
+        renderer.stepStartedLinks?.()
+      } catch (error) {
+        options.onError?.(error)
+      }
+    })
   }
   const loop = () => {
     if (stopped) return
@@ -160,8 +188,10 @@ export function startFrameLoop(
       windowClosed(renderer, options)
       return
     }
+    if (stopped) return
+    scheduleInputFrame()
     // On the wake path nothing re-arms a timer: an idle app is not ticked until the run loop has work.
-    if (stopped || frameWake) return
+    if (frameWake) return
     // A tick that left a key queued runs one key per tick, so the next key waits for no timer.
     if (renderer.keyEventPending?.()) {
       scheduledFrame = setImmediate(() => {

@@ -1628,8 +1628,8 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         .unwrap_or_else(|| "unknown panic".to_string())
 }
 
-/// `GPUIX_INPUT_FRAME_OFF`: a tick does not step a display link it started (the A-B switch for
-/// the input frame, docs/fork/testing.md). Read once, so set it before the first tick.
+/// `GPUIX_INPUT_FRAME_OFF`: `stepStartedLinks` does not step a display link a tick started (the
+/// A-B switch for the input frame, docs/fork/testing.md). Read once, so set it before the first call.
 #[cfg(target_os = "macos")]
 static INPUT_FRAME_OFF: std::sync::LazyLock<std::sync::atomic::AtomicBool> =
     std::sync::LazyLock::new(|| {
@@ -1745,6 +1745,10 @@ impl WakeSimulator {
 pub struct GpuixRenderer {
     #[cfg(target_os = "macos")]
     frame_wake: FrameWake,
+    /// Whether the last `tick()`'s pump ran a display-link step: that step was the frame, so
+    /// `step_started_links` leaves the list for a later tick.
+    #[cfg(target_os = "macos")]
+    last_pump_stepped_a_link: std::sync::atomic::AtomicBool,
     event_callback: Mutex<Option<Arc<ThreadsafeFunction<EventPayload>>>>,
     sync_handler: crate::events::sync_dispatch::SyncHandlerOwner,
     tree: Arc<Mutex<RetainedTree>>,
@@ -2152,6 +2156,8 @@ impl GpuixRenderer {
             pointer_requests: Default::default(),
             #[cfg(target_os = "macos")]
             frame_wake: FrameWake::default(),
+            #[cfg(target_os = "macos")]
+            last_pump_stepped_a_link: std::sync::atomic::AtomicBool::new(false),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -2546,9 +2552,12 @@ impl GpuixRenderer {
                         .map(|platform| platform.pump_events_reporting_step())
                 });
                 let running = pumped.as_ref().is_some_and(|outcome| outcome.is_some());
-                let pump_stepped_a_link = pumped
-                    .flatten()
-                    .is_some_and(|outcome| outcome.stepped);
+                self.last_pump_stepped_a_link.store(
+                    pumped
+                        .flatten()
+                        .is_some_and(|outcome| outcome.stepped),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 #[cfg(feature = "test-support")]
                 {
                     let delay = self
@@ -2557,17 +2566,6 @@ impl GpuixRenderer {
                         .load(std::sync::atomic::Ordering::Relaxed);
                     if delay > 0 {
                         std::thread::sleep(Duration::from_millis(delay.into()));
-                    }
-                }
-                // A tick called from inside another native call (a JS handler of input) is not a
-                // place to draw: the list waits for the outermost tick, which also still has the
-                // pump's own work to do. A tick whose pump ran a link step already drew; the list
-                // is left for the next tick, whose pump may not step.
-                if crate::events::sync_dispatch::outermost_native_call() && !pump_stepped_a_link {
-                    if INPUT_FRAME_OFF.load(std::sync::atomic::Ordering::Relaxed) {
-                        gpui_macos::discard_started_display_links();
-                    } else {
-                        gpui_macos::step_started_display_links();
                     }
                 }
                 Ok(running)
@@ -2599,6 +2597,62 @@ impl GpuixRenderer {
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.initialized.lock().unwrap()
+    }
+
+    /// Whether a display link started since it last drew still waits for its first step, so the
+    /// frame loop has to call `stepStartedLinks` after the task and microtasks of the tick that
+    /// started it. macOS only; everything else answers false.
+    #[napi]
+    pub fn started_links_pending(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            gpui_macos::started_display_links_pending()
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    /// Draws the input frame: the first step of the display links the last ticks started, now
+    /// instead of at the link's first vsync, which comes up to a frame period later. The frame
+    /// loop calls it from its own task after the tick's microtasks, so what the key's handlers
+    /// queued there is in the frame, as a browser paints after an input task and its microtasks.
+    /// Returns whether it stepped a window.
+    ///
+    /// Throws when called from a handler: a step draws, and a handler is inside the input
+    /// dispatch of a tick. It leaves the list alone when the last tick's pump ran a link step
+    /// (that was the frame) and discards it with `GPUIX_INPUT_FRAME_OFF` set. macOS only;
+    /// everything else answers false.
+    #[napi]
+    pub fn step_started_links(&self) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            crate::events::sync_dispatch::native_call(|| {
+                if !crate::events::sync_dispatch::outermost_native_call() {
+                    return Err(Error::from_reason(
+                        "stepStartedLinks cannot run inside an event handler that native called synchronously: it draws a frame. The frame loop calls it from its own task.",
+                    ));
+                }
+                if INPUT_FRAME_OFF.load(std::sync::atomic::Ordering::Relaxed) {
+                    gpui_macos::discard_started_display_links();
+                    return Ok(false);
+                }
+                if self.last_pump_stepped_a_link.load(std::sync::atomic::Ordering::Relaxed)
+                    || !gpui_macos::started_display_links_pending()
+                {
+                    return Ok(false);
+                }
+                gpui_macos::step_started_display_links();
+                Ok(true)
+            })
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(false)
+        }
     }
 
     /// Whether the last `tick()` left a key event queued or ended after sending one, so the

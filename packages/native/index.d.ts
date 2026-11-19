@@ -53,6 +53,25 @@ export declare class GpuixRenderer {
   tick(): boolean
   isInitialized(): boolean
   /**
+   * Whether a display link started since it last drew still waits for its first step, so the
+   * frame loop has to call `stepStartedLinks` after the task and microtasks of the tick that
+   * started it. macOS only; everything else answers false.
+   */
+  startedLinksPending(): boolean
+  /**
+   * Draws the input frame: the first step of the display links the last ticks started, now
+   * instead of at the link's first vsync, which comes up to a frame period later. The frame
+   * loop calls it from its own task after the tick's microtasks, so what the key's handlers
+   * queued there is in the frame, as a browser paints after an input task and its microtasks.
+   * Returns whether it stepped a window.
+   *
+   * Throws when called from a handler: a step draws, and a handler is inside the input
+   * dispatch of a tick. It leaves the list alone when the last tick's pump ran a link step
+   * (that was the frame) and discards it with `GPUIX_INPUT_FRAME_OFF` set. macOS only;
+   * everything else answers false.
+   */
+  stepStartedLinks(): boolean
+  /**
    * Whether the last `tick()` left a key event queued or ended after sending one, so the
    * frame loop has to tick again at once instead of waiting for a wake or its timer. Only a
    * macOS window yields per key event; everything else answers false.
