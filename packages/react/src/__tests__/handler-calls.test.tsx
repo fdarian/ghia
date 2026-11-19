@@ -8,6 +8,7 @@
 import fs from "fs"
 import { describe, expect, it } from "vitest"
 import { defineKeyframes } from "../index"
+import { document } from "@ghia/native/host"
 import { encodeWireBatchForTest } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing"
 
@@ -70,6 +71,13 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "postNativeEvent",
   "tick",
 ])
+
+/** The editing calls need the editing host focused with the caret in it, which the calls before them may have moved. */
+function placeCaretInEditor() {
+  const host = document.body.querySelector("[contenteditable]")
+  host.focus()
+  document.getSelection().collapse(host.firstChild, 1)
+}
 
 function calls(r, ids) {
   return {
@@ -237,6 +245,14 @@ function calls(r, ids) {
     setWindowTitle: () => r.setWindowTitle("handler-calls"),
     setWindowMediaChange: () => r.setWindowMediaChange(false),
     setWindowSelectionChange: () => r.setWindowSelectionChange(false, 1),
+    simulateEditingComposition: () => {
+      placeCaretInEditor()
+      r.simulateEditingComposition([{ action: "mark", text: "a" }, { action: "unmark" }])
+    },
+    simulateEditingInput: () => {
+      placeCaretInEditor()
+      r.simulateEditingInput("insertText", "x")
+    },
     simulateLostMouseUp: () => r.simulateLostMouseUp(),
     simulatePointerLockGranting: () => r.simulatePointerLockGranting(true),
     simulatePointerLockLost: () => r.simulatePointerLockLost(),
@@ -303,6 +319,7 @@ describeNative("renderer calls from a sync handler", () => {
             <form testId="form">
               <input testId="field" defaultValue="hi" style={{ width: 100, height: 20 }} onKeyDown={on === "keydown" ? run : undefined} />
             </form>
+            <div contentEditable style={{ width: 100, height: 20 }}>hi</div>
             <input testId="check" type="checkbox" />
             <input testId="range" type="range" />
             <img testId="img" style={{ width: 10, height: 10 }} />
@@ -322,6 +339,7 @@ describeNative("renderer calls from a sync handler", () => {
         expect(failures).toEqual([])
         expect(ran.length).toBeGreaterThan(80)
       } finally {
+        document.getSelection().collapse(null)
         unmount()
       }
     })

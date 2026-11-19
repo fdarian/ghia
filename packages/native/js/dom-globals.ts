@@ -21,6 +21,7 @@ import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
 import { HTMLCollection, NodeList } from "./dom/html-collection.js"
 import { HTMLButtonElement, HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
+import { AbstractRange, Range, StaticRange } from "./dom/range.js"
 import { ToggleEvent } from "./dom/toggle-event.js"
 import { NodeFilter, TreeWalker } from "./dom/tree-walker.js"
 import { Selection } from "./dom/selection.js"
@@ -68,6 +69,9 @@ const DOM_CLASSES = {
   CSSStyleRule,
   CSSRuleList,
   Selection,
+  AbstractRange,
+  StaticRange,
+  Range,
   MutationObserver,
   MutationRecord,
   DOMRect,

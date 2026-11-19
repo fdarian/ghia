@@ -408,6 +408,24 @@ describe("the tabbable selector", () => {
   })
 })
 
+describe(":read-write and :read-only", () => {
+  it("match a text control by its own state and an element by contenteditable", () => {
+    const text = el("input", { id: "text", type: "text" })
+    const locked = el("input", { id: "locked", readOnly: true })
+    const disabled = el("textarea", { id: "off", disabled: true })
+    const checkbox = el("input", { id: "box", type: "checkbox" })
+    const plain = el("div", { id: "plain" })
+    const inside = el("span", { id: "inside" })
+    const inner = el("input", { id: "inner", readOnly: true })
+    const island = el("div", { id: "island", contentEditable: "false" }, el("b", { id: "deep" }))
+    const host = el("div", { id: "host", contentEditable: true }, inside, inner, island)
+    const root = el("div", {}, text, locked, disabled, checkbox, plain, host)
+    expect(ids(root.querySelectorAll(":read-write"))).toEqual(["text", "host", "inside"])
+    expect(ids(root.querySelectorAll(":read-only"))).toEqual(["locked", "off", "box", "plain", "inner", "island", "deep"])
+    expect(host.matches(":not(:read-only)")).toBe(true)
+  })
+})
+
 describe("the state pseudo-classes", () => {
   it("ask the native renderer about the element, for exactly the pseudo-class written", () => {
     const t = page()

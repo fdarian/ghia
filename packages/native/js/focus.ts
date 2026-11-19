@@ -1,4 +1,7 @@
 import { HOST_BINDING, flushPendingMutations, type ObservableElement } from "./bounds.js"
+import { placeCaretInEditingHost } from "./dom/selection.js"
+import { isEditingHost } from "./editing/host.js"
+import type { Element } from "./dom/nodes.js"
 import type { NativeRenderer } from "./host.js"
 
 export interface FocusOptions {
@@ -32,7 +35,20 @@ export function focusHostElement(element: ObservableElement, options?: FocusOpti
   // The web renderer's `focusElement` returns nothing and takes the focus as it always did.
   const asked = required(renderer.focusElement, "focus()").call(renderer, element.nativeId)
   if (asked === false) return
+  // Chrome puts the caret in an editing host that takes focus while the selection is elsewhere.
+  if (isEditingHost(element as unknown as Element)) placeCaretInEditingHost(element as unknown as Element)
   if (!options?.preventScroll) scrollFocusIntoView(renderer, element.nativeId)
+}
+
+/**
+ * A `focusin` that native reported: focus moved to an editing host by Tab or a click, not by `focus()`,
+ * which places the caret itself. Chrome puts the caret at the start of the host unless the selection is
+ * already in it. Runs before the event is delivered, so its listeners see the selection.
+ */
+export function placeCaretOnFocusIn(element: object | undefined): void {
+  // The root dropped the element between the focus change and this event.
+  if (element === undefined) return
+  if (isEditingHost(element as Element)) placeCaretInEditingHost(element as Element)
 }
 
 /**

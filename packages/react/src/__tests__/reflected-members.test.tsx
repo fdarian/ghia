@@ -1,4 +1,4 @@
-// hidden, tabIndex, isContentEditable, shadowRoot and assignedSlot on host elements, and the user agent
+// hidden, tabIndex, shadowRoot and assignedSlot on host elements, and the user agent
 // style `[hidden]` gives: display: none under the author's own style.
 import { describe, expect, it } from "vitest"
 import type { PublicInstance } from "@ghia/native/host"
@@ -168,7 +168,7 @@ describeNative("the members with a fixed answer", () => {
     let shape: PublicInstance | null = null
     const root = createTestRoot()
     root.render(
-      <div ref={(element) => { box = element }} contentEditable>
+      <div ref={(element) => { box = element }}>
         <svg width={10} height={10}>
           <rect ref={(element) => { shape = element }} width={5} height={5} />
         </svg>
@@ -176,7 +176,6 @@ describeNative("the members with a fixed answer", () => {
     )
     try {
       for (const element of [box!, shape!]) {
-        expect(element.isContentEditable).toBe(false)
         expect(element.shadowRoot).toBeNull()
         expect(element.assignedSlot).toBeNull()
       }

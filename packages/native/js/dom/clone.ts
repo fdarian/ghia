@@ -7,10 +7,11 @@
 
 import { isNotAttribute } from "./attribute-names.js"
 import { carryStyleMarks, styleAttributeText } from "./css-style-declaration.js"
-import { DOM_BINDING, type Element, type ElementBinding, type Node, type TextBinding } from "./nodes.js"
+import { DOM_BINDING, type DocumentFragment, type Element, type ElementBinding, type Node, type ParentBinding, type TextBinding } from "./nodes.js"
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
+const DOCUMENT_FRAGMENT_NODE = 11
 
 type PrimitiveProp = string | number | boolean
 
@@ -41,12 +42,24 @@ function cloneText(source: Node): Node {
   return binding.createText(binding.data)
 }
 
+function cloneFragment(source: DocumentFragment, deep: boolean): Node {
+  const binding: ParentBinding = source[DOM_BINDING]()
+  const clone = binding.createFragment()
+  if (deep) {
+    const cloneBinding: ParentBinding = clone[DOM_BINDING]()
+    for (const child of binding.children) cloneBinding.insertBefore(cloneNode(child, true), null)
+  }
+  return clone
+}
+
 export function cloneNode(source: Node, deep: boolean): Node {
   switch (source.nodeType) {
     case ELEMENT_NODE:
       return cloneElement(source as Element, deep)
     case TEXT_NODE:
       return cloneText(source)
+    case DOCUMENT_FRAGMENT_NODE:
+      return cloneFragment(source as DocumentFragment, deep)
     default:
       throw new DOMException(`cloneNode is not supported on a ${source.nodeName} node`, "NotSupportedError")
   }

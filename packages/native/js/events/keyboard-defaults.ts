@@ -14,6 +14,11 @@ import {
   type PublicEventFields,
   type RootEvent,
 } from "./dispatch.js"
+import type { Element } from "../dom/nodes.js"
+import { paintedSelectionTookOver } from "../dom/selection.js"
+import { isSingleGrapheme } from "../dom/text-segmentation.js"
+import { editingHostOf } from "../editing/host.js"
+import { focusedNode, runEditingInput } from "../editing/input.js"
 import { scrollKeyName } from "../scroll.js"
 import { moveFocusByTab } from "../focus.js"
 import { isDragEvent } from "./drag.js"
@@ -24,6 +29,7 @@ import {
   document,
   isDocumentEvent,
   listensForSelectionChange,
+  wantsNativeSelectionChange,
   window,
 } from "./window-target.js"
 
@@ -63,7 +69,7 @@ export function handlesEvent(root: ActiveRoot, event: EventPayload): boolean {
   if (event.eventType === "selectionChange") {
     return (
       event.elementId === root.windowSelectionEventId &&
-      (Boolean(root.handlers.onSelectionChange) || listensForSelectionChange())
+      (Boolean(root.handlers.onSelectionChange) || wantsNativeSelectionChange())
     )
   }
   if (event.eventType === "appearanceChange") {
@@ -113,6 +119,8 @@ export function runRootEvent(
   context: RootEventContext
 ): DomDispatchResult {
   if (event.eventType === "selectionChange") {
+    // `value` is the painted text, absent after a clear: a clear is not a replacement of a node selection.
+    if (event.value != null) paintedSelectionTookOver()
     root.handlers.onSelectionChange?.(windowLevelEvent(root, event), context.renderer)
     if (listensForSelectionChange()) dispatchSelectionChange(root, event)
     return notHandled
@@ -151,10 +159,33 @@ export function runRootEvent(
   return result
 }
 
+const ELEMENT_NODE = 1
+const TEXT_CONTROLS: ReadonlySet<string> = new Set(["input", "textarea"])
+
+/** The edit a key makes in an editing host, as Chrome's keydown default action does; native text input never reaches a `<div contenteditable>`. */
+function editingInputOf(key: string | undefined, shift: boolean): { inputType: string; data: string | null } | undefined {
+  if (key === undefined) return undefined
+  if (key === "Enter") return { inputType: shift ? "insertLineBreak" : "insertParagraph", data: null }
+  if (key === "Backspace") return { inputType: "deleteContentBackward", data: null }
+  if (key === "Delete") return { inputType: "deleteContentForward", data: null }
+  return isSingleGrapheme(key) ? { inputType: "insertText", data: key } : undefined
+}
+
+function typeIntoEditingHost(event: DomEvent): boolean {
+  const edit = editingInputOf(event.key, Boolean(event.modifiers?.shift))
+  if (edit === undefined) return false
+  const focused = focusedNode()
+  if (editingHostOf(focused) === null || (focused.nodeType === ELEMENT_NODE && TEXT_CONTROLS.has((focused as Element).localName))) {
+    return false
+  }
+  return runEditingInput(edit.inputType, edit.data).handled
+}
+
 // The default actions of a key run after every handler had the chance to
 // call preventDefault().
 function runKeyDefault(root: ActiveRoot, event: DomEvent, context: RootEventContext) {
   if (hasCommandModifier(event)) return
+  if (typeIntoEditingHost(event)) return
   if (event.key === "Escape") {
     context.topLayer()?.onEscapeKeyDown(event as KeyEvent)
   } else if (event.key === "Tab" && root.handlers.tabNavigation !== false) {

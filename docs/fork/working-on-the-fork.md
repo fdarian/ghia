@@ -117,6 +117,16 @@ See [events-and-input.md](events-and-input.md).
   counts `has*`. Anything a build publishes must be idempotent, since a pass can be dropped.
 - **Observers.** `onLayout` and the observers are read from the published boxes: see
   [Forced reads, observers and content visibility](#forced-reads-observers-and-content-visibility).
+- **Editing hosts and live ranges.** See [editing.md](editing.md).
+  - Every child or text mutation in an adapter calls its live-range hook exactly once, and a path that is reached through the
+    DOM API must not call it again: `liveRangesAfterInsert` in React `linkChild` and Solid `insertHostNode`,
+    `liveRangesBeforeRemove` in React `unlinkChild` and Solid `removeFromParent` (before the splice, with the old index),
+    `liveRangesReplaceData` in `replaceData` (`js/dom/nodes.ts`) for the DOM members and in React `commitTextUpdate` and
+    Solid's universal `replaceText` for the framework's own text commits. `setDomTextData` and `replaceHostText` are what
+    `binding.setData` reaches after `replaceData` has notified, so they stay silent. A pick that adds a mutation path keeps the
+    count at one.
+  - `takes_focus` reads the parent's editability, so a `contenteditable` write and a reparent retrack the subtree
+    (`editable_count` gates the reparent), and a flipped element is marked render-changed.
 
 ### Layout and scrolling
 

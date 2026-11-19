@@ -71,6 +71,7 @@ A change reaches the screen like this: the adapter queues host mutations as one 
 | Paint and style | `style.rs`, `css/`, `color.rs`, `text/inline.rs`, `custom_elements/svg_*.rs` | `svg.ts` | `effects.rs`, `scene.rs`, `style.rs`, `crates/gpui_apple` |
 | Native views | `custom_elements/webview/`, `platform/webview_macos.rs` | `webview.ts` | `composition.rs`, `composition/`, `crates/gpui_macos/src/window/composition.rs` |
 | Motion | `motion/` | `motion-*.ts`, `keyframes.ts`, `layout-animation.ts`, `match-media.ts` | |
+| Editing, ranges, node selection | `html/editing.rs`, `retained_tree.rs` (`takes_focus`) | `editing/` (`host`, `input`), `dom/range.ts`, `dom/live-ranges.ts`, `dom/selection.ts`, `focus.ts` | |
 | Text, selection, search | `text/`, `syntax/`, `markdown/`, `diff/` | `text-selection.ts` | `elements/atomic_inline.rs`, `text_system/inline.rs` |
 | Bounds, observers, automation | `automation.rs`, `observers.rs`, `resolved_style.rs` | `bounds.ts`, `observers.ts`, `automation/` | `window.rs` (`draw_if_dirty`, `publish_layout`) |
 | Skipped subtrees, culling | `retain.rs`, `tape.rs`, `layout/cull.rs`, `perf_counters.rs` | `testing.ts` (counters and switches) | `elements/retained.rs`, `window/retained.rs` |

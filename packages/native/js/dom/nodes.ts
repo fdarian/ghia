@@ -16,6 +16,8 @@ import { classListOf, type DOMTokenList } from "./class-list.js"
 import { datasetOf } from "./dataset.js"
 import type { DOMRectList } from "./dom-rect.js"
 import { defineConstraintValidation } from "./constraint-validation.js"
+import { hasLiveRanges, liveRangesReplaceData, liveRangesSplitText } from "./live-ranges.js"
+import { namedError } from "../named-error.js"
 import { elementsByClassName, elementsByName, elementsByTagName, staticNodeList, type HTMLCollection, type NodeList } from "./html-collection.js"
 import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
 import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll } from "./selectors.js"
@@ -62,6 +64,8 @@ export type ParentBinding = NodeBinding & {
   createText(data: string): Text
   /** An element of the window that owns this node, in no tree yet: `type` is one of the element types. */
   createElement(type: string): Element
+  /** An empty `DocumentFragment` of the window that owns this node: never known to native, whatever is placed in it. */
+  createFragment(): DocumentFragment
 }
 
 export type ElementBinding = ParentBinding & StyleBinding & {
@@ -87,6 +91,8 @@ export type TextBinding = NodeBinding & {
   setData(data: string): void
   /** A text node of the window that owns this one, in no tree yet. */
   createText(data: string): Text
+  /** An empty `DocumentFragment` of the window that owns this one. */
+  createFragment(): DocumentFragment
 }
 
 const ELEMENT_NODE = 1
@@ -118,6 +124,22 @@ function orderOfTree(top: Node): number {
   const created = ++nextTreeOrder
   treeOrder.set(top, created)
   return created
+}
+
+/** @internal The document every node belongs to; throws before the runtime created it. */
+export function runtimeDocument(): Document {
+  const document = documentState.document
+  if (document === null) throw new Error("The document has not been created yet")
+  return document
+}
+
+/** @internal Where `node` is among its parent's children: the "index" of the DOM standard. The node has a parent. */
+export function indexOfNode(node: Node): number {
+  const parent = node.parentNode
+  if (parent === null) throw new Error("The node has no parent, so it has no index")
+  const index = parent[DOM_BINDING]().children.indexOf(node)
+  if (index < 0) throw new Error("The node's parent does not list it among its children")
+  return index
 }
 
 function ancestorsOf(node: Node): Node[] {
@@ -315,6 +337,21 @@ function defineConstants(target: object, constants: Record<string, number>): voi
   }
 }
 
+function indexSizeError(): DOMException {
+  return namedError("IndexSizeError", "The offset is greater than the length of the node's data") as DOMException
+}
+
+/** "Replace data": the one way the text of a node changes through the DOM members. */
+function replaceData(node: CharacterDataClass, offset: number, count: number, data: string): void {
+  const binding = node[DOM_BINDING]()
+  const current = binding.data
+  if (offset > current.length) throw indexSizeError()
+  const removed = Math.min(count, current.length - offset)
+  const next = current.slice(0, offset) + data + current.slice(offset + removed)
+  if (hasLiveRanges()) liveRangesReplaceData(node as unknown as Node, offset, removed, data.length)
+  binding.setData(next)
+}
+
 abstract class CharacterDataClass extends NodeClass {
   constructor() {
     super()
@@ -328,7 +365,7 @@ abstract class CharacterDataClass extends NodeClass {
   }
 
   set data(value: string) {
-    this[DOM_BINDING]().setData(value === null ? "" : String(value))
+    replaceData(this, 0, this.length, value === null ? "" : String(value))
   }
 
   get nodeValue(): string {
@@ -349,6 +386,29 @@ abstract class CharacterDataClass extends NodeClass {
 
   get length(): number {
     return this.data.length
+  }
+
+  substringData(offset: number, count: number): string {
+    const data = this.data
+    const start = offset >>> 0
+    if (start > data.length) throw indexSizeError()
+    return data.slice(start, start + (count >>> 0))
+  }
+
+  appendData(data: string): void {
+    replaceData(this, this.length, 0, String(data))
+  }
+
+  insertData(offset: number, data: string): void {
+    replaceData(this, offset >>> 0, 0, String(data))
+  }
+
+  deleteData(offset: number, count: number): void {
+    replaceData(this, offset >>> 0, count >>> 0, "")
+  }
+
+  replaceData(offset: number, count: number, data: string): void {
+    replaceData(this, offset >>> 0, count >>> 0, String(data))
   }
 
   remove(): void {
@@ -380,6 +440,34 @@ abstract class TextClass extends CharacterDataClass {
 
   get nodeName(): string {
     return "#text"
+  }
+
+  /** "Split a Text node": this keeps the text before `offset`, and the new node after it takes the rest. */
+  splitText(offset: number): Text {
+    const start = offset >>> 0
+    const data = this.data
+    if (start > data.length) throw indexSizeError()
+    const created = this[DOM_BINDING]().createText(data.slice(start))
+    const parent = this.parentNode
+    if (parent !== null) {
+      tree.insertBefore(parent, created, this.nextSibling)
+      if (hasLiveRanges()) liveRangesSplitText(this as unknown as Node, start, created, parent, indexOfNode(this as unknown as Node))
+    }
+    replaceData(this, start, data.length - start, "")
+    return created
+  }
+
+  /** The text of this node and of the text nodes next to it, in order. */
+  get wholeText(): string {
+    let first: Node = this as unknown as Node
+    for (let before = first.previousSibling; before !== null && before.nodeType === TEXT_NODE; before = before.previousSibling) {
+      first = before
+    }
+    let text = ""
+    for (let node: Node | null = first; node !== null && node.nodeType === TEXT_NODE; node = node.nextSibling) {
+      text += (node as unknown as TextClass).data
+    }
+    return text
   }
 }
 
@@ -725,12 +813,20 @@ abstract class DocumentClass extends NodeClass {
 
 Object.defineProperty(DocumentClass.prototype, "ownerDocument", { configurable: true, get: () => null })
 
-/** Never instantiated: it exists so `node instanceof DocumentFragment` is false, not an error. */
+/**
+ * A light container for nodes: what `document.createDocumentFragment()` and `Range.cloneContents()` hand
+ * out. An adapter's fragment class holds children through the same binding an element does, and
+ * is never mounted: inserting a fragment moves its children (tree-mutation.ts), so a fragment
+ * does not reach native as a node. `new DocumentFragment()` throws, unlike in a browser: the
+ * adapters make the nodes of a window.
+ */
 abstract class DocumentFragmentClass extends NodeClass {
   constructor() {
     super()
-    illegalConstructor()
+    if (new.target === DocumentFragmentClass) illegalConstructor()
   }
+
+  abstract [DOM_BINDING](): ParentBinding
 
   get nodeType(): number {
     return DOCUMENT_FRAGMENT_NODE
@@ -746,6 +842,39 @@ abstract class DocumentFragmentClass extends NodeClass {
     return text
   }
 
+  /** Every child goes; a non-empty string becomes the one child, a text node. */
+  set textContent(value: string | null) {
+    tree.replaceAllWithText(this as unknown as Node, value)
+  }
+
+  get children(): readonly Element[] {
+    return this[DOM_BINDING]().children.filter(isElement)
+  }
+
+  get childElementCount(): number {
+    return this.children.length
+  }
+
+  get firstElementChild(): Element | null {
+    return this[DOM_BINDING]().children.find(isElement) ?? null
+  }
+
+  get lastElementChild(): Element | null {
+    return this.children[this.children.length - 1] ?? null
+  }
+
+  append(...nodes: Array<Node | string>): void {
+    tree.append(this as unknown as Node, nodes)
+  }
+
+  prepend(...nodes: Array<Node | string>): void {
+    tree.prepend(this as unknown as Node, nodes)
+  }
+
+  replaceChildren(...nodes: Array<Node | string>): void {
+    tree.replaceChildren(this as unknown as Node, nodes)
+  }
+
   querySelector(selector: string): Element | null {
     return querySelector(this as unknown as Node, selector, "DocumentFragment")
   }
@@ -753,12 +882,15 @@ abstract class DocumentFragmentClass extends NodeClass {
   querySelectorAll(selector: string): NodeList {
     return staticNodeList(querySelectorAll(this as unknown as Node, selector, "DocumentFragment"))
   }
-
-  set textContent(_value: string | null) {}
 }
 
-/** Never instantiated, like `DocumentFragment`, which it extends in the DOM. */
-abstract class ShadowRootClass extends DocumentFragmentClass {}
+/** Never instantiated: there is no shadow DOM. */
+abstract class ShadowRootClass extends DocumentFragmentClass {
+  constructor() {
+    super()
+    illegalConstructor()
+  }
+}
 
 type DomClassSet = {
   Node: typeof NodeClass

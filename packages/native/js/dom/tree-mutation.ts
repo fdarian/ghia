@@ -4,7 +4,7 @@
  * primitives an adapter's binding gives: place a node before another, take a node out.
  * What the adapter does behind them (its mirror, the native tree, `MutationObserver`
  * records) is its own; the validation, the argument handling and the return values are
- * the DOM's and live here.
+ * the DOM's and live here. A `DocumentFragment` is inserted as its children, in order.
  */
 
 import { DOM_BINDING, Element, Node, type NodeBinding, type ParentBinding } from "./nodes.js"
@@ -12,6 +12,7 @@ import { DOM_BINDING, Element, Node, type NodeBinding, type ParentBinding } from
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
 const DOCUMENT_NODE = 9
+const DOCUMENT_FRAGMENT_NODE = 11
 
 function hierarchyRequestError(message: string): DOMException {
   return new DOMException(message, "HierarchyRequestError")
@@ -48,10 +49,15 @@ function assertNode(value: unknown, method: string, owner: string, position: num
 }
 
 /** The DOM's "ensure pre-insertion validity", for the node types that exist here. */
-function assertCanInsert(parent: Node, node: Node, before: Node | null): ParentBinding {
+export function assertCanInsert(parent: Node, node: Node, before: Node | null): ParentBinding {
   const binding = parentBindingOf(parent)
-  binding.assertSameWindow(node)
-  if (node.nodeType !== ELEMENT_NODE && node.nodeType !== TEXT_NODE) {
+  if (node.nodeType === DOCUMENT_FRAGMENT_NODE) {
+    // The fragment is never inserted itself: its children are, and they are what has to be in this window.
+    for (const child of node[DOM_BINDING]().children) binding.assertSameWindow(child)
+  } else {
+    binding.assertSameWindow(node)
+  }
+  if (node.nodeType !== ELEMENT_NODE && node.nodeType !== TEXT_NODE && node.nodeType !== DOCUMENT_FRAGMENT_NODE) {
     throw hierarchyRequestError(`Nodes of type '${node.nodeName}' may not be inserted inside nodes of type '${parent.nodeName}'`)
   }
   if (node.contains(parent)) {
@@ -78,6 +84,12 @@ function takeNodes(parent: Node, nodes: readonly Node[]): void {
 
 function insertNode(parent: Node, node: Node, before: Node | null): void {
   const binding = assertCanInsert(parent, node, before)
+  if (node.nodeType === DOCUMENT_FRAGMENT_NODE) {
+    // A fragment is replaced by its children, moved in order: each leaves the fragment through the
+    // adapter's own removal, so ranges and observers hear ordinary moves.
+    for (const child of node[DOM_BINDING]().children.slice()) binding.insertBefore(child, before)
+    return
+  }
   // Inserting a node before itself leaves it where it is.
   binding.insertBefore(node, before === node ? node.nextSibling : before)
 }

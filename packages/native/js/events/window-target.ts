@@ -1,9 +1,10 @@
 import type { EventPayload } from "../../index.js"
 import type { Animation } from "../web-animations.js"
 import { isElementType, isSvgElementType } from "../dom/element-types.js"
-import { Document, DOM_BINDING, registerDocument, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
+import { Document, DOM_BINDING, registerDocument, type DocumentFragment, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
-import { getSelection, type Selection } from "../dom/selection.js"
+import { Range } from "../dom/range.js"
+import { getSelection, holdsNodeSelection, setSelectionHooks, type Selection } from "../dom/selection.js"
 import { bumpTreeVersion } from "../dom/tree-version.js"
 import { createTreeWalker, type NodeFilterLike, type TreeWalker } from "../dom/tree-walker.js"
 import { mountedRenderer } from "../mounted-renderer.js"
@@ -171,6 +172,8 @@ export type DomNodeFactory = {
   /** `type` is one of the element types, as written: `isElementType` has checked it. */
   createElement(type: string): object
   createTextNode(data: string): Text
+  /** An empty `DocumentFragment`: never mounted, it holds children through the same mirror an element does. */
+  createDocumentFragment(): object
 }
 
 /** The elements every window root is made of: `html`, with `head` and `body` in it, the latter holding the app. */
@@ -402,6 +405,25 @@ export class GpuixDocument<Element = unknown> extends Document {
     return currentNodeFactory("createTextNode").createTextNode(String(data))
   }
 
+  /** A new empty `DocumentFragment` of the window that mounted last. */
+  createDocumentFragment(): DocumentFragment {
+    return currentNodeFactory("createDocumentFragment").createDocumentFragment() as DocumentFragment
+  }
+
+  /** A new `Range` collapsed at the start of the document: `(document, 0)`. */
+  createRange(): Range {
+    return new Range()
+  }
+
+  /**
+   * Whether a window of the app is open. Native does not tell JS which window is the key one, so
+   * the document of an app with a window is taken to have focus.
+   */
+  hasFocus(): boolean {
+    for (const entry of elementSources.values()) if (!entry.windowGone) return true
+    return false
+  }
+
   /** A `TreeWalker` over `root`, standing on `root`, as `document.createTreeWalker` does: `whatToShow` is every node by default. */
   createTreeWalker(root: Node, whatToShow?: number, filter: NodeFilterLike | null = null): TreeWalker {
     return createTreeWalker(root, whatToShow, filter)
@@ -552,6 +574,13 @@ export function subscribeWindowEventTypes(listener: () => void): () => void {
 export const window = new GpuixEventTarget(notifyTypeSubscribers, globalThis)
 export const document = new GpuixDocument(notifyTypeSubscribers)
 registerDocument(document)
+setSelectionHooks({
+  listens: () => listensForSelectionChange(),
+  dispatch: () => {
+    document.dispatchEvent(new Event("selectionchange"))
+  },
+  heldChanged: notifyTypeSubscribers,
+})
 
 /**
  * Lets the runtime see the elements of the root that drives `renderer`, through
@@ -663,8 +692,16 @@ export function listensForSelectionChange(): boolean {
 }
 
 /**
+ * Whether native's `selectionChange` is wanted: for a listener, and while a node selection is held,
+ * which painted text that the user selects replaces.
+ */
+export function wantsNativeSelectionChange(): boolean {
+  return listensForSelectionChange() || holdsNodeSelection()
+}
+
+/**
  * Keeps the renderer's `selectionChange` event on while `rootListens()` says the root wants it or a
- * `selectionchange` listener exists on `window` or `document`. `resync` after `rootListens` may
+ * `selectionchange` listener exists on `window` or `document`, or a node selection is held. `resync` after `rootListens` may
  * have changed; `stop` turns it off. Native names the window's event with `eventId`.
  */
 export function syncWindowSelectionChange(
@@ -673,7 +710,7 @@ export function syncWindowSelectionChange(
   rootListens: () => boolean
 ): { resync: () => void; stop: () => void } {
   const resync = () => {
-    renderer.setWindowSelectionChange?.(rootListens() || listensForSelectionChange(), eventId)
+    renderer.setWindowSelectionChange?.(rootListens() || wantsNativeSelectionChange(), eventId)
   }
   resync()
   typeSubscribers.add(resync)

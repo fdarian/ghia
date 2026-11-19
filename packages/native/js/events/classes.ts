@@ -7,6 +7,8 @@
  * without the runtime's constructor: see `delivered-events.ts`.
  */
 
+import type { StaticRange } from "../dom/range.js"
+
 /** The four modifiers of `EventModifierInit`, plus the ones no platform reports to Ghia. */
 export interface EventModifierInit {
   ctrlKey?: boolean
@@ -310,7 +312,11 @@ export interface InputEventInit extends UIEventInit {
   isComposing?: boolean
   inputType?: string
   dataTransfer?: object | null
+  /** The `StaticRange`s the edit will affect; `getTargetRanges()` hands out a copy. */
+  targetRanges?: readonly StaticRange[]
 }
+
+const targetRangesOf = new WeakMap<object, readonly StaticRange[]>()
 
 export class InputEvent extends UIEvent {
   readonly data: string | null
@@ -324,6 +330,12 @@ export class InputEvent extends UIEvent {
     this.isComposing = init.isComposing ?? false
     this.inputType = init.inputType ?? ""
     this.dataTransfer = init.dataTransfer ?? null
+    if (init.targetRanges !== undefined) targetRangesOf.set(this, [...init.targetRanges])
+  }
+
+  /** The ranges `beforeinput` says the edit will affect: empty for any other event. */
+  getTargetRanges(): StaticRange[] {
+    return [...(targetRangesOf.get(this) ?? [])]
   }
 }
 
