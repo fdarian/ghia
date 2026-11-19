@@ -206,7 +206,7 @@ second wake went from 5% to nearly all between runs of the same build. `-NSUpdat
 
 **Design.** `pump_app_nonblocking` calls `[CATransaction flush]` after each `sendEvent:`. The update cycle's next pass
 then finds no transaction to commit and arms nothing. Nothing else in the pump changed: the run-until-unhandled loop
-stays as it is and nothing blocks (#39).
+stays as it is and nothing blocks (#39), except that it ends after a frame step ([One step per pump](#one-frame-per-js-task)).
 
 **What the pump does not do.** `pump_app_nonblocking` does not call `[NSApplication updateWindows]`. `sendEvent:` sets
 `windowsNeedUpdate`, which installs a one-shot run loop observer that calls `updateWindows` in the next pass of the loop;
@@ -267,8 +267,39 @@ flag stays set from the wake until `tick()` returns, so wakes that arrive during
 
 Work that arrived meanwhile is not dropped: the frame step the display link merged into the main queue during a long tick
 is still there when `tick()` returns and `run_loop_pumped()` re-arms the watch, so it fires at once and the step runs in
-the next tick, right after the JS tasks that were queued. Two steps can run in one pump when a step outlasts a vsync. A
-frame that ends before the next vsync takes every wake, so fast frames keep the display rate.
+the next tick, right after the JS tasks that were queued. A frame that ends before the next vsync takes every wake, so
+fast frames keep the display rate.
+
+**One step per pump.** `pump_app_nonblocking` runs at most one display-link step (`step` in
+`gpui_macos/src/window.rs`, counted by `link_steps()`), and so does a tick. Without the stop, a frame that overran a vsync kept the
+pump in its run loop: each step blocks in `nextDrawable` until the next vsync, the link has queued its next tick by then,
+and the loop found a source every time. No wheel event was dequeued for 0.1 to 2 s, JS did not run, the window kept
+presenting a frozen scroll for 3 to 8 s of every 30 s, and a gap of 500 ms expired the wheel latch (`scroll_routing.rs`),
+so the scroll then stuck partway.
+
+The pump drains the NSEvents first (`drain_events`), then runs the run loop one source at a time while that handles
+sources (the loop exists for the webview's sources, see [the webview wake](#waking-js-for-a-webview)). The pump is one
+main-queue drain and at most one step per window. `nextEventMatchingMask:` runs one pass of the run loop in its mode when
+it finds no event, so a step can run inside the drain, and the pass of the source poll runs one too. Once a step has run,
+the drain goes on in a private mode with no sources (`GPUIPumpDrainMode`): the events that are queued, among them those
+that the same pass queued, come back in order, `sendEvent:` and the transaction flush run for each, and no source, the
+display link's next tick among them, runs. Without that, a pump that ran a step left the events of its pass for the next
+pump, and an overrunning animation handled one NSEvent per frame. A step in the drain or in the poll ends the call without
+polling the sources again. Other sources keep the loop.
+
+The block that has the embedder pump again is posted only when a step stopped its link (`link_stops()`, bumped by
+`count_step`) and at the 256-iteration cap. While a link runs, its next tick wakes the embedder within a vsync; a block
+after every step doubled the wakes of an animation (about 240 ticks a second at 120 Hz). With several windows the block
+is also posted when one window's link stops while another's runs, which costs one extra wake.
+
+The function returns whether a step ran in the call: a caller that steps the display links itself after the pump skips
+that step when it did, since the pump's step was the frame (`MacPlatform::pump_events` drops the flag for now). Only a
+step that ran a frame callback counts.
+`tests/pump_one_step.rs` (`harness = false`): a window whose frame sleeps 30 ms and asks for the next frame has at most
+one frame per pump, a pump that drew says a step ran, and several application-defined events posted before each pump are
+all handled by it (a main-queue block posts them, so they arrive in the pass that runs the step; events posted straight to NSApp were all returned before a pass and did not show the bug). With the wake hook installed, a step that leaves the link running is followed by a wake a vsync
+later, not at once, and every pump that ran a step after the last frame request is followed by a wake, the last one from
+the block.
 
 Don't tick inline from the wake callback or clear the flag before the tick (#56). Bun's `ThreadSafeFunction::on_dispatch`
 drains its queue without yielding, so once a frame outlasted a vsync each wake queued the next, and timers, promises
@@ -338,7 +369,7 @@ Memory layout that is not API, so `enable` refuses (an `Error`, and nothing is w
 
 Where it refuses, `webview_pulse.rs` logs the reason once and keeps the repeating `CFRunLoopTimer` it used before (16 ms for 1.5 s after anything asked a page for work, 250 ms otherwise); that timer exists only as this fallback.
 
-A run of the loop that returns after one source (`CFRunLoopRunInMode(.., 0.0, returnAfterSourceHandled)`) handles one source and receives the wake message in the same iteration, so another source that is signalled stays signalled and nothing wakes for it. `pump_app_nonblocking` therefore runs it until an iteration handles nothing. With one source per run, a `reload()` after a few idle seconds delivered `did-start-loading` and then nothing for seconds.
+A run of the loop that returns after one source (`CFRunLoopRunInMode(.., 0.0, returnAfterSourceHandled)`) handles one source and receives the wake message in the same iteration, so another source that is signalled stays signalled and nothing wakes for it. `pump_app_nonblocking` therefore runs it until an iteration handles nothing, or ran a display-link step ([One step per pump](#one-frame-per-js-task)). With one source per run, a `reload()` after a few idle seconds delivered `did-start-loading` and then nothing for seconds.
 
 **Numbers** (release addon, one machine, runs of the two addons back to back in one lock hold; load average 3 to 7 unless noted; `examples/webview-wake/`):
 

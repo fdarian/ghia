@@ -15,6 +15,8 @@ import { createTestRoot } from "../testing.js"
 import type { TestRenderer } from "../testing.js"
 
 const TIMEOUT = 120_000
+// Under the retention verifier a replaying frame is built whole, so a wheel is never a translate (testing.md, "The retention verifier").
+const verifying = process.env.GPUIX_RETAIN_VERIFY !== undefined
 const COUNT = 200
 const ROW = 40
 const TICK_MS = 1000 / 120
@@ -146,6 +148,44 @@ describe("partial redraw", () => {
         drive(renderer, check)
         expect(compared).toBeGreaterThan(40)
         expect(renderer.getPatchCounters().patchedFrames).toBeGreaterThan(0)
+        if (!verifying) {
+          expect(renderer.getPatchCounters().scrollPatch.shifted, "the wheel translates were drawn with a shift").toBeGreaterThan(0)
+        }
+      } finally {
+        app.unmount()
+      }
+    },
+    TIMEOUT,
+  )
+
+  it.skipIf(verifying)(
+    "copies the pixels of a list that a wheel translate keeps and draws the rest, through rows that come in and a scrollbar thumb that moves",
+    () => {
+      const app = open()
+      try {
+        const renderer = app.renderer
+        settle(renderer)
+        const before = renderer.getPatchCounters().scrollPatch
+
+        let compared = 0
+        const check = (name: string) => {
+          const { whole, kept } = pictures(renderer, name)
+          expect(kept, `${name}: the window keeps a picture`).not.toBeNull()
+          expect(kept === whole, `${name}: the picture kept is the frame drawn whole`).toBe(true)
+          compared++
+        }
+
+        check("start")
+        // 13 and 21 are fractions of a row, 55 and 90 bring rows in (and take rows out) in every frame; up and down.
+        for (const [step, delta] of [13, 21, 55, 90, 13, 55, -21, -90, -55, -13, 21, 90, -90, -55].entries()) {
+          renderer.dispatchScrollWheel(60, 200, 0, delta, undefined, "moved")
+          tick(renderer)
+          check(`wheel-${step}`)
+        }
+        const after = renderer.getPatchCounters().scrollPatch
+        expect(compared).toBeGreaterThan(10)
+        expect(after.membershipFrames - before.membershipFrames, "rows came in").toBeGreaterThan(0)
+        expect(after.shifted - before.shifted, "frames were presented with a shift").toBeGreaterThan(0)
       } finally {
         app.unmount()
       }

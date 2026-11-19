@@ -1137,15 +1137,15 @@ impl Tape {
     /// What the tape writes `delta` from where it wrote it, as text, one line per write, the texts
     /// where `root` is the path of the root that wrote it.
     pub(crate) fn describe(&self, delta: Point<Pixels>, root: &DocPath) -> String {
-        let lifted = (0..self.lifted.len() as u32).map(|rel| self.describe_lifted(rel, root)).collect::<String>();
+        let lifted = (0..self.lifted.len() as u32).map(|rel| self.describe_lifted(rel, delta, root)).collect::<String>();
         self.prepaint.described("prepaint", delta, root) + &self.paint.described("paint", delta, root) + &lifted
     }
 
-    /// What the element handed to the stacking context as `rel` wrote, as text.
-    fn describe_lifted(&self, rel: u32, root: &DocPath) -> String {
+    /// What the element handed to the stacking context as `rel` wrote, `delta` from where it wrote it, as text.
+    fn describe_lifted(&self, rel: u32, delta: Point<Pixels>, root: &DocPath) -> String {
         self.lifted
             .get(rel as usize)
-            .map_or_else(String::new, |entries| entries.described(&format!("lifted {rel} "), Point::default(), root))
+            .map_or_else(String::new, |entries| entries.described(&format!("lifted {rel} "), delta, root))
     }
 
     /// [`Self::describe`] of the tape as the build that made it had its path.
@@ -1362,7 +1362,7 @@ impl TapeStore {
         if self.verifying.get() {
             match phase {
                 Phase::Prepaint => self.replayed.borrow_mut().push((root, tape.borrow().describe(delta, doc))),
-                Phase::Lifted(rel) => self.replayed_lifted.borrow_mut().push((root, rel, tape.borrow().describe_lifted(rel, doc))),
+                Phase::Lifted(rel) => self.replayed_lifted.borrow_mut().push((root, rel, tape.borrow().describe_lifted(rel, delta, doc))),
                 _ => {}
             }
         }
@@ -1554,7 +1554,7 @@ impl TapeStore {
                     self.tapes.borrow().get(&root).map_or_else(Default::default, |tape| {
                         let tape = tape.borrow();
                         let lifted = (0..tape.lifted.len() as u32)
-                            .map(|rel| tape.describe_lifted(rel, &tape.doc))
+                            .map(|rel| tape.describe_lifted(rel, Point::default(), &tape.doc))
                             .filter(|slice| !slice.is_empty())
                             .collect::<String>();
                         (tape.describe_built(), lifted)
@@ -1977,6 +1977,40 @@ mod tests {
         assert_eq!(tapes.moved(1), down(-100.0), "a replay says where the root is");
         tapes.set(1, SharedTape::default());
         assert_eq!(tapes.moved(1), Point::default(), "a root built again is where it was built");
+    }
+
+    fn record_lifted_box(tape: &SharedTape, window: WindowId, y: f32) {
+        let _recording = Recorder::begin(tape, Phase::Lifted(0));
+        let bounds = gpui::Bounds::new(gpui::point(gpui::px(10.0), gpui::px(y)), gpui::size(gpui::px(30.0), gpui::px(40.0)));
+        crate::automation::record_bounds(
+            window,
+            1,
+            crate::automation::LaidOut::of_box(bounds, 1.0),
+            gpui::point(gpui::px(10.0), gpui::px(y)),
+            Default::default(),
+        );
+    }
+
+    #[test]
+    fn what_a_replay_puts_back_of_a_box_handed_to_the_context_is_described_where_it_puts_it() {
+        let window = WindowId::from(927);
+        let moved = gpui::point(gpui::px(0.0), gpui::px(-30.0));
+        let replayed = TapeStore::default();
+        replayed.verify(true);
+        let tape = SharedTape::default();
+        record_lifted_box(&tape, window, 20.0);
+        replayed.set(1, tape);
+        replayed.replay(window, 1, Phase::Prepaint, moved, &DocPath::default());
+        replayed.replay(window, 1, Phase::Lifted(0), moved, &DocPath::default());
+
+        let built = TapeStore::default();
+        built.verify(true);
+        let tape = SharedTape::default();
+        record_lifted_box(&tape, window, -10.0);
+        built.set(1, tape);
+        built.replay(window, 1, Phase::Prepaint, Point::default(), &DocPath::default());
+        assert!(replayed.describe_replays(false).contains("lifted 0 "), "{}", replayed.describe_replays(false));
+        assert_eq!(replayed.describe_replays(false), built.describe_replays(true));
     }
 
     #[test]
