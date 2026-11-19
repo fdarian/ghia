@@ -11983,8 +11983,12 @@ fn build_element_unpumped(
         .current(base_style)
         .and_then(|style| ctx.focus_styles.folded_for_resets(id, style, ctx.focus_handles.contains_key(&id)));
     let current_style = focus_reset_style.as_deref().or(animated.current(base_style));
+    // An atomic inline's overlay is laid over its style after it has descended (below): what the boxes around it
+    // declare is in `ctx.inherited` already.
     let overlaid_style = contents_overlay
-        .map(|overlay| current_style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(&overlay));
+        .as_ref()
+        .filter(|_| !atomic_root)
+        .map(|overlay| current_style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(overlay));
     let style = overlaid_style.as_deref().or(current_style);
     let anchored_style = anchor_scope.and_then(|anchored_id| {
         style.and_then(|style| crate::layout::anchor_size::resolve(anchored_id, style))
@@ -12056,6 +12060,10 @@ fn build_element_unpumped(
         .clone()
         .descend_with_custom(descend_style.as_deref(), element.has_inert_prop(), own_custom);
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
+    let atomic_overlaid = contents_overlay
+        .filter(|_| atomic_root)
+        .map(|overlay| style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(&overlay).into_owned());
+    let style = atomic_overlaid.as_ref().or(style);
     crate::layout::table::enter(&mut ctx.inherited.table_row, &mut ctx.inherited.table_cell, element);
     // The start of a logical inline pair is the right side in an rtl element.
     let rtl_style = style

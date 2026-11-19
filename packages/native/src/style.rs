@@ -250,6 +250,12 @@ fn deserialize_perspective_length<'de, D: Deserializer<'de>>(deserializer: D) ->
     }
 }
 length_field!(
+    deserialize_font_size,
+    "length",
+    "a CSS length with a unit, or calc()",
+    crate::css::dimension::parse_font_size
+);
+length_field!(
     deserialize_outline_offset,
     "outline offset",
     "a CSS length without %",
@@ -1029,6 +1035,7 @@ pub struct StyleDesc {
     // Text
     /// A number is px; a string is a CSS length. `em` and `%` are relative to the
     /// parent's font size, `rem` to the root's. Inherited.
+    #[serde(default, deserialize_with = "deserialize_font_size")]
     pub font_size: Option<LinearLength>,
     pub font_family: Option<String>,
     pub font_weight: Option<FontWeightValue>,

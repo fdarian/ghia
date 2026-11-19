@@ -100,6 +100,12 @@ pub(crate) fn parse_linear_length(token: &str) -> Option<LinearLength> {
     }
 }
 
+/// A `font-size`: [`parse_linear_length`], with a `calc()` marked as the math function Chrome computes it as.
+pub(crate) fn parse_font_size(token: &str) -> Option<LinearLength> {
+    let length = parse_linear_length(token)?;
+    Some(if super::syntax::function_args(token, "calc").is_some() { length.into_math_function() } else { length })
+}
+
 /// One length with no percentage, still unresolved. A bare number is only a
 /// length when it is zero, and `0%` is a percentage even though it is zero.
 pub(crate) fn parse_definite_length(token: &str) -> Option<LinearLength> {

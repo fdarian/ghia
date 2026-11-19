@@ -739,7 +739,8 @@ impl MotionValueStore {
             let value = match value {
                 AnimValue::Relative { px, percent, em, rem } => {
                     let declared = LinearLength::from_px_percent_em_rem(*px, *percent, *em, *rem);
-                    AnimValue::Number(parent.lengths.descend(Some(&declared), parent.above_root).font_size)
+                    let family = style.font_family.as_deref();
+                    AnimValue::Number(parent.lengths.descend_font(Some(&declared), family, parent.above_root).font_size)
                 }
                 other => other.clone(),
             };
