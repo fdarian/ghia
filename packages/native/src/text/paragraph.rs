@@ -271,7 +271,7 @@ pub fn styles(
             colors = colors.descend(declared);
             // A `display: contents` box has a font size too, and its children
             // inherit it.
-            lengths = lengths.descend(declared.font_size.as_ref(), false);
+            lengths = lengths.descend_style(Some(declared), false);
             underline_offset = underline_offset.inherit(declared.text_underline_offset.as_ref(), &lengths);
             // It has no box, so what it declares reaches the text only as far as
             // it is inherited.
@@ -285,7 +285,7 @@ pub fn styles(
                     group = *id;
                 }
             }
-            if declared.font_size.is_some() {
+            if lengths.sets_font_size(declared) {
                 style.font_size = Some(lengths.font_size as f32);
             }
             if let Some(line_height) = declared.line_height.as_ref() {
@@ -509,7 +509,7 @@ pub fn box_lengths(
                 of_box.entry(*id).or_insert(lengths);
                 continue;
             };
-            lengths = lengths.descend(motion.declared(*id, base, states(*id, base)).font_size.as_ref(), false);
+            lengths = lengths.descend_style(Some(&motion.declared(*id, base, states(*id, base))), false);
             of_box.entry(*id).or_insert(lengths);
         }
     }

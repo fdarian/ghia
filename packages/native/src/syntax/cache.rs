@@ -7,7 +7,7 @@
 //! then recolours existing spans without reparsing, and one cached document
 //! serves both appearances.
 //!
-//! GPUIX is immediate-mode: `<code>` re-renders on every frame. Without this
+//! GPUIX is immediate-mode: `<code-block>` re-renders on every frame. Without this
 //! cache a 200-line snippet is reparsed 60 times a second.
 
 use std::collections::{HashMap, VecDeque};

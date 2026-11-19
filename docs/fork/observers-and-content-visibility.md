@@ -129,7 +129,7 @@ Chrome's find buffer (`FindBuffer::ShouldIgnoreContents`) leaves out the content
 
 The reveal must last as long as the match is active. One that lasted only the frame that found it would build and skip the element on alternate frames when the active match is far from the viewport.
 
-Rejected: numbering skipped matches by their index among the collected ones alone (`ordinal = offset + index`). The native runs (`<code>`, `<markdown>`, `<diff>`) are numbered between the retained ones, and only the sort by `DocPos` puts them in place; the skipped element has a `DocPos` where its matches have none. Taking the `activeIndex` for the index of a collected match to find the element to reveal fails for the same reason.
+Rejected: numbering skipped matches by their index among the collected ones alone (`ordinal = offset + index`). The native runs (`<code-block>`, `<markdown>`, `<diff>`) are numbered between the retained ones, and only the sort by `DocPos` puts them in place; the skipped element has a `DocPos` where its matches have none. Taking the `activeIndex` for the index of a collected match to find the element to reveal fails for the same reason.
 
 ### Observers below skipped content
 

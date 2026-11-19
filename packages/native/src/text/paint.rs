@@ -241,7 +241,7 @@ struct Frame {
     ///
     /// Native elements draw their text inside gpui, so it never appears in the
     /// retained tree and `getAllText()` cannot see it. Without this log the only
-    /// way to assert what `<code>` or `<diff>` rendered is a screenshot, which
+    /// way to assert what `<code-block>` or `<diff>` rendered is a screenshot, which
     /// tells you something changed but never what.
     painted: Layered<SharedString>,
     /// Same idea for highlight washes. See [`PaintedHighlight`].
@@ -556,7 +556,7 @@ pub enum HighlightSource {
     /// Retained text (`#text` nodes). A match can span the several host nodes React makes
     /// for one interpolated line, because they were merged before matching.
     Resolved(Arc<super::search::HighlightContext>),
-    /// `<code>`, `<markdown>`, `<diff>`: text the retained tree never sees.
+    /// `<code-block>`, `<markdown>`, `<diff>`: text the retained tree never sees.
     Native(Arc<super::search::HighlightContext>),
 }
 
@@ -572,7 +572,7 @@ pub struct SelectableText {
     /// `None` is the important case for plain `#text` nodes: gpui then derives
     /// one run from `window.text_style()`, so colour, weight and family keep
     /// inheriting from ancestor `style` props. Pass `Some(..)` only when the
-    /// element owns its own colours, as `<code>` and `<diff>` do.
+    /// element owns its own colours, as `<code-block>` and `<diff>` do.
     pub runs: Option<Vec<TextRun>>,
     /// Per-run changes laid over the inherited text style, for a paragraph whose
     /// inline boxes restyle parts of it. Empty means plain text; otherwise the

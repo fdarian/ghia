@@ -206,6 +206,7 @@ Test files are in `packages/react/src/__tests__/` unless a path says otherwise. 
 | | `table-baseline-cell` (+x2) | `table-baseline-cell.test.tsx` |
 | Line boxes and baselines | `line-box` (+x2) | `line-box.test.tsx` |
 | | `inline-strut` (+x2) | `inline-strut.test.tsx` |
+| | `code-inline` (+x2; `dsf-oracle.sh code-inline`: the computed `font-size`, boxes and baseline of `code`, `kbd`, `samp`, `tt` and `pre` in 47 cases of Chrome's monospace size scaling (atomic inlines in an inline chain and `calc()` sizes among them), in Menlo, so the boxes follow the machine's fonts, and three scenes read paused and finished, a `font-size` transition, a keyframe animation and a `:focus` rule on a `code`; the cases' markup is the page's, which both tests render, the scenes are React's) | `code-inline.test.tsx` (React and Solid) |
 | | `empty-inline-box` (+x2) | `empty-inline-box.test.tsx` |
 | | `text-baseline` (+x2) | `text-baselines.test.tsx` |
 | | `x-height` (+x2) | `text-box-metrics.test.tsx` |

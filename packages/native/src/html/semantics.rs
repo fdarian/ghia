@@ -32,6 +32,7 @@ pub(crate) fn implicit_role(tree: &RetainedTree, element: &RetainedElement) -> O
         "blockquote" => Role::Blockquote,
         "dialog" => Role::Dialog,
         "p" => Role::Paragraph,
+        "code" => Role::Code,
         "figure" => Role::Figure,
         "fieldset" | "details" => Role::Group,
         "table" => Role::Table,

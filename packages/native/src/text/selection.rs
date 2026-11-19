@@ -977,7 +977,7 @@ mod tests {
         assert_eq!(sel.selected_text().as_deref(), Some("a\tb\nb2\nc\td\noutside"));
     }
 
-    /// `<code>` and `<diff>` register their runs without a group, so every
+    /// `<code-block>` and `<diff>` register their runs without a group, so every
     /// line stays a line even though one element painted them all.
     #[test]
     fn ungrouped_runs_always_separate() {

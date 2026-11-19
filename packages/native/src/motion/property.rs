@@ -1774,12 +1774,17 @@ impl AnimProp {
                 }
             }
             Kind::FontSize => {
-                let length: LinearLength = serde_json::from_value(value.clone())
-                    .map_err(|error| format!("motion {name} must be a number or a CSS length: {error}"))?;
+                let length = crate::css::length::deserialize_with(
+                    value.clone(),
+                    "length",
+                    "a CSS length with a unit, or calc()",
+                    crate::css::dimension::parse_font_size,
+                )
+                .map_err(|error| format!("motion {name} must be a number or a CSS length: {error}"))?;
                 if length.is_negative() {
                     return Err(format!("motion {name} must be non-negative"));
                 }
-                AnimValue::Number(check_finite(name, lengths.declared_font_size(&length).max(0.0))?)
+                AnimValue::Number(check_finite(name, lengths.keyframe_font_size(&length).max(0.0))?)
             }
             Kind::FontWeight => {
                 let weight: FontWeightValue = serde_json::from_value(value.clone())

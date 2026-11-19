@@ -1194,7 +1194,7 @@ export declare class TestGpuixRenderer {
   /**
    * Syntax-cache counters as `[hits, misses, documents]`.
    *
-   * GPUIX rebuilds its whole element tree every frame, so a `<code>` block
+   * GPUIX rebuilds its whole element tree every frame, so a `<code-block>` block
    * that misses the cache reparses at frame rate. A test can watch the hit
    * count to catch that regression before a profiler does.
    */
@@ -1203,7 +1203,7 @@ export declare class TestGpuixRenderer {
    * Every string painted in the last frame, in paint order.
    *
    * `getAllText()` only sees string nodes in the retained tree. Native
-   * elements such as `<code>` and `<diff>` draw their text inside gpui, so
+   * elements such as `<code-block>` and `<diff>` draw their text inside gpui, so
    * this is the only way to assert on what they actually rendered.
    */
   getPaintedText(): Array<string>

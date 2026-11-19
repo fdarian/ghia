@@ -1,6 +1,6 @@
 //! A custom element that is the root of a virtual-list row is built unlifted (`CustomRenderContext::lift_absorbed`),
 //! whatever its style and the focus variants laid over it make of its lift. The elements that are built by
-//! `custom_surface` (`<markdown>`, `<code>`, `<diff>`, `<webview>`, `<svg>`, the `<img>` fallback and blank) are
+//! `custom_surface` (`<markdown>`, `<code-block>`, `<diff>`, `<webview>`, `<svg>`, the `<img>` fallback and blank) are
 //! not recorded as retained, so no frame asserts their lift: this does.
 
 use std::collections::{HashMap, HashSet};

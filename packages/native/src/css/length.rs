@@ -63,10 +63,12 @@ impl LengthUnit {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearLength(Repr);
 
+/// `math` is set for a `font-size` written as a `calc()` ([`LinearLength::as_math_function`]); no other length has
+/// it, and arithmetic on a length drops it.
 #[derive(Debug, Clone, PartialEq)]
 enum Repr {
-    Single { unit: LengthUnit, value: f64 },
-    Mixed(Arc<[f64; 12]>),
+    Single { unit: LengthUnit, value: f64, math: bool },
+    Mixed(Arc<[f64; 12]>, bool),
 }
 
 impl Default for LinearLength {
@@ -81,10 +83,13 @@ impl LinearLength {
         for term in self.terms() {
             fp.f64(term);
         }
+        if self.is_math_function() {
+            fp.bits(&[true]);
+        }
     }
 
     pub(crate) const fn px(px: f64) -> Self {
-        Self(Repr::Single { unit: LengthUnit::Px, value: px })
+        Self(Repr::Single { unit: LengthUnit::Px, value: px, math: false })
     }
 
     /// `fraction` is `0.5` for `50%`.
@@ -124,17 +129,41 @@ impl LinearLength {
         Self::from_terms(terms)
     }
 
+    /// This length as a `font-size` written as a math function (`calc()`). Chrome computes every math function as
+    /// an absolute size, `calc(1.5em)` included, except a `calc()` that reduces to a percentage, which stays
+    /// relative.
+    pub(crate) fn into_math_function(self) -> Self {
+        match self.0 {
+            Repr::Single { unit: LengthUnit::Percent, .. } => self,
+            Repr::Single { unit, value, .. } => Self(Repr::Single { unit, value, math: true }),
+            Repr::Mixed(terms, _) => Self(Repr::Mixed(terms, true)),
+        }
+    }
+
+    fn is_math_function(&self) -> bool {
+        matches!(self.0, Repr::Single { math: true, .. } | Repr::Mixed(_, true))
+    }
+
+    /// Whether a `font-size` of this length is absolute in Chrome's sense: a math function, or any part but `em`
+    /// and `%`, which stay relative to the parent's size.
+    fn is_absolute_font_size(&self) -> bool {
+        self.is_math_function()
+            || LengthUnit::ALL
+                .iter()
+                .any(|unit| !matches!(unit, LengthUnit::Percent | LengthUnit::Em) && self.term(*unit) != 0.0)
+    }
+
     /// The term of `unit`.
     pub(crate) fn term(&self, unit: LengthUnit) -> f64 {
         match &self.0 {
-            Repr::Single { unit: own, value } => {
+            Repr::Single { unit: own, value, .. } => {
                 if *own == unit {
                     *value
                 } else {
                     0.0
                 }
             }
-            Repr::Mixed(terms) => terms[unit as usize],
+            Repr::Mixed(terms, _) => terms[unit as usize],
         }
     }
 
@@ -147,12 +176,12 @@ impl LinearLength {
 
     pub(crate) fn terms(&self) -> [f64; 12] {
         match &self.0 {
-            Repr::Single { unit, value } => {
+            Repr::Single { unit, value, .. } => {
                 let mut terms = [0.0; 12];
                 terms[*unit as usize] = *value;
                 terms
             }
-            Repr::Mixed(terms) => **terms,
+            Repr::Mixed(terms, _) => **terms,
         }
     }
 
@@ -161,8 +190,8 @@ impl LinearLength {
         let mut non_zero = terms.iter().enumerate().filter(|(_, term)| **term != 0.0);
         match (non_zero.next(), non_zero.next()) {
             (None, _) => Self::px(terms[LengthUnit::Px as usize]),
-            (Some((index, value)), None) => Self(Repr::Single { unit: LengthUnit::ALL[index], value: *value }),
-            _ => Self(Repr::Mixed(Arc::new(terms))),
+            (Some((index, value)), None) => Self(Repr::Single { unit: LengthUnit::ALL[index], value: *value, math: false }),
+            _ => Self(Repr::Mixed(Arc::new(terms), false)),
         }
     }
 
@@ -190,14 +219,14 @@ impl LinearLength {
     pub(crate) fn is_finite(&self) -> bool {
         match &self.0 {
             Repr::Single { value, .. } => value.is_finite(),
-            Repr::Mixed(terms) => terms.iter().all(|term| term.is_finite()),
+            Repr::Mixed(terms, _) => terms.iter().all(|term| term.is_finite()),
         }
     }
 
     pub(crate) fn is_zero(&self) -> bool {
         match &self.0 {
             Repr::Single { value, .. } => *value == 0.0,
-            Repr::Mixed(_) => false,
+            Repr::Mixed(..) => false,
         }
     }
 
@@ -206,15 +235,15 @@ impl LinearLength {
     pub(crate) fn is_negative(&self) -> bool {
         match &self.0 {
             Repr::Single { value, .. } => *value < 0.0,
-            Repr::Mixed(terms) => terms.iter().all(|term| *term <= 0.0) && terms.iter().any(|term| *term < 0.0),
+            Repr::Mixed(terms, _) => terms.iter().all(|term| *term <= 0.0) && terms.iter().any(|term| *term < 0.0),
         }
     }
 
     /// Whether the px of this length depend on the font size, the viewport or a query container.
     pub(crate) fn is_relative(&self) -> bool {
         match &self.0 {
-            Repr::Single { unit, value } => *unit as usize >= LengthUnit::Em as usize && *value != 0.0,
-            Repr::Mixed(terms) => terms[LengthUnit::Em as usize..].iter().any(|term| *term != 0.0),
+            Repr::Single { unit, value, .. } => *unit as usize >= LengthUnit::Em as usize && *value != 0.0,
+            Repr::Mixed(terms, _) => terms[LengthUnit::Em as usize..].iter().any(|term| *term != 0.0),
         }
     }
 
@@ -225,7 +254,7 @@ impl LinearLength {
     /// The px, when no other term contributes.
     pub(crate) fn as_px(&self) -> Option<f64> {
         match &self.0 {
-            Repr::Single { unit: LengthUnit::Px, value } => Some(*value),
+            Repr::Single { unit: LengthUnit::Px, value, .. } => Some(*value),
             _ => None,
         }
     }
@@ -233,8 +262,8 @@ impl LinearLength {
     /// The percentage as a fraction, when no other term contributes.
     pub(crate) fn as_percent(&self) -> Option<f64> {
         match &self.0 {
-            Repr::Single { unit: LengthUnit::Percent, value } => Some(*value),
-            Repr::Single { unit: LengthUnit::Px, value } if *value == 0.0 => Some(0.0),
+            Repr::Single { unit: LengthUnit::Percent, value, .. } => Some(*value),
+            Repr::Single { unit: LengthUnit::Px, value, .. } if *value == 0.0 => Some(0.0),
             _ => None,
         }
     }
@@ -243,6 +272,37 @@ impl LinearLength {
 /// The CSS initial `font-size` in px. gpui's default text style is `rems(1.)` and
 /// `Window::rem_size` is 16px until set, which gpuix never does.
 pub(crate) const INITIAL_FONT_SIZE: f64 = 16.0;
+
+/// Chrome's default fixed font size, the size of the generic `monospace` family where the default font size is
+/// [`INITIAL_FONT_SIZE`].
+const MONOSPACE_FONT_SIZE: f64 = 13.0;
+
+/// Whether a `font-family` list is the generic `monospace` alone, which is what makes Chrome scale a font size that
+/// is not an absolute length (`monospace, monospace` and `Menlo, monospace` are not: that is the trick that turns the
+/// scaling off).
+fn is_generic_monospace(font_family: &str) -> bool {
+    font_family.trim().eq_ignore_ascii_case("monospace")
+}
+
+/// What Chrome's monospace scaling multiplied a font size by (a byte, so the context does not grow).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum FontScale {
+    None,
+    /// The family became `monospace` alone.
+    Down,
+    /// The family stopped being `monospace`.
+    Up,
+}
+
+impl FontScale {
+    fn factor(self) -> f64 {
+        match self {
+            Self::None => 1.0,
+            Self::Down => MONOSPACE_FONT_SIZE / INITIAL_FONT_SIZE,
+            Self::Up => INITIAL_FONT_SIZE / MONOSPACE_FONT_SIZE,
+        }
+    }
+}
 
 /// What a length needs besides itself to become px. One context describes one
 /// element; `descend` makes the context its children inherit.
@@ -255,6 +315,16 @@ pub(crate) struct LengthContext {
     parent_font_size: f64,
     /// The computed `font-size` of the root element, which `rem` means.
     pub(crate) root_font_size: f64,
+    /// Whether the computed `font-family` is the generic `monospace` alone.
+    monospace: bool,
+    /// Whether the `font-size` is, or is inherited from, an absolute length (`px`, `rem`, a viewport unit): Chrome's
+    /// monospace scaling leaves such a size alone.
+    absolute_size: bool,
+    /// What Chrome's monospace scaling multiplied a font size that is not absolute by at this element: 1, 13/16 where
+    /// the family became `monospace` alone, 16/13 where it stopped being, and 1 below an absolute size. A length
+    /// that is resolved as this element's `font-size` and was not declared by it (a transition's target, a state's)
+    /// is scaled by it too.
+    font_scale: FontScale,
     pub(crate) viewport_width: f64,
     pub(crate) viewport_height: f64,
     /// The content box of the nearest ancestor query container that contains the
@@ -271,6 +341,8 @@ impl LengthContext {
         fp.f64(self.font_size);
         fp.f64(self.parent_font_size);
         fp.f64(self.root_font_size);
+        fp.bits(&[self.monospace, self.absolute_size]);
+        fp.word(self.font_scale as u64);
         fp.f64(self.viewport_width);
         fp.f64(self.viewport_height);
         fp.option_f64(self.container_width);
@@ -283,6 +355,9 @@ impl LengthContext {
             font_size: INITIAL_FONT_SIZE,
             parent_font_size: INITIAL_FONT_SIZE,
             root_font_size: INITIAL_FONT_SIZE,
+            monospace: false,
+            absolute_size: false,
+            font_scale: FontScale::None,
             viewport_width,
             viewport_height,
             container_width: None,
@@ -310,13 +385,47 @@ impl LengthContext {
     /// fraction of it. `rem` is the root's, except for the root element itself,
     /// whose `rem` is still the initial size. No declaration inherits.
     pub(crate) fn descend(&self, font_size: Option<&LinearLength>, is_root: bool) -> Self {
-        let computed = self.computed_font_size(font_size);
+        self.descend_font(font_size, None, is_root)
+    }
+
+    /// [`descend`](Self::descend) for an element with `style`, whose `font-family` decides Chrome's monospace
+    /// scaling too.
+    pub(crate) fn descend_style(&self, style: Option<&crate::style::StyleDesc>, is_root: bool) -> Self {
+        self.descend_font(
+            style.and_then(|style| style.font_size.as_ref()),
+            style.and_then(|style| style.font_family.as_deref()),
+            is_root,
+        )
+    }
+
+    /// Chrome scales a font size that is not an absolute length by 13/16 when the family becomes the generic
+    /// `monospace` alone, and back by 16/13 when it stops being (`code` in a `font-size: 150%` parent is 19.5px of
+    /// 24, a `font-family: Menlo` span in it 24 again), so the default `code` is 13px beside 16px text. An absolute
+    /// size is never scaled, and neither does a family list longer than `monospace`.
+    pub(crate) fn descend_font(&self, font_size: Option<&LinearLength>, font_family: Option<&str>, is_root: bool) -> Self {
+        let monospace = font_family.map_or(self.monospace, is_generic_monospace);
+        let font_scale = match (monospace != self.monospace, self.absolute_size) {
+            (true, false) if monospace => FontScale::Down,
+            (true, false) => FontScale::Up,
+            _ => FontScale::None,
+        };
+        let own_absolute = font_size.is_some_and(LinearLength::is_absolute_font_size);
+        let computed = self.computed_font_size(font_size) * if own_absolute { 1.0 } else { font_scale.factor() };
         Self {
             font_size: computed,
             parent_font_size: self.font_size,
             root_font_size: if is_root { computed } else { self.root_font_size },
+            monospace,
+            absolute_size: self.absolute_size || own_absolute,
+            font_scale,
             ..*self
         }
+    }
+
+    /// Whether an element with `style` has to set its text size to [`font_size`](Self::font_size): it declares one,
+    /// or its family put it through the monospace scaling.
+    pub(crate) fn sets_font_size(&self, style: &crate::style::StyleDesc) -> bool {
+        style.font_size.is_some() || (style.font_family.is_some() && self.font_size != self.parent_font_size)
     }
 
     /// The context of a state refinement (`focusVisible`) of the element that has
@@ -324,8 +433,7 @@ impl LengthContext {
     /// that sets none keeps the element's own.
     pub(crate) fn for_state(&self, font_size: Option<&LinearLength>) -> Self {
         let Some(font_size) = font_size else { return *self };
-        let parent = Self { font_size: self.parent_font_size, ..*self };
-        Self { font_size: parent.computed_font_size(Some(font_size)), ..*self }
+        Self { font_size: self.declared_font_size(font_size).max(0.0), ..*self }
     }
 
     /// `self` is the parent's context. A negative result is clamped to 0, as CSS
@@ -338,8 +446,17 @@ impl LengthContext {
     }
 
     /// The px of a `font-size` this element declares, unclamped: its `em` and `%`
-    /// are of the parent's size, not its own.
+    /// are of the parent's size, not its own, and Chrome's monospace scaling applies to a size that is not
+    /// absolute.
     pub(crate) fn declared_font_size(&self, length: &LinearLength) -> f64 {
+        let size = self.keyframe_font_size(length);
+        if length.is_absolute_font_size() { size } else { size * self.font_scale.factor() }
+    }
+
+    /// The px of a `font-size` in a keyframe, a motion target: against the parent's size and with no monospace
+    /// scaling, because Chrome builds the style of a keyframe from the parent's, whose family it keeps (`2em` on a
+    /// `code` is 32px at the end of an animation, 26px as its own declaration).
+    pub(crate) fn keyframe_font_size(&self, length: &LinearLength) -> f64 {
         let parent = Self { font_size: self.parent_font_size, ..*self };
         parent.resolve(length, parent.font_size)
     }
@@ -347,8 +464,8 @@ impl LengthContext {
     /// `percent_basis` is the px a `100%` stands for.
     pub(crate) fn resolve(&self, length: &LinearLength, percent_basis: f64) -> f64 {
         match &length.0 {
-            Repr::Single { unit, value } => value * self.px_per(*unit, percent_basis),
-            Repr::Mixed(terms) => LengthUnit::ALL
+            Repr::Single { unit, value, .. } => value * self.px_per(*unit, percent_basis),
+            Repr::Mixed(terms, _) => LengthUnit::ALL
                 .iter()
                 .zip(terms.iter())
                 .map(|(unit, term)| term * self.px_per(*unit, percent_basis))
@@ -514,6 +631,7 @@ impl fmt::Display for LinearLength {
         .collect();
         match terms.as_slice() {
             [] => write!(formatter, "0px"),
+            [(value, unit)] if self.is_math_function() => write!(formatter, "calc({}{unit})", tidy(*value)),
             [(value, unit)] => write!(formatter, "{}{unit}", tidy(*value)),
             [(first, first_unit), rest @ ..] => {
                 write!(formatter, "calc({}{first_unit}", tidy(*first))?;
@@ -608,10 +726,10 @@ mod tests {
 
     #[test]
     fn a_length_with_one_term_is_stored_as_that_term() {
-        assert_eq!(LinearLength::of(LengthUnit::Em, 2.0).0, Repr::Single { unit: LengthUnit::Em, value: 2.0 });
+        assert_eq!(LinearLength::of(LengthUnit::Em, 2.0).0, Repr::Single { unit: LengthUnit::Em, value: 2.0, math: false });
         assert_eq!(LinearLength::of(LengthUnit::Vw, 0.0), LinearLength::px(0.0));
         assert_eq!(LinearLength::from_px_percent(10.0, 0.5).plus(&LinearLength::px(-10.0)), LinearLength::percent(0.5));
-        assert!(matches!(LinearLength::from_px_percent(10.0, 0.5).0, Repr::Mixed(_)));
+        assert!(matches!(LinearLength::from_px_percent(10.0, 0.5).0, Repr::Mixed(..)));
     }
 
     fn parse(text: &str) -> LinearLength {
@@ -693,6 +811,9 @@ mod tests {
         font_size: 20.0,
         parent_font_size: 10.0,
         root_font_size: 16.0,
+        monospace: false,
+        absolute_size: false,
+        font_scale: FontScale::None,
         viewport_width: 800.0,
         viewport_height: 600.0,
         container_width: None,
@@ -744,6 +865,122 @@ mod tests {
         let resized = initial.with_viewport(300.0, 200.0);
         assert_eq!((resized.viewport_width, resized.viewport_height), (300.0, 200.0));
         assert_eq!(resized.font_size, INITIAL_FONT_SIZE);
+    }
+
+    fn styled(json: &str) -> crate::style::StyleDesc {
+        crate::retained_tree::parse_style(json.as_bytes()).expect("a style")
+    }
+
+    /// The font sizes of an element with each of `styles` in a chain below `parent`.
+    fn sizes(parent: LengthContext, styles: &[&str]) -> Vec<f64> {
+        let mut context = parent;
+        styles
+            .iter()
+            .map(|json| {
+                context = context.descend_style(Some(&styled(json)), false);
+                context.font_size
+            })
+            .collect()
+    }
+
+    // The expected sizes are the ones headless Chrome computes (`code-inline-oracle.html`).
+    const MONOSPACE: &str = r#"{"fontFamily": "monospace"}"#;
+
+    #[test]
+    fn the_generic_monospace_is_13px_where_the_default_size_is_16() {
+        let root = context(800.0, 600.0);
+        assert_eq!(sizes(root, &[MONOSPACE]), [13.0]);
+        assert_eq!(sizes(root, &[r#"{"fontFamily": "MONOSPACE"}"#]), [13.0]);
+        assert_eq!(sizes(root, &[MONOSPACE, "{}", MONOSPACE]), [13.0, 13.0, 13.0]);
+    }
+
+    #[test]
+    fn a_family_list_that_is_more_than_the_generic_monospace_does_not_scale() {
+        let root = context(800.0, 600.0);
+        for family in ["monospace, monospace", "Menlo, monospace", "monospace, Menlo", "monospace, sans-serif", "'monospace'", "ui-monospace", "Menlo"] {
+            let style = format!(r#"{{"fontFamily": "{family}"}}"#);
+            assert_eq!(sizes(root, &[style.as_str()]), [16.0], "{family}");
+        }
+    }
+
+    #[test]
+    fn leaving_the_monospace_family_scales_back() {
+        let root = context(800.0, 600.0);
+        assert_eq!(sizes(root, &[MONOSPACE, r#"{"fontFamily": "Menlo"}"#, "{}"]), [13.0, 16.0, 16.0]);
+    }
+
+    #[test]
+    fn a_relative_size_is_scaled_and_an_absolute_one_is_not() {
+        let root = context(800.0, 600.0);
+        assert_eq!(sizes(root, &[r#"{"fontSize": "150%"}"#, MONOSPACE]), [24.0, 19.5]);
+        assert_eq!(sizes(root, &[r#"{"fontSize": "1.5em"}"#, MONOSPACE, r#"{"fontFamily": "Menlo"}"#]), [24.0, 19.5, 24.0]);
+        for absolute in ["20px", "2rem", "calc(1em + 4px)", "2vw"] {
+            let style = format!(r#"{{"fontSize": "{absolute}"}}"#);
+            let size = sizes(root, &[style.as_str()])[0];
+            assert_eq!(sizes(root, &[style.as_str(), MONOSPACE]), [size, size], "{absolute}");
+        }
+    }
+
+    #[test]
+    fn a_size_beside_the_family_is_scaled_unless_it_is_absolute() {
+        let root = context(800.0, 600.0);
+        let with = |size: &str| {
+            let style = format!(r#"{{"fontFamily": "monospace", "fontSize": "{size}"}}"#);
+            sizes(root, &[style.as_str()])[0]
+        };
+        assert_eq!((with("1em"), with("100%"), with("2em")), (13.0, 13.0, 26.0));
+        assert_eq!((with("20px"), with("0px")), (20.0, 0.0));
+        let in_monospace = sizes(root, &[MONOSPACE, r#"{"fontSize": "2em"}"#]);
+        assert_eq!(in_monospace, [13.0, 26.0]);
+    }
+
+    #[test]
+    fn a_math_function_is_an_absolute_size_unless_it_reduces_to_a_percentage() {
+        let root = context(800.0, 600.0);
+        assert_eq!(sizes(root, &[r#"{"fontSize": "calc(1.5em)"}"#, MONOSPACE]), [24.0, 24.0]);
+        assert_eq!(sizes(root, &[r#"{"fontSize": "calc(150%)"}"#, MONOSPACE]), [24.0, 19.5]);
+        let own = |size: &str| {
+            let style = format!(r#"{{"fontFamily": "monospace", "fontSize": "{size}"}}"#);
+            sizes(root, &[style.as_str()])[0]
+        };
+        assert_eq!((own("calc(1em)"), own("calc(150%)"), own("calc(1em + 0%)")), (16.0, 19.5, 16.0));
+    }
+
+    #[test]
+    fn a_math_function_stays_one_through_its_text() {
+        let calc = crate::css::dimension::parse_font_size("calc(1.5em)").unwrap();
+        assert_ne!(calc, parse("1.5em"));
+        assert_eq!(calc.to_string(), "calc(1.5em)");
+        assert_eq!(crate::css::dimension::parse_font_size("calc(150%)").unwrap(), LinearLength::percent(1.5));
+        assert_eq!(crate::css::dimension::parse_font_size("1.5em").unwrap(), parse("1.5em"));
+        assert_eq!(std::mem::size_of::<LinearLength>(), 16);
+    }
+
+    #[test]
+    fn a_declared_size_that_is_not_absolute_has_the_scale_of_its_element() {
+        let root = context(800.0, 600.0);
+        let code = root.descend_style(Some(&styled(MONOSPACE)), false);
+        let declared = |size: &str| code.declared_font_size(&crate::css::dimension::parse_font_size(size).unwrap());
+        assert_eq!((declared("1em"), declared("1.5em"), declared("150%"), declared("2em")), (13.0, 19.5, 19.5, 26.0));
+        assert_eq!((declared("20px"), declared("2rem"), declared("calc(1.5em)")), (20.0, 32.0, 24.0));
+        let keyframe = |size: &str| code.keyframe_font_size(&crate::css::dimension::parse_font_size(size).unwrap());
+        assert_eq!((keyframe("1em"), keyframe("2em"), keyframe("20px")), (16.0, 32.0, 20.0));
+        assert_eq!(code.for_state(Some(&parse("1em"))).font_size, 13.0);
+        assert_eq!(code.for_state(Some(&parse("20px"))).font_size, 20.0);
+        let span = code.descend_style(Some(&styled(r#"{"fontFamily": "Menlo"}"#)), false);
+        assert_eq!(span.declared_font_size(&parse("1em")), 16.0);
+        let in_absolute = root.descend_style(Some(&styled(r#"{"fontSize": "20px"}"#)), false).descend_style(Some(&styled(MONOSPACE)), false);
+        assert_eq!(in_absolute.declared_font_size(&parse("1em")), 20.0);
+    }
+
+    #[test]
+    fn a_state_that_declares_no_family_keeps_the_scaled_size() {
+        let element = context(800.0, 600.0).descend_style(Some(&styled(MONOSPACE)), false);
+        assert_eq!(element.for_state(None).font_size, 13.0);
+        assert!(element.sets_font_size(&styled(MONOSPACE)));
+        assert!(!element.sets_font_size(&styled("{}")));
+        let plain = context(800.0, 600.0).descend_style(Some(&styled(r#"{"fontFamily": "Menlo"}"#)), false);
+        assert!(!plain.sets_font_size(&styled(r#"{"fontFamily": "Menlo"}"#)));
     }
 
     #[test]

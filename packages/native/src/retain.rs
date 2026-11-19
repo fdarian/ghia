@@ -183,7 +183,7 @@ pub(crate) enum Exclusion {
     PaintReporter,
     /// It declares a `highlight`, or is inside one.
     Highlight,
-    /// A custom element that has no `retain_state`: `<code>`, `<markdown>` and `<diff>`, which hold
+    /// A custom element that has no `retain_state`: `<code-block>`, `<markdown>` and `<diff>`, which hold
     /// scrollers whose offset only gpui knows.
     CustomElement,
     /// An `<svg>` that has not been painted yet, whose raster is still being made, or whose document
@@ -232,7 +232,7 @@ impl Exclusion {
 
     /// Whether what the element paints or lays out follows the clock or the arrival of something
     /// (a raster, an image), so that a tick which builds only what runs on a clock would leave it
-    /// as it was. A custom element that has no `retain_state` (`<code>`, `<markdown>`, `<diff>`)
+    /// as it was. A custom element that has no `retain_state` (`<code-block>`, `<markdown>`, `<diff>`)
     /// does not: it is rebuilt by every frame that builds its page and paints the same in a tick.
     /// Nor does a virtual list: its rows are measured in the frame that builds them, and what
     /// changes them afterwards (a scroll, a new window of rows, an animation in a row) is a source
@@ -4130,7 +4130,7 @@ mod tests {
     fn the_fingerprint_names_every_field_of_inherited() {
         // `inherited_fingerprint` lists the fields by hand. Adding one changes this size, and the
         // fingerprint has to learn it or the key will not see it change.
-        assert_eq!(std::mem::size_of::<Inherited>(), 368);
+        assert_eq!(std::mem::size_of::<Inherited>(), 376);
     }
 
     #[test]
@@ -5950,7 +5950,7 @@ mod tests {
             "src",
             serde_json::json!("blob:never-arrives"),
         ));
-        elements.push(typed(41, 1, "code", r#"{"height": 20}"#));
+        elements.push(typed(41, 1, "code-block", r#"{"height": 20}"#));
         let scene = Scene::new(cx, elements);
         scene.settle(cx);
         crate::perf_counters::reset();

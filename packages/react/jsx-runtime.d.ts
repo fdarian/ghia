@@ -7,7 +7,7 @@
 import type * as React from "react"
 import type {
   AnchoredProps,
-  CodeProps,
+  CodeBlockProps,
   DiffProps,
   FormInstance,
   FormProps,
@@ -163,7 +163,7 @@ export namespace JSX {
     label: Host<LabelProps, "label">
     form: Host<FormProps, "form", FormInstance>
     anchored: Host<AnchoredProps, "anchored">
-    code: Host<CodeProps, "code">
+    "code-block": Host<CodeBlockProps, "code-block">
     diff: Host<DiffProps, "diff">
     markdown: Host<MarkdownProps, "markdown">
     "virtual-list": Host<VirtualListProps, "virtual-list">

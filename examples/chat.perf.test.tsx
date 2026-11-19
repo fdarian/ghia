@@ -35,7 +35,7 @@ const WHEEL_X = 700
 const WHEEL_Y = 400
 
 const BUDGET = {
-  // `<code>` paints no card, so the chat draws its own wrapper, header strip
+  // `<code-block>` paints no card, so the chat draws its own wrapper, header strip
   // and language label: three extra host nodes per code turn, about 6ms over
   // 1000 turns. Chrome costs React nodes now, and that is the whole point.
   mountMs: 170,
@@ -177,7 +177,7 @@ describeNative('chat performance', () => {
   // It does NOT prove the two-level cache works. Measured: breaking the cache
   // (keying the group list on `subtree_revision` instead of `search_revision`)
   // moves a keystroke from 1.9ms to 2.7ms here, well inside any sane budget,
-  // because most of this chat's text lives in native `<code>` / `<diff>` /
+  // because most of this chat's text lives in native `<code-block>` / `<diff>` /
   // `<markdown>` props rather than retained text.
   //
   // The proof is `highlight_cache_tests` in `packages/native/src/renderer.rs`,

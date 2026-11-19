@@ -2,9 +2,10 @@
 //! with the path every `setStyle` goes through.
 //!
 //! What a per-tag layer cannot say stays out: a rule that needs the element's attributes
-//! (`a:any-link`, `details[open]`), the quotes of `q`, and the generic family `monospace` with its
-//! 13px size (`pre`, `kbd` and `samp` take `Menlo` at the size they inherit). The rules that need
-//! an element's place are the lists inside lists, which [`NESTED_LISTS`] has.
+//! (`a:any-link`, `details[open]`) and the quotes of `q`. The generic family `monospace` of `pre`,
+//! `code`, `kbd`, `samp` and `tt` is here, and its 13px size is Chrome's scaling of a font size when the
+//! family becomes `monospace` (`LengthContext::descend_style`). The rules that need an element's place
+//! are the lists inside lists, which [`NESTED_LISTS`] has.
 
 pub(super) const TAGS: &[(&str, &str)] = &[
     // The root of every window. Not Chrome's: `html` and `body` fill the window, because the box above the root is
@@ -35,7 +36,7 @@ pub(super) const TAGS: &[(&str, &str)] = &[
     ("figure", r#"{"display":"block","marginTop":"1em","marginBottom":"1em","marginInline":"40px"}"#),
     ("figcaption", r#"{"display":"block"}"#),
     ("blockquote", r#"{"display":"block","marginTop":"1em","marginBottom":"1em","marginInline":"40px"}"#),
-    ("pre", r#"{"display":"block","whiteSpace":"pre","fontFamily":"Menlo","marginTop":"1em","marginBottom":"1em"}"#),
+    ("pre", r#"{"display":"block","whiteSpace":"pre","fontFamily":"monospace","marginTop":"1em","marginBottom":"1em"}"#),
     (
         "fieldset",
         r##"{"display":"block","marginInline":"2px","paddingBlock":"0.35em 0.625em","paddingInline":"0.75em","borderWidth":2,"borderStyle":"groove","borderColor":"#efefef"}"##,
@@ -65,9 +66,11 @@ pub(super) const TAGS: &[(&str, &str)] = &[
     ("sub", r#"{"display":"inline","fontSize":"0.8333333em","verticalAlign":"sub"}"#),
     ("sup", r#"{"display":"inline","fontSize":"0.8333333em","verticalAlign":"super"}"#),
     ("time", r#"{"display":"inline"}"#),
-    ("kbd", r#"{"display":"inline","fontFamily":"Menlo"}"#),
+    ("code", r#"{"display":"inline","fontFamily":"monospace"}"#),
+    ("kbd", r#"{"display":"inline","fontFamily":"monospace"}"#),
     ("var", r#"{"display":"inline","fontStyle":"italic"}"#),
-    ("samp", r#"{"display":"inline","fontFamily":"Menlo"}"#),
+    ("samp", r#"{"display":"inline","fontFamily":"monospace"}"#),
+    ("tt", r#"{"display":"inline","fontFamily":"monospace"}"#),
     ("br", r#"{"display":"inline"}"#),
     ("wbr", r#"{"display":"inline"}"#),
     (

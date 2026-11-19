@@ -224,9 +224,9 @@ The ticks inside a run, at 1 and at 0 included, are patched. A native loop and a
 ### An `<input>` is retained and its caret is a tick (#74)
 
 A page with an `<input>` or `<textarea>`, focused or not, in view or not, drew every tick of a loop elsewhere whole (`Unsteady`
-at the tick rate): 4.0 ms a draw at 7.8k elements, 7.4 ms at 13k. A page with a `<code>`, `<markdown>` or `<diff>` did the same.
+at the tick rate): 4.0 ms a draw at 7.8k elements, 7.4 ms at 13k. A page with a `<code-block>`, `<markdown>` or `<diff>` did the same.
 The input had no `retain_state`, so it was `Exclusion::CustomElement`, which was in `varies_with_time`, and `Plan::unsteady`
-declined every tick of a page that built one. The kind was listed for the input, whose caret follows the clock; `<code>`,
+declined every tick of a page that built one. The kind was listed for the input, whose caret follows the clock; `<code-block>`,
 `<markdown>` and `<diff>` have no `retain_state` either but do not follow it (the highlight is made on the frame thread and nothing
 of them arrives late). The input's measure was a keyless request, which made every recording of it `UnstableLayout`.
 
@@ -246,7 +246,7 @@ of them arrives late). The input's measure was a keyless request, which made eve
 - **A caret nobody sees asks for no frame.** The timer is armed by the prepaint of the editor (`TextEditorState::keep_blinking`),
   only while the window is key, the caret is shown and its box meets the content mask and the bounds of the editor; `render` only
   notes the focus coming. An input scrolled back into view arms again in the frame that moves it.
-- **`<code>`, `<markdown>` and `<diff>` left `varies_with_time`.** Nothing else read it for custom elements.
+- **`<code-block>`, `<markdown>` and `<diff>` left `varies_with_time`.** Nothing else read it for custom elements.
 - **A virtual list and its rows left `varies_with_time` too (r52).** A `<virtual-list>` beside the input (the search box of a mail client) made the frame before it unsteady, so every blink was a whole frame that rebuilt the visible rows (2.4 ms in a `sample` profile). A list is painted as the frame that built it left it: its rows are measured in that frame, and a scroll, a new window of rows or an animation in a row is a source of its own (an animation in a row is `Outside`, since no unit holds it). Test: `animation-frame-work` "blinks in patched frames that build the input alone beside a virtual list".
 - **A list that was scrolled, and a row under the pointer (r53).** A scroll asked for a frame at every vsync of the scrollbar's hold and fade, which queued the view dirty and made gpui decline every blink (`PendingView`); the hold asks for none now ([scroll.md](scroll.md#scrollbars)). A row the pointer was over was `Outside` at every tick: the hover that changed it put the row on the spine of the frame, and no build ever enters a row (the list builds them in its layout, whatever the window holds), so it stayed in `unbuilt` for good. `RetainedElement::is_built_by_ancestor` is true below a `<virtual-list>`, so a row is not kept there. A row is entered now, in a session of its own ([retention.md](retention.md#rows-of-a-virtual-list)) outside the walk of the frame, and the spine still reaches it: it is built because the hover changed it. Tests: `animation-frame-work` "blinks in patched frames that build the input alone beside a virtual list scrolled by a wheel / scrollTo, while the scrollbar holds / after the scrollbar has faded"; `retain.rs` `a_changed_row_of_a_virtual_list_is_not_left_unbuilt`.
 
@@ -1679,7 +1679,7 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
 - Transforms in three dimensions patch every tick with no decline of either kind (`getPatchCounters`): `transform-css-patch.test.tsx` for a transition of `rotateY` under a perspective, an animation of 3D lists that do not pair, of the depth of `transform-origin` around a rotation, and of the `perspective` and `perspective-origin` of the parent; `motion-transform.test.tsx` for a Motion tween of `rotateY` whose card hides the face that turns away on the patched ticks (`faces_away` is published with the box, not compared by the tape; [paint-and-transforms.md](paint-and-transforms.md#retention-and-patched-ticks)).
 - `animation-frame-work.test.tsx`: at 500 and 5000 nodes every loop kind (keyframes colour, native `motion` colour, colour
   transition, svg stroke dash, `motion` and keyframes opacity, the colour loop of a relative box with and without a `z-index`, loops
-  beside an `<input>`, `textarea`, focused input, selection, `<code>`, `<markdown>` and `<diff>`, loops under `relative`,
+  beside an `<input>`, `textarea`, focused input, selection, `<code-block>`, `<markdown>` and `<diff>`, loops under `relative`,
   `absolute` and `opacity < 1` wrappers and on absolute elements, beside an `<svg>` of no area or waiting for a job) does the same
   work per tick (elements built, prepainted, painted, primitives, retained and layout counters equal) with `patchedFrames` equal to
   the ticks, also with a screen reader on, and the picture equals the frame built whole at the same instant and patching off.

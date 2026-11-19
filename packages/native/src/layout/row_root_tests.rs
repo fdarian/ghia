@@ -132,7 +132,7 @@ fn a_markdown_row_root_is_unlifted(cx: &mut gpui::TestAppContext) {
 
 #[gpui::test]
 fn a_code_row_root_is_unlifted(cx: &mut gpui::TestAppContext) {
-    assert_unlifted_in_every_style(cx, "code", &[("code", serde_json::json!("a\nb"))]);
+    assert_unlifted_in_every_style(cx, "code-block", &[("code", serde_json::json!("a\nb"))]);
 }
 
 #[gpui::test]

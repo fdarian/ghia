@@ -442,7 +442,7 @@ describeNative("clipPath clips the pointer on every kind of element", () => {
     ["input", (box, onClick) => <input style={box} onClick={onClick} />],
     ["textarea", (box, onClick) => <textarea style={box} onClick={onClick} />],
     ["markdown", (box, onClick) => <markdown source={"# Title\n\nBody"} style={box} onClick={onClick} />],
-    ["code", (box, onClick) => <code code={"const a = 1"} style={box} onClick={onClick} />],
+    ["code", (box, onClick) => <code-block code={"const a = 1"} style={box} onClick={onClick} />],
     ["diff", (box, onClick) => <diff patch="" style={box} onClick={onClick} />],
     ["anchored", (box, onClick) => (
       <div style={{ width: 1, height: 1 }}>

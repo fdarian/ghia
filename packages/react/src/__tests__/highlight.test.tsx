@@ -210,13 +210,13 @@ describe("highlight", () => {
     expect(renderer.getPaintedHighlights()).toHaveLength(1)
   })
 
-  // `<code>` builds its lines inside render(), so they never reach the
+  // `<code-block>` builds its lines inside render(), so they never reach the
   // retained tree. It matches the exact string it paints instead.
-  it("matches inside a native <code> element", () => {
+  it("matches inside a native <code-block> element", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div highlight={{ query: "const" }}>
-        <code code={"const a = 1\nlet b = 2\nconst c = 3"} language="typescript" />
+        <code-block code={"const a = 1\nlet b = 2\nconst c = 3"} language="typescript" />
       </div>
     )
     expect(matched(renderer)).toEqual(["const", "const"])
@@ -224,11 +224,11 @@ describe("highlight", () => {
 
   // A native element paints many strings. Numbering restarted per string
   // before, so activeIndex marked one match active on EVERY line.
-  it("marks one active match across the lines of a <code> block", () => {
+  it("marks one active match across the lines of a <code-block> block", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div highlight={{ query: "x", activeIndex: 2 }}>
-        <code code={"x x\nx x"} language="typescript" showHeader={false} />
+        <code-block code={"x x\nx x"} language="typescript" showHeader={false} />
       </div>
     )
 
@@ -238,7 +238,7 @@ describe("highlight", () => {
 
   // Ordinals follow PAINT order, so `activeIndex` means "the nth match in the
   // document" no matter which kind of element painted it. Numbering retained
-  // matches first made activeIndex: 0 mark the text even when <code> came
+  // matches first made activeIndex: 0 mark the text even when <code-block> came
   // first in the document.
   it("numbers matches in document order across both kinds", () => {
     const { render, renderer } = createTestRoot()
@@ -248,7 +248,7 @@ describe("highlight", () => {
         highlight={{ query: "x", activeIndex: 0 }}
       >
         {first === "text" ? <div>x here</div> : null}
-        <code code={"x again"} language="typescript" showHeader={false} />
+        <code-block code={"x again"} language="typescript" showHeader={false} />
         {first === "code" ? <div>x here</div> : null}
       </div>
     )
@@ -292,7 +292,7 @@ describe("highlight", () => {
         style={{ display: "flex", flexDirection: "column" }}
         highlight={{ query: "x", activeIndex: 1 }}
       >
-        <code code={"x again"} language="typescript" showHeader={false} style={{ position: "relative" }} />
+        <code-block code={"x again"} language="typescript" showHeader={false} style={{ position: "relative" }} />
         <div>x here</div>
       </div>
     )
@@ -343,7 +343,7 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ userSelect: "none" }} highlight={{ query: "const" }}>
-        <code code={"const a = 1"} language="typescript" showHeader={false} />
+        <code-block code={"const a = 1"} language="typescript" showHeader={false} />
       </div>
     )
     expect(matched(renderer)).toEqual(["const"])
@@ -353,7 +353,7 @@ describe("highlight", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div highlight={{ query: "2" }}>
-        <code code={"let a = 1\nlet b = 3"} language="typescript" showLineNumbers showHeader={false} />
+        <code-block code={"let a = 1\nlet b = 3"} language="typescript" showLineNumbers showHeader={false} />
       </div>
     )
     // The gutter prints "1" and "2"; only content may match, and there is no

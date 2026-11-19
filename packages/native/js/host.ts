@@ -1628,7 +1628,7 @@ export type ElementType =
   | "label"
   | "form"
   | "anchored"
-  | "code"
+  | "code-block"
   | "diff"
   | "markdown"
   | "webview"
@@ -1675,7 +1675,7 @@ export interface SyntaxTheme {
  * heading scale is a framework render and needs no native rebuild.
  */
 export interface GpuixMetrics {
-  // Code blocks. Shared by <code> and the markdown fenced block.
+  // Code blocks. Shared by <code-block> and the markdown fenced block.
   codeTextSize?: number
   codeLineHeight?: number
   codeGutterDigitWidth?: number
@@ -1706,8 +1706,8 @@ export interface GpuixMetrics {
   mdTableMinColumnContent?: number
   mdInlineCodeRadius?: number
   /**
-   * The fenced-block card. `<code>` paints no card, so these are
-   * markdown-only: style a `<code>` block with its own `style` prop instead.
+   * The fenced-block card. `<code-block>` paints no card, so these are
+   * markdown-only: style a `<code-block>` with its own `style` prop instead.
    */
   mdCodePaddingX?: number
   mdCodePaddingY?: number
@@ -1760,7 +1760,7 @@ export interface HighlightSpec {
    * newline between lines.
    *
    * A pair that splits a surrogate pair is rejected, not snapped. Native text
-   * (`<code>`, `<markdown>`, `<diff>`) is not part of that text; use `query`.
+   * (`<code-block>`, `<markdown>`, `<diff>`) is not part of that text; use `query`.
    */
   ranges?: Array<[number, number]>
   /** Any CSS colour. Defaults to the theme accent at 30% alpha. */
@@ -2743,7 +2743,7 @@ export interface SvgProps extends HostProps, SvgPresentationProps {
 }
 
 /**
- * Props for the <code> custom element — a syntax-highlighted code block.
+ * Props for the <code-block> custom element — a syntax-highlighted code block.
  *
  * It paints **no surface of its own**: no fill, border, radius, padding or
  * language header. `style` is the surface, and `fontFamily`, `fontSize`,
@@ -2754,7 +2754,7 @@ export interface SvgProps extends HostProps, SvgPresentationProps {
  * theme's ratio. Lines never wrap and the block is its own horizontal
  * scroller, so `whiteSpace` and `overflowX` do nothing.
  */
-export interface CodeProps extends HostProps {
+export interface CodeBlockProps extends HostProps {
   /** The source to display. Rendered one div per line at an exact line height. */
   code?: string
   /** Language alias such as "ts", "rust", "bash". Beats `path` for detection. */

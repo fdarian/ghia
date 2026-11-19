@@ -1,12 +1,12 @@
 /** The HTML tags that are host elements. Each lays out as a `div` or a `span` does, with the default style of
  *  Chrome's user agent stylesheet: `packages/native/src/html/tags.rs` is the one table of those styles, and this
- *  list is the same set. `code` and `select` are not here: Ghia has elements of those names. */
+ *  list is the same set. `select` is not here: Ghia has an element of that name. */
 export const HTML_TAGS = [
   "html", "head", "body",
   "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "dl", "dt", "dd",
   "section", "nav", "header", "footer", "main", "article", "aside",
   "figure", "figcaption", "blockquote", "pre", "fieldset", "legend", "address", "hr", "details", "summary", "dialog",
-  "a", "strong", "em", "b", "i", "u", "s", "small", "mark", "abbr", "cite", "q", "sub", "sup", "time", "kbd", "var", "samp", "br", "wbr",
+  "a", "strong", "em", "b", "i", "u", "s", "small", "mark", "abbr", "cite", "q", "sub", "sup", "time", "code", "kbd", "var", "samp", "tt", "br", "wbr",
   "button",
   "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup", "col",
 ] as const
@@ -22,7 +22,7 @@ export function isHtmlTag(type: string): type is HtmlTag {
 /** The tags that are inline unless a style says otherwise, as a `span` is: the rows of the native table whose
  *  `display` is `inline`. */
 export const HTML_INLINE_TAGS = [
-  "a", "strong", "em", "b", "i", "u", "s", "small", "mark", "abbr", "cite", "q", "sub", "sup", "time", "kbd", "var", "samp", "br", "wbr",
+  "a", "strong", "em", "b", "i", "u", "s", "small", "mark", "abbr", "cite", "q", "sub", "sup", "time", "code", "kbd", "var", "samp", "tt", "br", "wbr",
 ] as const satisfies readonly HtmlTag[]
 
 const HTML_INLINE_TAG_SET: ReadonlySet<string> = new Set(HTML_INLINE_TAGS)

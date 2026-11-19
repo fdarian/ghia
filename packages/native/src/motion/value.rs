@@ -130,7 +130,7 @@ impl ParentValues {
     pub(crate) fn descend(&self, style: Option<&StyleDesc>) -> Self {
         let font = self.of(style);
         Self {
-            lengths: self.lengths.descend(style.and_then(|style| style.font_size.as_ref()), self.above_root),
+            lengths: self.lengths.descend_style(style, self.above_root),
             above_root: false,
             weight: font.weight,
             variations: font.variations,
@@ -150,7 +150,7 @@ impl ParentValues {
     /// The context of an element styled by `style` whose parent has this font: what its
     /// own `em`, `rem` and viewport units mean.
     pub(crate) fn lengths_of(&self, style: Option<&StyleDesc>) -> LengthContext {
-        self.lengths.descend(style.and_then(|style| style.font_size.as_ref()), self.above_root)
+        self.lengths.descend_style(style, self.above_root)
     }
 
     fn of(&self, style: Option<&StyleDesc>) -> Font {

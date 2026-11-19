@@ -71,7 +71,7 @@ import type {
   SvgFeSpotLightProps as NativeSvgFeSpotLightProps,
   SvgFeTileProps as NativeSvgFeTileProps,
   SvgFeTurbulenceProps as NativeSvgFeTurbulenceProps,
-  CodeProps as NativeCodeProps,
+  CodeBlockProps as NativeCodeBlockProps,
   DiffProps as NativeDiffProps,
   MarkdownProps as NativeMarkdownProps,
   AnchoredProps as NativeAnchoredProps,
@@ -211,7 +211,7 @@ export type SvgFeTurbulenceProps = SvgShapeElementProps<NativeSvgFeTurbulencePro
 
 export type SvgTextProps = SvgShapeElementProps<NativeSvgTextProps>
 
-export interface CodeProps extends ReactHostProps<NativeCodeProps> {
+export interface CodeBlockProps extends ReactHostProps<NativeCodeBlockProps> {
   key?: Key | null
   children?: ReactNode
   ref?: Ref<PublicInstance>

@@ -651,7 +651,7 @@ describeNative("events", () => {
       const clicks: EventPayload[] = []
       testRoot.render(
         <div style={{ display: "flex", padding: 20 }}>
-          <code
+          <code-block
             code="hello"
             language="ts"
             onClick={(event) => {

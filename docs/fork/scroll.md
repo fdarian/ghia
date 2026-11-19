@@ -20,7 +20,7 @@ One wheel event goes to the innermost scroller that can use any of it, and that 
 
 The wheel reaches only scrollers that are ancestors of the hit target, so a card over an unrelated scroller does not scroll it, and a modal does not scroll the page it was declared in. When scrolling is smooth over empty padding and stuck over a child, look at who claimed the delta: a nested scroller, `<virtual-list>` or `<diff scroll>` under the pointer, or an `onWheel` handler that calls `preventDefault()`, which cancels the scroll outright.
 
-The code and table bodies that `<code>` and `<markdown>` build are `overflow_x_scroll().restrict_scroll_to_axis()` divs that do not set `allow_concurrent_scroll`, so `div.rs` takes its older branch for them: horizontal deltas only, no chaining, no latching. Keep `restrict_scroll_to_axis()` on any x-only scroller that native code builds, or a vertical wheel over it moves it sideways instead of the page.
+The code and table bodies that `<code-block>` and `<markdown>` build are `overflow_x_scroll().restrict_scroll_to_axis()` divs that do not set `allow_concurrent_scroll`, so `div.rs` takes its older branch for them: horizontal deltas only, no chaining, no latching. Keep `restrict_scroll_to_axis()` on any x-only scroller that native code builds, or a vertical wheel over it moves it sideways instead of the page.
 
 The wheel itself is a separate event, `onWheel` (see [events-and-input.md](events-and-input.md)). Its delta sign is positive down, and the simulated wheel (`nativeSimulateScrollWheel`, `dispatchScrollWheel`, the automation `wheel`) takes the same sign. `nativeSimulateScrollWheel` without a phase starts a new gesture.
 

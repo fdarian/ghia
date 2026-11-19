@@ -16,6 +16,7 @@ import {
   $selectAll,
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
+  FORMAT_TEXT_COMMAND,
   INDENT_CONTENT_COMMAND,
   type ElementNode,
   type LexicalEditor,
@@ -441,6 +442,57 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     expect(paragraphs()).toEqual(['Helloabc'])
     expect(rootElement().textContent).toBe('Helloabc')
     expect(painted()).toContain('Helloabc')
+    expect(uncaught).toEqual([])
+  })
+
+  it('20. the Code text format makes an inline <code> that draws its text on the line of the words around it', async () => {
+    lexicalEditor().update(() => {
+      const paragraph = $createParagraphNode()
+      paragraph.append($createTextNode('one two three'))
+      $getRoot().clear().append(paragraph)
+    })
+    await nextTask()
+    await settle(root)
+    const text = rootElement().querySelector('span')?.firstChild
+    if (text === null || text === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(text, 4, text, 7)
+    await nextTask()
+    await settle(root)
+    lexicalEditor().dispatchCommand(FORMAT_TEXT_COMMAND, 'code')
+    await nextTask()
+    await settle(root)
+    expect(paragraphs()).toEqual(['one two three'])
+    const code = rootElement().querySelector('code')
+    if (code === null) throw new Error('the Code format made no <code>')
+    expect(code.textContent).toBe('two')
+    expect(getComputedStyle(code).display).toBe('inline')
+    expect(painted()).toContain('two')
+    const paragraph = rootElement().querySelector('p')
+    if (paragraph === null) throw new Error('no paragraph')
+    const box = paragraph.getBoundingClientRect()
+    const rectOf = (node: Node): DOMRect => {
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      return range.getBoundingClientRect()
+    }
+    const runs = [paragraph.firstChild, code, paragraph.lastChild].map((node) => {
+      if (node === null) throw new Error('the paragraph lost a run')
+      return rectOf(node)
+    })
+    for (const rect of runs) {
+      expect(rect.width).toBeGreaterThan(0)
+      expect(rect.y).toBeGreaterThanOrEqual(box.y - 0.5)
+      expect(rect.y + rect.height).toBeLessThanOrEqual(box.y + box.height + 0.5)
+    }
+    // One line: the paragraph is no taller than the tallest run and each run starts where the one before ends.
+    const before = runs[0]!
+    const inside = runs[1]!
+    const after = runs[2]!
+    expect(box.height).toBeLessThan(2 * inside.height)
+    expect(inside.x).toBeGreaterThanOrEqual(before.x + before.width - 0.5)
+    expect(after.x).toBeGreaterThanOrEqual(inside.x + inside.width - 0.5)
     expect(uncaught).toEqual([])
   })
 })

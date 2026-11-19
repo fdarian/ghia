@@ -1,0 +1,1384 @@
+{
+ "rects": {
+  "default": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "default.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "default.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "default.base": [
+   33.6171875,
+   15,
+   0,
+   0
+  ],
+  "parent-20px": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "parent-20px.p": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "parent-20px.code": [
+   16.6796875,
+   0,
+   12.046875,
+   23
+  ],
+  "parent-20px.base": [
+   44.2890625,
+   18.5,
+   0,
+   0
+  ],
+  "parent-larger": [
+   0,
+   0,
+   1280,
+   22.5
+  ],
+  "parent-larger.p": [
+   0,
+   0,
+   1280,
+   22.5
+  ],
+  "parent-larger.code": [
+   16.015625,
+   3.5,
+   9.3984375,
+   18
+  ],
+  "parent-larger.base": [
+   40.3515625,
+   18,
+   0,
+   0
+  ],
+  "parent-em": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "parent-em.p": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "parent-em.code": [
+   20.015625,
+   4,
+   11.7421875,
+   22.5
+  ],
+  "parent-em.base": [
+   50.4296875,
+   22,
+   0,
+   0
+  ],
+  "parent-percent": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "parent-percent.p": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "parent-percent.code": [
+   20.015625,
+   4,
+   11.7421875,
+   22.5
+  ],
+  "parent-percent.base": [
+   50.4296875,
+   22,
+   0,
+   0
+  ],
+  "parent-rem": [
+   0,
+   0,
+   1280,
+   37
+  ],
+  "parent-rem.p": [
+   0,
+   0,
+   1280,
+   37
+  ],
+  "parent-rem.code": [
+   26.6875,
+   0,
+   19.265625,
+   37
+  ],
+  "parent-rem.base": [
+   70.84375,
+   29.5,
+   0,
+   0
+  ],
+  "parent-calc": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "parent-calc.p": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "parent-calc.code": [
+   16.6796875,
+   0,
+   12.046875,
+   23
+  ],
+  "parent-calc.base": [
+   44.2890625,
+   18.5,
+   0,
+   0
+  ],
+  "grandparent-20px": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "grandparent-20px.p": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "grandparent-20px.code": [
+   16.6796875,
+   0,
+   12.046875,
+   23
+  ],
+  "grandparent-20px.base": [
+   44.2890625,
+   18.5,
+   0,
+   0
+  ],
+  "grandparent-em": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "grandparent-em.p": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "grandparent-em.code": [
+   20.015625,
+   4,
+   11.7421875,
+   22.5
+  ],
+  "grandparent-em.base": [
+   50.4296875,
+   22,
+   0,
+   0
+  ],
+  "author-menlo": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "author-menlo.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "author-menlo.code": [
+   13.34375,
+   0,
+   9.6328125,
+   19
+  ],
+  "author-menlo.base": [
+   35.421875,
+   15,
+   0,
+   0
+  ],
+  "author-monospace": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "author-monospace.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "author-monospace.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "author-monospace.base": [
+   33.6171875,
+   15,
+   0,
+   0
+  ],
+  "monospace-twice": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "monospace-twice.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "monospace-twice.code": [
+   13.34375,
+   0,
+   9.6328125,
+   19
+  ],
+  "monospace-twice.base": [
+   35.421875,
+   15,
+   0,
+   0
+  ],
+  "monospace-menlo": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "monospace-menlo.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "monospace-menlo.code": [
+   13.34375,
+   0,
+   9.6328125,
+   19
+  ],
+  "monospace-menlo.base": [
+   35.421875,
+   15,
+   0,
+   0
+  ],
+  "menlo-monospace": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "menlo-monospace.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "menlo-monospace.code": [
+   13.34375,
+   0,
+   9.6328125,
+   19
+  ],
+  "menlo-monospace.base": [
+   35.421875,
+   15,
+   0,
+   0
+  ],
+  "ui-monospace": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "ui-monospace.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "ui-monospace.code": [
+   13.34375,
+   0.5,
+   8,
+   18
+  ],
+  "ui-monospace.base": [
+   33.7890625,
+   15,
+   0,
+   0
+  ],
+  "monospace-upper": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "monospace-upper.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "monospace-upper.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "monospace-upper.base": [
+   33.6171875,
+   15,
+   0,
+   0
+  ],
+  "monospace-sans": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "monospace-sans.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "monospace-sans.code": [
+   13.34375,
+   0,
+   9.6328125,
+   19
+  ],
+  "monospace-sans.base": [
+   35.421875,
+   15,
+   0,
+   0
+  ],
+  "monospace-quoted": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "monospace-quoted.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "monospace-quoted.code": [
+   13.34375,
+   0.5,
+   8,
+   18
+  ],
+  "monospace-quoted.base": [
+   33.7890625,
+   15,
+   0,
+   0
+  ],
+  "size-1em": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "size-1em.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "size-1em.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "size-1em.base": [
+   33.6171875,
+   15,
+   0,
+   0
+  ],
+  "size-100percent": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "size-100percent.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "size-100percent.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "size-100percent.base": [
+   33.6171875,
+   15,
+   0,
+   0
+  ],
+  "size-20px": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "size-20px.p": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "size-20px.code": [
+   13.34375,
+   0,
+   12.046875,
+   23
+  ],
+  "size-20px.base": [
+   37.8359375,
+   18.5,
+   0,
+   0
+  ],
+  "size-2em": [
+   0,
+   0,
+   1280,
+   30
+  ],
+  "size-2em.p": [
+   0,
+   0,
+   1280,
+   30
+  ],
+  "size-2em.code": [
+   13.34375,
+   0,
+   15.65625,
+   30
+  ],
+  "size-2em.base": [
+   41.4453125,
+   24,
+   0,
+   0
+  ],
+  "kbd": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "kbd.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "kbd.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "kbd.base": [
+   33.6171875,
+   15,
+   0,
+   0
+  ],
+  "samp": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "samp.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "samp.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "samp.base": [
+   33.6171875,
+   15,
+   0,
+   0
+  ],
+  "tt": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "tt.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "tt.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "tt.base": [
+   33.6171875,
+   15,
+   0,
+   0
+  ],
+  "pre": [
+   0,
+   0,
+   1280,
+   15
+  ],
+  "pre.p": [
+   0,
+   0,
+   1280,
+   15
+  ],
+  "pre-20px": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "pre-20px.p": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "pre-code": [
+   0,
+   0,
+   1280,
+   15
+  ],
+  "pre-code.p": [
+   0,
+   0,
+   1280,
+   15
+  ],
+  "pre-code.code": [
+   15.65625,
+   0,
+   7.828125,
+   15
+  ],
+  "in-monospace": [
+   0,
+   0,
+   1280,
+   15
+  ],
+  "in-monospace.p": [
+   0,
+   0,
+   1280,
+   15
+  ],
+  "in-monospace.code": [
+   15.65625,
+   0,
+   7.828125,
+   15
+  ],
+  "in-monospace.base": [
+   39.140625,
+   12,
+   0,
+   0
+  ],
+  "in-monospace-20px": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "in-monospace-20px.p": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "in-monospace-20px.code": [
+   24.0859375,
+   0,
+   12.046875,
+   23
+  ],
+  "in-monospace-20px.base": [
+   60.21875,
+   18.5,
+   0,
+   0
+  ],
+  "code-in-code": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "code-in-code.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "code-in-code.code": [
+   13.34375,
+   3,
+   23.484375,
+   15
+  ],
+  "code-in-code.inner": [
+   29,
+   3,
+   7.828125,
+   15
+  ],
+  "code-in-code.base": [
+   36.828125,
+   15,
+   0,
+   0
+  ],
+  "span-in-code": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "span-in-code.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "span-in-code.code": [
+   13.34375,
+   3,
+   23.484375,
+   15
+  ],
+  "span-in-code.inner": [
+   29,
+   3,
+   7.828125,
+   15
+  ],
+  "span-in-code.base": [
+   36.828125,
+   15,
+   0,
+   0
+  ],
+  "menlo-in-code": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "menlo-in-code.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "menlo-in-code.code": [
+   13.34375,
+   3,
+   25.2890625,
+   15
+  ],
+  "menlo-in-code.inner": [
+   29,
+   0,
+   9.6328125,
+   19
+  ],
+  "menlo-in-code.base": [
+   38.6328125,
+   15,
+   0,
+   0
+  ],
+  "helvetica-in-code": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "helvetica-in-code.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "helvetica-in-code.code": [
+   13.34375,
+   3,
+   23.65625,
+   15
+  ],
+  "helvetica-in-code.inner": [
+   29,
+   0,
+   8,
+   18.5
+  ],
+  "helvetica-in-code.base": [
+   37,
+   15,
+   0,
+   0
+  ],
+  "span-monospace": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "span-monospace.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "span-monospace.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "span-monospace.base": [
+   33.6171875,
+   15,
+   0,
+   0
+  ],
+  "code-em-child": [
+   0,
+   0,
+   1280,
+   30
+  ],
+  "code-em-child.p": [
+   0,
+   0,
+   1280,
+   30
+  ],
+  "code-em-child.code": [
+   13.34375,
+   12,
+   31.3125,
+   15
+  ],
+  "code-em-child.inner": [
+   29,
+   0,
+   15.65625,
+   30
+  ],
+  "code-em-child.base": [
+   44.65625,
+   24,
+   0,
+   0
+  ],
+  "line-height-px": [
+   0,
+   0,
+   1280,
+   25
+  ],
+  "line-height-px.p": [
+   0,
+   0,
+   1280,
+   25
+  ],
+  "line-height-px.code": [
+   13.34375,
+   5.5,
+   7.828125,
+   15
+  ],
+  "line-height-px.base": [
+   33.6171875,
+   17.5,
+   0,
+   0
+  ],
+  "line-height-number": [
+   0,
+   0,
+   1280,
+   24
+  ],
+  "line-height-number.p": [
+   0,
+   0,
+   1280,
+   24
+  ],
+  "line-height-number.code": [
+   13.34375,
+   5.5,
+   7.828125,
+   15
+  ],
+  "line-height-number.base": [
+   33.6171875,
+   17.5,
+   0,
+   0
+  ],
+  "line-height-code": [
+   0,
+   0,
+   1280,
+   30
+  ],
+  "line-height-code.p": [
+   0,
+   0,
+   1280,
+   30
+  ],
+  "line-height-code.code": [
+   13.34375,
+   7.5,
+   7.828125,
+   15
+  ],
+  "line-height-code.base": [
+   33.6171875,
+   19.5,
+   0,
+   0
+  ],
+  "atomic-helvetica": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "atomic-helvetica.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "atomic-helvetica.code": [
+   13.34375,
+   3,
+   15.828125,
+   15
+  ],
+  "atomic-helvetica.inner": [
+   21.171875,
+   0,
+   8,
+   18.5
+  ],
+  "atomic-helvetica.base": [
+   29.171875,
+   15,
+   0,
+   0
+  ],
+  "atomic-small-code": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "atomic-small-code.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "atomic-small-code.small": [
+   0,
+   2.5,
+   6.5234375,
+   15.5
+  ],
+  "atomic-small-code.code": [
+   0,
+   5,
+   6.5234375,
+   12.5
+  ],
+  "atomic-small-code.base": [
+   6.5234375,
+   15,
+   0,
+   0
+  ],
+  "atomic-em-chain": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "atomic-em-chain.p": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "atomic-em-chain.outer": [
+   13.34375,
+   0,
+   11.7421875,
+   27.5
+  ],
+  "atomic-em-chain.block": [
+   13.34375,
+   0,
+   11.7421875,
+   27.5
+  ],
+  "atomic-em-chain.code": [
+   13.34375,
+   4,
+   11.7421875,
+   22.5
+  ],
+  "atomic-em-chain.base": [
+   25.0859375,
+   22,
+   0,
+   0
+  ],
+  "atomic-block-code": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "atomic-block-code.p": [
+   0,
+   0,
+   1280,
+   18.5
+  ],
+  "atomic-block-code.block": [
+   13.34375,
+   0,
+   7.828125,
+   18.5
+  ],
+  "atomic-block-code.code": [
+   13.34375,
+   3,
+   7.828125,
+   15
+  ],
+  "atomic-block-code.base": [
+   21.171875,
+   15,
+   0,
+   0
+  ],
+  "calc-parent-em": [
+   0,
+   0,
+   1280,
+   28
+  ],
+  "calc-parent-em.p": [
+   0,
+   0,
+   1280,
+   28
+  ],
+  "calc-parent-em.code": [
+   20.015625,
+   0,
+   14.453125,
+   28
+  ],
+  "calc-parent-em.base": [
+   53.140625,
+   22.5,
+   0,
+   0
+  ],
+  "calc-code-1em": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "calc-code-1em.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "calc-code-1em.code": [
+   13.34375,
+   0,
+   9.6328125,
+   19
+  ],
+  "calc-code-1em.base": [
+   35.421875,
+   15,
+   0,
+   0
+  ],
+  "calc-parent-percent": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "calc-parent-percent.p": [
+   0,
+   0,
+   1280,
+   27.5
+  ],
+  "calc-parent-percent.code": [
+   20.015625,
+   4,
+   11.7421875,
+   22.5
+  ],
+  "calc-parent-percent.base": [
+   50.4296875,
+   22,
+   0,
+   0
+  ],
+  "calc-code-percent": [
+   0,
+   0,
+   1280,
+   22.5
+  ],
+  "calc-code-percent.p": [
+   0,
+   0,
+   1280,
+   22.5
+  ],
+  "calc-code-percent.code": [
+   13.34375,
+   0,
+   11.7421875,
+   22.5
+  ],
+  "calc-code-percent.base": [
+   37.53125,
+   18,
+   0,
+   0
+  ]
+ },
+ "fontSizes": {
+  "default": "16px",
+  "default.p": "16px",
+  "default.code": "13px",
+  "default.base": "16px",
+  "parent-20px": "16px",
+  "parent-20px.p": "20px",
+  "parent-20px.code": "20px",
+  "parent-20px.base": "20px",
+  "parent-larger": "16px",
+  "parent-larger.p": "19.2px",
+  "parent-larger.code": "15.6px",
+  "parent-larger.base": "19.2px",
+  "parent-em": "16px",
+  "parent-em.p": "24px",
+  "parent-em.code": "19.5px",
+  "parent-em.base": "24px",
+  "parent-percent": "16px",
+  "parent-percent.p": "24px",
+  "parent-percent.code": "19.5px",
+  "parent-percent.base": "24px",
+  "parent-rem": "16px",
+  "parent-rem.p": "32px",
+  "parent-rem.code": "32px",
+  "parent-rem.base": "32px",
+  "parent-calc": "16px",
+  "parent-calc.p": "20px",
+  "parent-calc.code": "20px",
+  "parent-calc.base": "20px",
+  "grandparent-20px": "20px",
+  "grandparent-20px.p": "20px",
+  "grandparent-20px.code": "20px",
+  "grandparent-20px.base": "20px",
+  "grandparent-em": "24px",
+  "grandparent-em.p": "24px",
+  "grandparent-em.code": "19.5px",
+  "grandparent-em.base": "24px",
+  "author-menlo": "16px",
+  "author-menlo.p": "16px",
+  "author-menlo.code": "16px",
+  "author-menlo.base": "16px",
+  "author-monospace": "16px",
+  "author-monospace.p": "16px",
+  "author-monospace.code": "13px",
+  "author-monospace.base": "16px",
+  "monospace-twice": "16px",
+  "monospace-twice.p": "16px",
+  "monospace-twice.code": "16px",
+  "monospace-twice.base": "16px",
+  "monospace-menlo": "16px",
+  "monospace-menlo.p": "16px",
+  "monospace-menlo.code": "16px",
+  "monospace-menlo.base": "16px",
+  "menlo-monospace": "16px",
+  "menlo-monospace.p": "16px",
+  "menlo-monospace.code": "16px",
+  "menlo-monospace.base": "16px",
+  "ui-monospace": "16px",
+  "ui-monospace.p": "16px",
+  "ui-monospace.code": "16px",
+  "ui-monospace.base": "16px",
+  "monospace-upper": "16px",
+  "monospace-upper.p": "16px",
+  "monospace-upper.code": "13px",
+  "monospace-upper.base": "16px",
+  "monospace-sans": "16px",
+  "monospace-sans.p": "16px",
+  "monospace-sans.code": "16px",
+  "monospace-sans.base": "16px",
+  "monospace-quoted": "16px",
+  "monospace-quoted.p": "16px",
+  "monospace-quoted.code": "16px",
+  "monospace-quoted.base": "16px",
+  "size-1em": "16px",
+  "size-1em.p": "16px",
+  "size-1em.code": "13px",
+  "size-1em.base": "16px",
+  "size-100percent": "16px",
+  "size-100percent.p": "16px",
+  "size-100percent.code": "13px",
+  "size-100percent.base": "16px",
+  "size-20px": "16px",
+  "size-20px.p": "16px",
+  "size-20px.code": "20px",
+  "size-20px.base": "16px",
+  "size-2em": "16px",
+  "size-2em.p": "16px",
+  "size-2em.code": "26px",
+  "size-2em.base": "16px",
+  "kbd": "16px",
+  "kbd.p": "16px",
+  "kbd.code": "13px",
+  "kbd.base": "16px",
+  "samp": "16px",
+  "samp.p": "16px",
+  "samp.code": "13px",
+  "samp.base": "16px",
+  "tt": "16px",
+  "tt.p": "16px",
+  "tt.code": "13px",
+  "tt.base": "16px",
+  "pre": "16px",
+  "pre.p": "13px",
+  "pre-20px": "16px",
+  "pre-20px.p": "20px",
+  "pre-code": "16px",
+  "pre-code.p": "13px",
+  "pre-code.code": "13px",
+  "in-monospace": "16px",
+  "in-monospace.p": "13px",
+  "in-monospace.code": "13px",
+  "in-monospace.base": "13px",
+  "in-monospace-20px": "16px",
+  "in-monospace-20px.p": "20px",
+  "in-monospace-20px.code": "20px",
+  "in-monospace-20px.base": "20px",
+  "code-in-code": "16px",
+  "code-in-code.p": "16px",
+  "code-in-code.code": "13px",
+  "code-in-code.inner": "13px",
+  "code-in-code.base": "16px",
+  "span-in-code": "16px",
+  "span-in-code.p": "16px",
+  "span-in-code.code": "13px",
+  "span-in-code.inner": "13px",
+  "span-in-code.base": "16px",
+  "menlo-in-code": "16px",
+  "menlo-in-code.p": "16px",
+  "menlo-in-code.code": "13px",
+  "menlo-in-code.inner": "16px",
+  "menlo-in-code.base": "16px",
+  "helvetica-in-code": "16px",
+  "helvetica-in-code.p": "16px",
+  "helvetica-in-code.code": "13px",
+  "helvetica-in-code.inner": "16px",
+  "helvetica-in-code.base": "16px",
+  "span-monospace": "16px",
+  "span-monospace.p": "16px",
+  "span-monospace.code": "13px",
+  "span-monospace.base": "16px",
+  "code-em-child": "16px",
+  "code-em-child.p": "16px",
+  "code-em-child.code": "13px",
+  "code-em-child.inner": "26px",
+  "code-em-child.base": "16px",
+  "line-height-px": "16px",
+  "line-height-px.p": "16px",
+  "line-height-px.code": "13px",
+  "line-height-px.base": "16px",
+  "line-height-number": "16px",
+  "line-height-number.p": "16px",
+  "line-height-number.code": "13px",
+  "line-height-number.base": "16px",
+  "line-height-code": "16px",
+  "line-height-code.p": "16px",
+  "line-height-code.code": "13px",
+  "line-height-code.base": "16px",
+  "atomic-helvetica": "16px",
+  "atomic-helvetica.p": "16px",
+  "atomic-helvetica.code": "13px",
+  "atomic-helvetica.inner": "16px",
+  "atomic-helvetica.base": "16px",
+  "atomic-small-code": "16px",
+  "atomic-small-code.p": "16px",
+  "atomic-small-code.small": "13.3333px",
+  "atomic-small-code.code": "10.8333px",
+  "atomic-small-code.base": "16px",
+  "atomic-em-chain": "16px",
+  "atomic-em-chain.p": "16px",
+  "atomic-em-chain.outer": "24px",
+  "atomic-em-chain.block": "24px",
+  "atomic-em-chain.code": "19.5px",
+  "atomic-em-chain.base": "16px",
+  "atomic-block-code": "16px",
+  "atomic-block-code.p": "16px",
+  "atomic-block-code.block": "16px",
+  "atomic-block-code.code": "13px",
+  "atomic-block-code.base": "16px",
+  "calc-parent-em": "16px",
+  "calc-parent-em.p": "24px",
+  "calc-parent-em.code": "24px",
+  "calc-parent-em.base": "24px",
+  "calc-code-1em": "16px",
+  "calc-code-1em.p": "16px",
+  "calc-code-1em.code": "16px",
+  "calc-code-1em.base": "16px",
+  "calc-parent-percent": "16px",
+  "calc-parent-percent.p": "24px",
+  "calc-parent-percent.code": "19.5px",
+  "calc-parent-percent.base": "24px",
+  "calc-code-percent": "16px",
+  "calc-code-percent.p": "16px",
+  "calc-code-percent.code": "19.5px",
+  "calc-code-percent.base": "16px"
+ },
+ "scenes": {
+  "transitionRest": 13,
+  "transitionStart": 13,
+  "transitionUp": {
+   "mid": 16.25,
+   "end": 19.5
+  },
+  "transitionBackStart": 19.5,
+  "transitionDown": {
+   "mid": 16.25,
+   "end": 13
+  },
+  "keyframesStart": 13,
+  "keyframes": {
+   "mid": 22.5,
+   "end": 32
+  },
+  "focusBefore": [
+   13,
+   78.2734375
+  ],
+  "focused": true,
+  "focusAfter": [
+   13,
+   78.2734375
+  ]
+ }
+}

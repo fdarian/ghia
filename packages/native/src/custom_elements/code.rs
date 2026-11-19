@@ -1,10 +1,10 @@
-//! `<code>` — a syntax-highlighted, selectable code block.
+//! `<code-block>` — a syntax-highlighted, selectable code block.
 //!
 //! Ported from Comet (https://github.com/zeronsh/comet), MIT.
 //! Original: `render_code_block` in `crates/ui/src/markdown/render.rs`.
 //!
 //! ```tsx
-//! <code
+//! <code-block
 //!   code={source}
 //!   language="typescript"       // or path="src/app.ts"
 //!   showLineNumbers
@@ -14,7 +14,7 @@
 //!
 //! **It paints no surface of its own**: no fill, no border, no radius, no
 //! padding and no language header. `style` is the surface, so an app owns the
-//! card look and `<code>` owns the glyphs. `<markdown>` keeps its own
+//! card look and `<code-block>` owns the glyphs. `<markdown>` keeps its own
 //! fenced-block card, because a document renderer owns its layout.
 //!
 //! Two things stay ours: lines never wrap, and the block is its own horizontal
@@ -46,7 +46,7 @@ pub struct CodeFactory;
 
 impl CustomElementFactory for CodeFactory {
     fn element_type(&self) -> &str {
-        "code"
+        "code-block"
     }
 
     fn create(&self, _id: u64) -> Box<dyn CustomElement> {

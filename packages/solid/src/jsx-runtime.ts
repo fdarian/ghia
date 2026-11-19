@@ -1,7 +1,7 @@
 import type { JSX as SolidJSX } from "solid-js"
 import type {
   AnchoredProps,
-  CodeProps,
+  CodeBlockProps,
   DiffProps,
   DomElementOf,
   FormProps,
@@ -213,7 +213,7 @@ export namespace JSX {
     label: SolidHostProps<LabelProps & { for?: string }, "label">
     form: SolidHostProps<FormProps, "form">
     anchored: SolidHostProps<AnchoredProps, "anchored">
-    code: SolidHostProps<CodeProps, "code">
+    "code-block": SolidHostProps<CodeBlockProps, "code-block">
     diff: SolidHostProps<DiffProps, "diff">
     markdown: SolidHostProps<MarkdownProps, "markdown">
     "virtual-list": SolidHostProps<VirtualListProps, "virtual-list">

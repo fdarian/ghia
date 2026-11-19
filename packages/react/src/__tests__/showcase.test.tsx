@@ -14,7 +14,7 @@ import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 const NOTES = [
   "## Release notes",
   "",
-  "Text is now **selectable** across every element, including `<code>` and `<diff>`.",
+  "Text is now **selectable** across every element, including `<code-block>` and `<diff>`.",
   "",
   "- Tree-sitter highlighting runs in Rust",
   "- Diffs virtualize with GPUI's list",
@@ -110,8 +110,8 @@ describe("native text showcase", () => {
             <markdown source={NOTES} />
           </Panel>
           <Panel title="CODE">
-            {/* `<code>` paints no card, so the card is here, in caller code. */}
-            <code
+            {/* `<code-block>` paints no card, so the card is here, in caller code. */}
+            <code-block
               code={SNIPPET}
               language="typescript"
               showLineNumbers
@@ -160,7 +160,7 @@ describe("native text showcase", () => {
         }}
       >
         <markdown source="heading text" />
-        <code code={"code line one"} language="ts" />
+        <code-block code={"code line one"} language="ts" />
       </div>
     )
 
@@ -185,7 +185,7 @@ describe("native text showcase", () => {
         }}
       >
         <markdown source={NOTES} theme={theme} />
-        <code code={SNIPPET} language="typescript" showLineNumbers theme={theme} />
+        <code-block code={SNIPPET} language="typescript" showLineNumbers theme={theme} />
         <diff scroll patch={PATCH} style={{ flexGrow: 1, minHeight: 0 }} theme={theme} />
       </div>
     )

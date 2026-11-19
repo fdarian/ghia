@@ -250,12 +250,12 @@ describeNative("text wrapping", () => {
     expectScreenshotsDiffer(before, after)
   })
 
-  it("pans a wide <code> block on a horizontal wheel", () => {
+  it("pans a wide <code-block> block on a horizontal wheel", () => {
     const { render, renderer } = createTestRoot()
     const line = "const wide = '".padEnd(220, "x") + "'"
     render(
       <div testId="col" style={{ width: 240, padding: 8, backgroundColor: "#111" }}>
-        <code code={line + "\n" + line} language="ts" />
+        <code-block code={line + "\n" + line} language="ts" />
       </div>,
     )
     const before = path.join(SHOTS_DIR, "wrap-code-x-before.png")

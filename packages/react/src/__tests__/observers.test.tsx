@@ -423,7 +423,7 @@ describeNative("ResizeObserver", () => {
     ["img", (ref: ReturnType<typeof setup>["ref"]) => <img ref={ref("a")} style={{ width: 120, height: 30 }} />],
     ["svg", (ref: ReturnType<typeof setup>["ref"]) => <svg ref={ref("a")} style={{ width: 120, height: 30 }} />],
     ["textarea", (ref: ReturnType<typeof setup>["ref"]) => <textarea ref={ref("a")} style={{ width: 120, height: 30 }} />],
-    ["code", (ref: ReturnType<typeof setup>["ref"]) => <code ref={ref("a")} code="let a = 1" language="ts" style={{ width: 120, height: 30 }} />],
+    ["code", (ref: ReturnType<typeof setup>["ref"]) => <code-block ref={ref("a")} code="let a = 1" language="ts" style={{ width: 120, height: 30 }} />],
     ["markdown", (ref: ReturnType<typeof setup>["ref"]) => <markdown ref={ref("a")} source="# hi" style={{ width: 120, height: 30 }} />],
   ])("observes a <%s>", (_name, build) => {
     const { render, renderer, ref, element, unmount } = setup()

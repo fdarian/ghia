@@ -158,10 +158,10 @@ describeNative("pseudo styles on native surfaces", () => {
     testRoot = createTestRoot()
   })
 
-  it("paints the hover style declared on a <code> block", () => {
+  it("paints the hover style declared on a <code-block> block", () => {
     testRoot.render(
       <div style={{ width: "100%", height: "100%", backgroundColor: "#11111b" }}>
-        <code
+        <code-block
           code={"const answer = 42\n"}
           language="ts"
           style={{

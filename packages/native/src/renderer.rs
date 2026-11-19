@@ -8639,7 +8639,7 @@ impl Inherited {
         self.custom = custom;
         self.lengths = self
             .lengths
-            .descend(style.and_then(|style| style.font_size.as_ref()), self.above_root);
+            .descend_style(style, self.above_root);
         self.above_root = false;
         self.font_features = None;
         self.font_variations = None;
@@ -11983,8 +11983,12 @@ fn build_element_unpumped(
         .current(base_style)
         .and_then(|style| ctx.focus_styles.folded_for_resets(id, style, ctx.focus_handles.contains_key(&id)));
     let current_style = focus_reset_style.as_deref().or(animated.current(base_style));
+    // An atomic inline's overlay is laid over its style after it has descended (below): what the boxes around it
+    // declare is in `ctx.inherited` already.
     let overlaid_style = contents_overlay
-        .map(|overlay| current_style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(&overlay));
+        .as_ref()
+        .filter(|_| !atomic_root)
+        .map(|overlay| current_style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(overlay));
     let style = overlaid_style.as_deref().or(current_style);
     let anchored_style = anchor_scope.and_then(|anchored_id| {
         style.and_then(|style| crate::layout::anchor_size::resolve(anchored_id, style))
@@ -12051,11 +12055,24 @@ fn build_element_unpumped(
     // is the style a transitioning element already has (motion folds them), so with or without a
     // transition `.card:focus-within { color: red }` reaches the text below.
     let descend_style = style.map(|style| ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id)));
-    let descended = ctx
+    let mut descended = ctx
         .inherited
         .clone()
         .descend_with_custom(descend_style.as_deref(), element.has_inert_prop(), own_custom);
+    let atomic_overlaid = contents_overlay
+        .filter(|_| atomic_root)
+        .map(|overlay| style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(&overlay).into_owned());
+    // The lengths of the boxes around an atomic are in `descended` already, but the text colour GPUI paints with is the
+    // one a style declares (`ColorContext::declared`): the colour of the boxes around it reaches it only through the
+    // overlay.
+    if let Some(overlaid) = &atomic_overlaid {
+        descended.colors = ctx
+            .inherited
+            .colors
+            .descend(&ctx.focus_styles.folded(id, overlaid, ctx.focus_handles.contains_key(&id)));
+    }
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
+    let style = atomic_overlaid.as_ref().or(style);
     crate::layout::table::enter(&mut ctx.inherited.table_row, &mut ctx.inherited.table_cell, element);
     // The start of a logical inline pair is the right side in an rtl element.
     let rtl_style = style
@@ -13765,8 +13782,9 @@ fn build_atomics(
             }
             let overlay = (!chain.is_empty()).then(|| {
                 let mut overlay = StyleDesc::inherited_through(&chain);
-                if overlay.font_size.is_some() {
-                    // Resolved here: `em` means the font of the box that declared it.
+                if overlay.font_size.is_some() || inherited.lengths.font_size != ctx.inherited.lengths.font_size {
+                    // Resolved here: `em` means the font of the box that declared it. A size that only the monospace
+                    // family scaled is not declared by any box, and the atomic still inherits it.
                     overlay.font_size = Some(crate::css::length::LinearLength::px(inherited.lengths.font_size));
                 }
                 Box::new(overlay)
@@ -13784,7 +13802,7 @@ fn build_atomics(
             });
             let lengths = inherited
                 .lengths
-                .descend(declared.as_ref().and_then(|style| style.font_size.as_ref()), false);
+                .descend_style(declared.as_deref(), false);
             let line_height = declared
                 .as_ref()
                 .and_then(|style| style.line_height.clone())
@@ -14127,7 +14145,7 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
     if let Some(color) = colors.declared() {
         el = el.text_color(color);
     }
-    if style.font_size.is_some() {
+    if lengths.sets_font_size(style) {
         el = el.text_size(gpui::px(lengths.font_size as f32));
     }
     if let Some(ref family) = style.font_family {
@@ -17174,9 +17192,9 @@ mod font_size_cascade_tests {
             cx,
             &[
                 node(1, None, "{}"),
-                custom(2, 1, "code", r#"{"fontSize": 10, "lineHeight": 2}"#),
-                custom(3, 1, "code", r#"{"fontSize": 10, "lineHeight": "30px"}"#),
-                custom(4, 1, "code", r#"{"fontSize": 10, "lineHeight": "3em"}"#),
+                custom(2, 1, "code-block", r#"{"fontSize": 10, "lineHeight": 2}"#),
+                custom(3, 1, "code-block", r#"{"fontSize": 10, "lineHeight": "30px"}"#),
+                custom(4, 1, "code-block", r#"{"fontSize": 10, "lineHeight": "3em"}"#),
             ],
         );
         for id in [2, 3, 4] {

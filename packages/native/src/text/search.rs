@@ -528,7 +528,7 @@ pub fn settle_frame(window: WindowId) -> Vec<u64> {
 ///
 /// Numbering at build time cannot work: retained matches are located before the
 /// frame, native text only exists during it, and a subtree can interleave them
-/// (`<code>` then a string). Numbering each kind separately made `activeIndex`
+/// (`<code-block>` then a string). Numbering each kind separately made `activeIndex`
 /// point at the wrong match whenever a native element came first.
 ///
 /// Numbering in paint order cannot work either: a positioned element paints after the
@@ -595,7 +595,7 @@ pub fn washes_for_retained_run(
 
 /// Washes for a string a native element is about to paint.
 ///
-/// `<code>`, `<markdown>` and `<diff>` build their text inside `render()`, so it
+/// `<code-block>`, `<markdown>` and `<diff>` build their text inside `render()`, so it
 /// never reaches the retained tree and [`GroupList::collect`] cannot see it.
 /// They match the exact string they are painting instead, which makes drift
 /// between the search pass and the paint pass impossible.

@@ -191,7 +191,7 @@ export type {
 export type { MotionDivProps, MotionShapeProps, MotionSpanProps } from "./components/index.js"
 export type {
   AnchoredProps,
-  CodeProps,
+  CodeBlockProps,
   CursorValue,
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,

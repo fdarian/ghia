@@ -137,11 +137,11 @@ describeNative("font-family lists", () => {
     })
   })
 
-  it("resolves the list of a <code> element as it does for text", () => {
+  it("resolves the list of a <code-block> element as it does for text", () => {
     const codeWidth = (root: Root, fontFamily: string): number => {
       root.render(
         <div style={{ display: "flex" }}>
-          <code testId="code" code="ABAB" language="ts" style={{ fontFamily, fontSize: 20 }} />
+          <code-block testId="code" code="ABAB" language="ts" style={{ fontFamily, fontSize: 20 }} />
         </div>
       )
       const element = root.renderer.findByTestId("code")

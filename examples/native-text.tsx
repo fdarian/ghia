@@ -1,7 +1,7 @@
 /**
  * GPUIX native text components.
  *
- * Shows `<markdown>`, `<code>` and `<diff>` — three elements that render text
+ * Shows `<markdown>`, `<code-block>` and `<diff>` — three elements that render text
  * with Tree-sitter syntax highlighting inside Rust, and stay selectable and
  * copyable through the shared selection registry.
  *
@@ -92,7 +92,7 @@ function Tabs({ active, onSelect }: { active: Tab; onSelect: (tab: Tab) => void 
 }
 
 /**
- * `<code>` paints glyphs only: no fill, border, radius, padding or header.
+ * `<code-block>` paints glyphs only: no fill, border, radius, padding or header.
  * The card is app code, built from a plain `<div>` and the `style` prop.
  */
 function CodeBlock({ code, language }: { code: string; language: string }) {
@@ -123,7 +123,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
       >
         <div style={{ fontSize: 11, color: '#b4b4b4' }}>{language}</div>
       </div>
-      <code
+      <code-block
         code={code}
         language={language}
         showLineNumbers

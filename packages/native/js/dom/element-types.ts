@@ -18,7 +18,7 @@ const GHIA_ELEMENT_TYPES: ReadonlySet<string> = new Set<ElementType>([
   "label",
   "form",
   "anchored",
-  "code",
+  "code-block",
   "diff",
   "markdown",
   "webview",
