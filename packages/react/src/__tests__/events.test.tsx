@@ -55,6 +55,19 @@ const WINDOW_SETTLE_SCRIPT = [
   "}",
 ]
 
+// What the scripts below print when the window is occluded: the tests skip on it before reading the rest.
+const OCCLUDED_REPORT = JSON.stringify({
+  windowVisible: false,
+  windowStable: false,
+  strayInput: 0,
+  idleWakes: 0,
+  handled: 0,
+  keys: [],
+  idleWakesAfter: 0,
+  maxFramesInOneTick: 0,
+  maxFramesInOneFrameCall: 0,
+})
+
 describe("frame loop", () => {
   it.skipIf(process.platform !== "darwin")(
     "drives the frame loop from real display-link wakes without blocking I/O",
@@ -235,7 +248,9 @@ describe("frame loop", () => {
       if (!report.windowStable) context.skip("the window's visibility or key status changed, or a pointer reached it, during the run")
     }
 
-    const runInputFrameScript = (inputFrameOff: boolean, animate = false): InputFrameReport => {
+    // `microtask`: the key's handler changes nothing itself and commits from a queueMicrotask, so the
+    // link is started by that microtask, after the tick returned.
+    const runInputFrameScript = (inputFrameOff: boolean, animate = false, microtask = false): InputFrameReport => {
       const rendererPath = fileURLToPath(new URL("../reconciler/renderer.ts", import.meta.url))
       const reconcilerPath = fileURLToPath(new URL("../reconciler/reconciler.js", import.meta.url))
       const script = [
@@ -272,7 +287,7 @@ describe("frame loop", () => {
         '  return React.createElement("div", { style: { width: "100%", height: "100%" }, onMouseMove: () => { strayInput++ }, onMouseDown: () => { strayInput++ }, onWheel: () => { strayInput++ } }, `typed ${count}`)',
         "}",
         // Nothing has focus, so a key goes to the window's handler, which changes the visible text.
-        "render(React.createElement(App), { renderer, onKeyDown: () => { handled++; bump(); if (" + animate + ") animateFrames() } })",
+        "render(React.createElement(App), { renderer, onKeyDown: () => { handled++; if (" + microtask + ") queueMicrotask(bump); else bump(); if (" + animate + ") animateFrames() } })",
         "let handledAtLastKey = 0",
         "let paintedAtEndOfKeyFrame = null",
         "let measuring = false",
@@ -289,7 +304,8 @@ describe("frame loop", () => {
         "    if (handled > handledAtLastKey && !keyTickSeen) {",
         "      keyTickSeen = true",
         // No link is waiting for its first step: the key's frame is the pump's (or there is none to draw).
-        "      if (!renderer.startedLinksPending()) paintedAtEndOfKeyFrame = renderer.getPaintedFrameCount()",
+        // With a microtask commit no link exists yet: the frame call is the only thing that can draw.
+        "      if (!" + microtask + " && !renderer.startedLinksPending()) paintedAtEndOfKeyFrame = renderer.getPaintedFrameCount()",
         "    }",
         "    return running",
         "  },",
@@ -336,6 +352,8 @@ describe("frame loop", () => {
         "}",
         "await quietFor(800, 7000)",
         "const windowVisible = renderer.isWindowVisible()",
+        // An occluded window (a locked screen) starts no link, so each key would wait out its deadline.
+        `if (!windowVisible) { console.log(${JSON.stringify(OCCLUDED_REPORT)}); process.exit(0) }`,
         "const size = renderer.getWindowSize()",
         "statusAtStart = windowStatus()",
         "const idleWakesFrom = wakes",
@@ -422,6 +440,28 @@ describe("frame loop", () => {
       120_000,
     )
 
+    // The link is started by a microtask the key's handler queued (Lexical's update after a prevented
+    // edit, `queueMicrotask(() => flushSync(...))`): nothing is owed when tick() returns, so the frame
+    // loop has to ask after the microtasks, in the frame call's own task.
+    it(
+      "is drawn by the frame call when only a microtask the key queued starts the link",
+      (context) => {
+        const report = runInputFrameScript(false, false, true)
+        console.log(`key frames, microtask commit: ${JSON.stringify(report)}`)
+        skipIfNotMeasurable(report, context)
+        expect(report.handled).toBe(keyCount)
+        for (const key of report.keys) {
+          expect(key.drawnByEndOfKeyFrame).toBeGreaterThan(0)
+          expect(key.drawnByLaterSteps).toBe(0)
+        }
+        // A vsync that wakes the loop in the tick right after the commit steps the window there instead.
+        expect(report.keys.filter((key) => key.frameCallStepped).length).toBeGreaterThan(keyCount / 2)
+        expect(report.idleWakesAfter).toBe(0)
+        expect(report.maxFramesInOneFrameCall).toBeLessThanOrEqual(1)
+      },
+      120_000,
+    )
+
     // A vsync that merges into the link's source while the input frame draws leaves a step queued
     // right behind it. Without the pacing guard that step draws the animation's next frame 0 to
     // 3 ms after the eager one (the callbacks are timed when the slow first one is done).
@@ -504,6 +544,8 @@ describe("frame loop", () => {
         ...WINDOW_SETTLE_SCRIPT,
         "await quietFor(800, 7000)",
         "const windowVisible = renderer.isWindowVisible()",
+        // An occluded window (a locked screen) starts no link, so each key would wait out its deadline.
+        `if (!windowVisible) { console.log(${JSON.stringify(OCCLUDED_REPORT)}); process.exit(0) }`,
         "const size = renderer.getWindowSize()",
         "statusAtStart = windowStatus()",
         "const keys = []",
@@ -619,6 +661,8 @@ describe("frame loop", () => {
         ...WINDOW_SETTLE_SCRIPT,
         'await quietFor(800, 7000)',
         "const windowVisible = renderer.isWindowVisible()",
+        // An occluded window (a locked screen) starts no link, so each key would wait out its deadline.
+        `if (!windowVisible) { console.log(${JSON.stringify(OCCLUDED_REPORT)}); process.exit(0) }`,
         "const size = renderer.getWindowSize()",
         "statusAtStart = windowStatus()",
         "const keys = []",
