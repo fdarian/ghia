@@ -43,6 +43,9 @@ const MARKUP = PAGE.slice(PAGE.indexOf("<body>") + "<body>".length, PAGE.indexOf
 /** What Ghia does not have: `font-size: larger` and the other keywords ([deviations.md](docs/fork/deviations.md#html-tags)). */
 const UNSUPPORTED = new Set(["parent-larger"])
 
+/** A family list nothing in it is installed for: Chrome draws it in its standard font (Times) and Ghia in GPUI's fallback face, which the font size does not depend on (docs/fork/deviations.md, font family lists). Only its font size is compared. */
+const FALLBACK_FONT = new Set(["ui-monospace", "monospace-quoted"])
+
 /** The oracle's markup as elements; `ref` gets each one that has a `data-id`. The cases are its `data-case` boxes. */
 function elementsOf(html: string, ref: (id: string, instance: PublicInstance | null) => void): React.ReactNode[] {
   const root: React.ReactNode[] = []
@@ -121,6 +124,7 @@ describeNative("monospace elements against Chrome", () => {
         const failures: string[] = []
         for (const id of ids(ORACLE[scale])) {
           // The block's own width is the window's in Chrome and the 1280px of the page here.
+          if (FALLBACK_FONT.has(id.split(".")[0]!)) continue
           const compared = id.endsWith(".p") ? [1, 3] : [0, 1, 2, 3]
           const expected = ORACLE[scale].rects[id]!
           const actual = page.rect(id)
