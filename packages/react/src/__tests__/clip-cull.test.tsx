@@ -216,23 +216,26 @@ describeNative("content outside a clip", () => {
   it("keeps Tab working into a focusable that is skipped, and scrolls it into view", () => {
     const { renderer, skippedPerFrame, refs, unmount } = setup((ref) => (
       <div testId="scroller" ref={ref("scroller")} style={{ ...CLIP, overflow: "scroll" }}>
-        {Array.from({ length: 6 }, (_, index) => (
-          <div key={index} testId={`i${index}`} tabIndex={0} style={{ width: 150, height: 150, flexShrink: 0 }} />
-        ))}
+        <div testId="first" tabIndex={0} style={{ width: 150, height: ROW, flexShrink: 0 }} />
+        <div style={{ width: 150, height: SCROLLER_RECORDS_TO, flexShrink: 0 }} />
+        <div testId="skipped" ref={ref("skipped")} tabIndex={0} style={{ width: 150, height: ROW, flexShrink: 0 }} />
       </div>
     ))
     try {
       expect(skippedPerFrame()).toBeGreaterThan(0)
       const focused = () => renderer.getElement(renderer.getFocusedElementId())?.testId ?? null
       renderer.simulateKeystrokes("Tab")
-      expect(focused()).toBe("i0")
-      // i3 starts at 450, past the clip and what the scroller records (400), and so do i4 and i5.
-      renderer.simulateKeystrokes("Tab Tab Tab")
-      expect(focused()).toBe("i3")
+      expect(focused()).toBe("first")
+      renderer.simulateKeystrokes("Tab")
+      expect(focused()).toBe("skipped")
       expect(refs.get("scroller").scrollTop).toBeGreaterThan(0)
-      // Focus the scroller's way back too.
+      const shown = refs.get("skipped").getBoundingClientRect()
+      expect(shown.y).toBeGreaterThanOrEqual(0)
+      expect(shown.y + shown.height).toBeLessThanOrEqual(CLIP.height)
+      // `first` is skipped now, as far above the clip as `skipped` was below it.
       renderer.simulateKeystrokes("Shift+Tab")
-      expect(focused()).toBe("i2")
+      expect(focused()).toBe("first")
+      expect(refs.get("scroller").scrollTop).toBe(0)
     } finally {
       unmount()
     }
@@ -310,7 +313,6 @@ describeNative("content outside a clip", () => {
     const entries: boolean[] = []
     const { renderer, skippedPerFrame, refs, unmount } = setup((ref) => (
       <div ref={ref("scroller")} style={{ ...CLIP, overflow: "auto" }}>
-        {/* Past the clip and the overscan of the rows a scroll can move. */}
         <div style={{ width: 150, height: SCROLLER_RECORDS_TO + 50, flexShrink: 0 }} />
         <div ref={ref("target")} style={{ width: 150, height: 30, flexShrink: 0 }} />
       </div>
