@@ -228,7 +228,7 @@ describe("startFrameLoop without display-link wakes", () => {
       },
     }
     const loop = startFrameLoop(renderer)
-    // A second tick before the immediate runs does not queue a second frame call.
+    // The wake's tick runs after the frame call's immediate (it is scheduled behind it) and does not queue a second one.
     renderer.wake?.()
     await nextImmediate()
     await nextImmediate()

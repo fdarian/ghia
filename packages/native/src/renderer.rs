@@ -1745,10 +1745,6 @@ impl WakeSimulator {
 pub struct GpuixRenderer {
     #[cfg(target_os = "macos")]
     frame_wake: FrameWake,
-    /// Whether the last `tick()`'s pump ran a display-link step: that step was the frame, so
-    /// `step_started_links` leaves the list for a later tick.
-    #[cfg(target_os = "macos")]
-    last_pump_stepped_a_link: std::sync::atomic::AtomicBool,
     event_callback: Mutex<Option<Arc<ThreadsafeFunction<EventPayload>>>>,
     sync_handler: crate::events::sync_dispatch::SyncHandlerOwner,
     tree: Arc<Mutex<RetainedTree>>,
@@ -2156,8 +2152,6 @@ impl GpuixRenderer {
             pointer_requests: Default::default(),
             #[cfg(target_os = "macos")]
             frame_wake: FrameWake::default(),
-            #[cfg(target_os = "macos")]
-            last_pump_stepped_a_link: std::sync::atomic::AtomicBool::new(false),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -2551,13 +2545,7 @@ impl GpuixRenderer {
                         .as_ref()
                         .map(|platform| platform.pump_events_reporting_step())
                 });
-                let running = pumped.as_ref().is_some_and(|outcome| outcome.is_some());
-                self.last_pump_stepped_a_link.store(
-                    pumped
-                        .flatten()
-                        .is_some_and(|outcome| outcome.stepped),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                let running = pumped.is_some_and(|outcome| outcome.is_some());
                 #[cfg(feature = "test-support")]
                 {
                     let delay = self
@@ -2622,8 +2610,7 @@ impl GpuixRenderer {
     /// Returns whether it stepped a window.
     ///
     /// Throws when called from a handler: a step draws, and a handler is inside the input
-    /// dispatch of a tick. It leaves the list alone when the last tick's pump ran a link step
-    /// (that was the frame) and discards it with `GPUIX_INPUT_FRAME_OFF` set. macOS only;
+    /// dispatch of a tick. It discards the list with `GPUIX_INPUT_FRAME_OFF` set. macOS only;
     /// everything else answers false.
     #[napi]
     pub fn step_started_links(&self) -> Result<bool> {
@@ -2639,12 +2626,7 @@ impl GpuixRenderer {
                     gpui_macos::discard_started_display_links();
                     return Ok(false);
                 }
-                // Inert under the per-key yield: the pump stops after each key event's sendEvent:
-                // and never sends a key after it has stepped a link in the same call, so a link
-                // started by a key is not stepped by the same pump. Kept in case a pump ever does.
-                if self.last_pump_stepped_a_link.load(std::sync::atomic::Ordering::Relaxed)
-                    || !gpui_macos::started_display_links_pending()
-                {
+                if !gpui_macos::started_display_links_pending() {
                     return Ok(false);
                 }
                 gpui_macos::step_started_display_links();

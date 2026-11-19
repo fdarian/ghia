@@ -135,8 +135,7 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
   the link in the tick that dispatches it, so its frame waited that long. A frame request (or the window becoming visible)
   that starts a link that was stopped sets the window's `first_step_pending` and lists it; a link that
   `restart_display_link` or `resubscribe_display_link` brings back does not, and a step or a synchronous draw
-  (`display_layer`, `windowDidBecomeKey`) clears it. `tick()` only pumps: it draws no frame of its own and records whether
-  its pump ran a link step (`PumpOutcome.stepped`). After every tick, `startFrameLoop` (`runtime.ts`) schedules one
+  (`display_layer`, `windowDidBecomeKey`) clears it. `tick()` only pumps: it draws no frame of its own. After every tick, `startFrameLoop` (`runtime.ts`) schedules one
   `setImmediate` (never a second while one is queued) that asks `renderer.startedLinksPending()`
   (`gpui_macos::started_display_links_pending()`: some listed window still has the flag, a frame request and a running
   link, the test `step_started_display_links` applies) and, if so, calls `renderer.stepStartedLinks()`. The question is
@@ -154,9 +153,9 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
   merged while the input frame drew has its step queued right behind it, and a link step less than half the period of the
   screen's `maximumFramesPerSecond` (4 ms when it reports none) after the input frame is let go by, without a frame and
   without counting: the frame request stays and the next vsync draws it, so an animation's next frame is not drawn unpaced.
-  A link that is already running is never listed, so continuous input keeps vsync pacing. If the last tick's pump ran a link
-  step (`PumpOutcome.stepped`) the call leaves the list for a later tick: that step was the frame, and a second would draw
-  twice (inert under the per-key yield, where the pump sends no key after a step in the same call; kept in case it ever does). `GPUIX_INPUT_FRAME_OFF=1` (read once, at the first call) makes the call discard the list, which leaves the first
+  A link that is already running is never listed, so continuous input keeps vsync pacing. A window whose first step the pump already ran
+  no longer has the flag (a step clears it), so the call cannot draw it twice, and it steps whenever some window is still owed
+  its first step, even after a pump that stepped a link. `GPUIX_INPUT_FRAME_OFF=1` (read once, at the first call) makes the call discard the list, which leaves the first
   step to the vsync. Both methods are optional on the renderer `startFrameLoop` drives (its fakes lack them), no-ops
   returning `false` off macOS, and neither adds a tick or a wake: the frame call is not a tick, does not run from the wake
   callback, and `pending` is still cleared only by `tick_finished`, after the tick (#56). A tick from a sync handler is

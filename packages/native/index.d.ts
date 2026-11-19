@@ -66,8 +66,7 @@ export declare class GpuixRenderer {
    * Returns whether it stepped a window.
    *
    * Throws when called from a handler: a step draws, and a handler is inside the input
-   * dispatch of a tick. It leaves the list alone when the last tick's pump ran a link step
-   * (that was the frame) and discards it with `GPUIX_INPUT_FRAME_OFF` set. macOS only;
+   * dispatch of a tick. It discards the list with `GPUIX_INPUT_FRAME_OFF` set. macOS only;
    * everything else answers false.
    */
   stepStartedLinks(): boolean

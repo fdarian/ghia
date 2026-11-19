@@ -418,7 +418,7 @@ describe("frame loop", () => {
         // The link stops after two idle steps and the script waited for them, so a window nothing else
         // touched (windowStable) gets no wake now: #77, an idle window is not woken.
         expect(report.idleWakesAfter).toBe(0)
-        // A tick whose pump ran a link step must not be followed by a frame call that draws again: two draws.
+        // No double draw: a tick that stepped a link and the frame call after it draw at most one frame each.
         expect(report.maxFramesInOneTick).toBeLessThanOrEqual(1)
         expect(report.maxFramesInOneFrameCall).toBeLessThanOrEqual(1)
       },
