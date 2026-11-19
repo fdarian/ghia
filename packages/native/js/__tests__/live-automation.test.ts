@@ -139,6 +139,28 @@ describe("liveRendererAsTest", () => {
     expect(live.heard).toEqual(["tick", "microtask", "frame", "timer"])
   })
 
+  it("an input draws the frame of a link only a microtask started", async () => {
+    const live = fakeLiveRenderer()
+    let pending = false
+    live.renderer.tick = () => live.heard.push("tick")
+    live.renderer.simulateKeystrokes = () => {
+      queueMicrotask(() => {
+        live.heard.push("microtask starts the link")
+        pending = true
+      })
+    }
+    live.renderer.startedLinksPending = () => pending
+    live.renderer.stepStartedLinks = () => {
+      live.heard.push("frame")
+      pending = false
+      return true
+    }
+
+    await liveRendererAsTest(live.renderer).simulateKeystrokes("a")
+
+    expect(live.heard).toEqual(["tick", "microtask starts the link", "frame"])
+  })
+
   it("an input with no link waiting makes no frame call", async () => {
     const live = fakeLiveRenderer()
     let calls = 0

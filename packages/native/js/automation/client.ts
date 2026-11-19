@@ -799,12 +799,13 @@ export function liveRendererAsTest(
   // until the event loop turns, so a drag stepped without yielding would hear its release
   // before its moves.
   // As the frame loop does: tick() draws nothing, and the frame a started display link owes is
-  // drawn from a later task, after the microtasks the input's handlers queued.
+  // drawn from a later task, after the microtasks the input's handlers queued. The link is looked
+  // for in that task: one only a microtask starts does not exist when tick() returns.
   const afterInput = async (): Promise<void> => {
     renderer.tick?.()
-    if (renderer.startedLinksPending?.()) {
+    if (renderer.startedLinksPending && renderer.stepStartedLinks) {
       await nextImmediate()
-      renderer.stepStartedLinks?.()
+      if (renderer.startedLinksPending()) renderer.stepStartedLinks()
     }
     await nextLoopTurn()
   }

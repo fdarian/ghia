@@ -159,14 +159,16 @@ export function startFrameLoop(
   // The frame of an input draws from a task of its own, after the microtasks the tick's handlers
   // queued (an editor that commits its update in one, Lexical), as a browser paints after the input
   // task and its microtasks. Never from inside tick(), which pumps and draws no frame of its own.
+  // Whether a link is owed is asked inside the immediate, not after the tick: a link only one of
+  // those microtasks starts (a commit after a prevented edit) does not exist yet when tick() returns.
   const scheduleInputFrame = () => {
-    if (!renderer.stepStartedLinks || scheduledInputFrame !== undefined) return
-    if (!renderer.startedLinksPending?.()) return
+    if (!renderer.startedLinksPending || !renderer.stepStartedLinks) return
+    if (scheduledInputFrame !== undefined) return
     scheduledInputFrame = setImmediate(() => {
       scheduledInputFrame = undefined
       if (stopped) return
       try {
-        renderer.stepStartedLinks?.()
+        if (renderer.startedLinksPending?.()) renderer.stepStartedLinks?.()
       } catch (error) {
         options.onError?.(error)
       }

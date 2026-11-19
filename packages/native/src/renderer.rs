@@ -2639,6 +2639,9 @@ impl GpuixRenderer {
                     gpui_macos::discard_started_display_links();
                     return Ok(false);
                 }
+                // Inert under the per-key yield: the pump stops after each key event's sendEvent:
+                // and never sends a key after it has stepped a link in the same call, so a link
+                // started by a key is not stepped by the same pump. Kept in case a pump ever does.
                 if self.last_pump_stepped_a_link.load(std::sync::atomic::Ordering::Relaxed)
                     || !gpui_macos::started_display_links_pending()
                 {

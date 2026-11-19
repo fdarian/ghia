@@ -237,6 +237,32 @@ describe("startFrameLoop without display-link wakes", () => {
     expect(events.slice(0, 3)).toEqual(["tick", "microtask", "frame"])
   })
 
+  it("draws the input frame of a link only a microtask of the tick started", async () => {
+    const events: string[] = []
+    let pending = false
+    const renderer = {
+      ...wakeableRenderer(() => {
+        events.push("tick")
+        queueMicrotask(() => {
+          events.push("microtask starts the link")
+          pending = true
+        })
+        return true
+      }),
+      startedLinksPending: () => pending,
+      stepStartedLinks: () => {
+        events.push("frame")
+        pending = false
+        return true
+      },
+    }
+    const loop = startFrameLoop(renderer)
+    await nextImmediate()
+    await nextImmediate()
+    loop.stop()
+    expect(events).toEqual(["tick", "microtask starts the link", "frame"])
+  })
+
   it("makes no frame call when no link is waiting, and adds no tick", async () => {
     let ticks = 0
     let calls = 0
