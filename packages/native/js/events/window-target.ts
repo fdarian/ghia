@@ -1,10 +1,12 @@
 import type { EventPayload } from "../../index.js"
+import type { FocusableElement } from "../focus.js"
 import type { Animation } from "../web-animations.js"
 import { isElementType, isSvgElementType } from "../dom/element-types.js"
 import { Document, DOM_BINDING, registerDocument, type DocumentFragment, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
 import { Range } from "../dom/range.js"
 import { createCaretPosition, type CaretPosition } from "../editing/caret-position.js"
+import { documentCommands } from "../editing/document-commands.js"
 import { caretFromPoint, setElementLookup } from "../editing/geometry.js"
 import { getSelection, holdsNodeSelection, setSelectionHooks, type Selection } from "../dom/selection.js"
 import { bumpTreeVersion } from "../dom/tree-version.js"
@@ -191,6 +193,8 @@ type ElementSourceEntry = {
   windowGone: boolean
   /** Order in which the roots last heard a focus event; higher is more recent. */
   focusedAt: number
+  /** The element the last `focusin` named, until its `focusout`: what `document.activeElement` answers without asking native. */
+  focused: object | null
 }
 
 /**
@@ -314,6 +318,31 @@ export class GpuixDocument<Element = unknown> extends Document {
 
   [DOM_BINDING](): NodeBinding {
     return DOCUMENT_BINDING
+  }
+
+  private executingCommand = false
+
+  /**
+   * Runs `copy`, `cut` or `selectAll` as the Edit menu does, and returns whether it did; `paste`
+   * and every other command return false and do nothing (docs/fork/deviations.md). A call made while
+   * another runs (from the `copy` event it fires) returns false and does nothing, as Chrome's does.
+   */
+  execCommand(commandId: string, _showUI?: boolean, _value?: string): boolean {
+    if (this.executingCommand) return false
+    this.executingCommand = true
+    try {
+      return documentCommands().exec(String(commandId))
+    } finally {
+      this.executingCommand = false
+    }
+  }
+
+  queryCommandSupported(commandId: string): boolean {
+    return documentCommands().supported(String(commandId))
+  }
+
+  queryCommandEnabled(commandId: string): boolean {
+    return documentCommands().enabled(String(commandId))
   }
 
   /** The constructed sheets that apply to every window of the app, in order; later ones win. */
@@ -603,6 +632,12 @@ setSelectionHooks({
     document.dispatchEvent(new Event("selectionchange"))
   },
   heldChanged: notifyTypeSubscribers,
+  focusHost: (host) => {
+    for (const entry of elementSources.values()) {
+      if (!entry.windowGone && entry.focused !== null && host.contains(entry.focused as Node)) return
+    }
+    ;(host as unknown as FocusableElement).focus({ preventScroll: true })
+  },
 })
 
 /**
@@ -633,6 +668,7 @@ export function installElementSource(
     },
     windowGone: false,
     focusedAt: 0,
+    focused: null,
   }
   const firstRoot = elementSources.size === 0
   elementSources.set(renderer, entry)
@@ -687,6 +723,17 @@ setElementLookup(elementOf)
 export function noteFocusEvent(owner: object): void {
   const entry = elementSources.get(owner)
   if (entry) entry.focusedAt = ++focusClock
+}
+
+/**
+ * @internal Follows the focus events native reports, so a question of "is focus inside this element" (the selection
+ * entering an editing host asks it on every change) is a read of JS state and no native query.
+ */
+export function trackFocusedElement(owner: object, eventType: "focusin" | "focusout", element: object | undefined): void {
+  const entry = elementSources.get(owner)
+  if (entry === undefined) return
+  if (eventType === "focusin") entry.focused = element ?? null
+  else if (entry.focused === element) entry.focused = null
 }
 
 /**

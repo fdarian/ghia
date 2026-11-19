@@ -131,10 +131,18 @@ export declare class GpuixRenderer {
   setWindowTitle(title: string): void
   /** Open the platform path picker. Returns null when the user cancels. */
   promptForPaths(options?: PathPromptOptions | undefined | null): Promise<Array<string> | null>
-  /** Replace the system clipboard's contents with plain text. */
-  writeClipboardText(text: string): void
-  /** The system clipboard's text, or null when it holds none. */
-  readClipboardText(): string | null
+  /**
+   * Replace the system clipboard's contents with `items`. `text/plain`, `text/html` and
+   * `text/uri-list` take their native pasteboard types, every other type goes into the web
+   * custom data that Chrome reads (`docs/fork/events-and-input.md#clipboard`). Windows and
+   * Linux hold `text/plain` only.
+   */
+  writeClipboard(items: Array<ClipboardData>): void
+  /**
+   * Every type of the system clipboard that `writeClipboard` writes, in `DataTransfer` order:
+   * `text/plain`, `text/html`, `text/uri-list`, then each custom type.
+   */
+  readClipboard(): Array<ClipboardData>
   /** Whether `openEyeDropper` exists on this platform. macOS only. */
   supportsEyeDropper(): boolean
   /**
@@ -1054,6 +1062,13 @@ export declare class TestGpuixRenderer {
    * event for `Shift`, which the platform does not.
    */
   simulateModifiersChanged(modifiers?: string | undefined | null): void
+  /**
+   * Chooses the Edit menu item named `"copy"`, `"cut"`, `"paste"` or `"selectAll"`, as the
+   * menu bar does: the action is dispatched on the window only if `App::is_action_available`
+   * finds a listener for it (the menu greys the item out otherwise). Returns whether the item was enabled:
+   * the app-level listeners of `events/clipboard.rs` make the four always available.
+   */
+  simulateMenuAction(name: string): boolean
   /** Dispatch one keyup (one press in the `simulate_keystrokes` grammar). */
   simulateKeyUp(keystroke: string): void
   /**
@@ -1086,9 +1101,13 @@ export declare class TestGpuixRenderer {
   focusNext(): void
   focusPrevious(): void
   promptForPaths(options?: PathPromptOptions | undefined | null): Promise<Array<string> | null>
-  /** The test window's own in-memory clipboard, never the system's. */
-  writeClipboardText(text: string): void
-  readClipboardText(): string | null
+  /**
+   * The test window's own in-memory clipboard, never the system's. It holds the entries as
+   * written, in order; its `text/plain` is also the GPUI clipboard's text, which an `<input>`
+   * copies to and pastes from.
+   */
+  writeClipboard(items: Array<ClipboardData>): void
+  readClipboard(): Array<ClipboardData>
   getFocusedElementId(): number | null
   /** Makes the offscreen window key or not, as when the user switches apps. */
   setWindowActive(active: boolean): void
@@ -1801,6 +1820,12 @@ export interface CheckUpdateOptions {
   installMode?: string
 }
 
+/** One entry of a clipboard: a MIME type and its `DOMString` data, as `DataTransfer.getData` has them. */
+export interface ClipboardData {
+  type: string
+  data: string
+}
+
 /** One layer of the last composed frame. */
 export interface CompositionLayerReading {
   /** `"gpui"` or `"native"`. */
@@ -1816,6 +1841,9 @@ export interface CompositionLayerReading {
   /** For a native layer: whether it shows. */
   visible: boolean
 }
+
+/** The name of a pasteboard nothing else uses. */
+export declare function createTestPasteboard(): string
 
 /**
  * The ops the binary decoder reads from `bytes`, each as `["name", ...args]` JSON.
@@ -2753,6 +2781,9 @@ export interface PathPromptOptions {
   accept?: string
 }
 
+/** `readClipboard` of the pasteboard `createTestPasteboard` made under `name`. */
+export declare function readClipboardFrom(name: string): Array<ClipboardData>
+
 /** A rectangle in CSS px. */
 export interface Rectangle {
   x: number
@@ -2760,6 +2791,9 @@ export interface Rectangle {
   width: number
   height: number
 }
+
+/** Frees the pasteboard `createTestPasteboard` made under `name`. */
+export declare function releaseTestPasteboard(name: string): void
 
 /** What the retained subtrees of the window did since it was made, see `get_retained_counters`. */
 export interface RetainedCounters {
@@ -3183,3 +3217,6 @@ export interface WindowSize {
   width: number
   height: number
 }
+
+/** `writeClipboard` on the pasteboard `createTestPasteboard` made under `name`. */
+export declare function writeClipboardTo(name: string, items: Array<ClipboardData>): void

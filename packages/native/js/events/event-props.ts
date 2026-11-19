@@ -1,6 +1,7 @@
 import { captureHandlerKey } from "./dispatch.js"
 import type {
   AnimationEventHandlerProps,
+  ClipboardEventHandlerProps,
   CompositionEventHandlerProps,
   ContentVisibilityEventHandlerProps,
   PointerEventHandlerProps,
@@ -111,6 +112,20 @@ type MissingFromCompositionTable = Exclude<
 const compositionTableCoversEveryProp: [MissingFromCompositionTable] extends [never] ? true : never = true
 void compositionTableCoversEveryProp
 
+/** Copy, cut and paste. They bubble and can be cancelled. */
+const CLIPBOARD_EVENT_PROPS = [
+  ["onCopy", "copy"],
+  ["onCut", "cut"],
+  ["onPaste", "paste"],
+] as const satisfies readonly (readonly [keyof ClipboardEventHandlerProps, string])[]
+
+type MissingFromClipboardTable = Exclude<
+  keyof ClipboardEventHandlerProps,
+  (typeof CLIPBOARD_EVENT_PROPS)[number][0]
+>
+const clipboardTableCoversEveryProp: [MissingFromClipboardTable] extends [never] ? true : never = true
+void clipboardTableCoversEveryProp
+
 /** The pointer, mouse, drag and wheel types, lowercase. */
 export const POINTER_EVENT_TYPES: ReadonlySet<string> = new Set(
   POINTER_EVENT_PROPS.map(([, eventType]) => eventType)
@@ -125,6 +140,7 @@ export const DOM_DISPATCHED_EVENT_TYPES: ReadonlySet<string> = new Set([
   ...ANIMATION_EVENT_PROPS.map(([, eventType]) => eventType),
   ...CONTENT_VISIBILITY_EVENT_PROPS.map(([, eventType]) => eventType),
   ...COMPOSITION_EVENT_PROPS.map(([, eventType]) => eventType),
+  ...CLIPBOARD_EVENT_PROPS.map(([, eventType]) => eventType),
 ])
 
 /**
@@ -137,6 +153,7 @@ export const DOM_DISPATCHED_HANDLER_PROPS: readonly (readonly [string, string])[
   ...ANIMATION_EVENT_PROPS,
   ...CONTENT_VISIBILITY_EVENT_PROPS,
   ...COMPOSITION_EVENT_PROPS,
+  ...CLIPBOARD_EVENT_PROPS,
 ].flatMap(([propName, eventType]) => [
   [propName, eventType] as const,
   [`${propName}Capture`, captureHandlerKey(eventType)] as const,

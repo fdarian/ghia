@@ -65,6 +65,8 @@ export class FakeEl extends HTMLElement {
   readonly listeners = new ElementListeners()
   readonly id = nextId++
   window: ScriptedWindow | undefined
+  /** A selection set inside an editing host focuses it; these fixtures have no focus to move. */
+  focus(): void {}
 
   constructor(
     readonly type: string,

@@ -385,10 +385,10 @@ describe.skipIf(!hasNativeTestRenderer)("the key moves of an editing host (Solid
     it("is untouched by the keys", () => {
       const { host, texts, caret, press, state } = mount(["hello brave world"])
       const button = document.getElementById("other")!
-      button.focus()
       const seen = log(host, ["beforeinput"])
       caret(texts[0]!, 5)
-      for (const key of ["ArrowRight", "Alt+ArrowRight", "Meta+ArrowLeft", "Meta+a", "Alt+Backspace", "Meta+Backspace", "Control+f", "Shift+Home"]) {
+      button.focus()
+      for (const key of ["ArrowRight", "Alt+ArrowRight", "Meta+ArrowLeft", "Alt+Backspace", "Meta+Backspace", "Control+f", "Shift+Home"]) {
         press(key)
         expect(state()).toEqual([texts[0], 5, texts[0], 5])
       }

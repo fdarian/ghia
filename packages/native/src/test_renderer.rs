@@ -720,10 +720,10 @@ impl TestGpuixRenderer {
     }
 
     /// Runs one simulated key input on the window, then the executors.
-    fn key_input(
+    fn key_input<R>(
         &self,
-        input: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> std::result::Result<(), String>,
-    ) -> Result<()> {
+        input: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> std::result::Result<R, String>,
+    ) -> Result<R> {
         with_input_state(|cx, window, _view| {
             let result = cx
                 .update_window(window, |_, window, app| input(window, app))
@@ -781,6 +781,7 @@ impl TestGpuixRenderer {
         let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
             crate::custom_elements::input::init(cx);
+            crate::events::clipboard::init(cx);
             install_test_image_http_client(cx);
             crate::custom_elements::webview::install_test_pages(cx);
             cx.set_global(crate::custom_elements::nativeview::SurfaceLog::default());
@@ -1651,6 +1652,35 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Chooses the Edit menu item named `"copy"`, `"cut"`, `"paste"` or `"selectAll"`, as the
+    /// menu bar does: the action is dispatched on the window only if `App::is_action_available`
+    /// finds a listener for it (the menu greys the item out otherwise). Returns whether the item was enabled:
+    /// the app-level listeners of `events/clipboard.rs` make the four always available.
+    #[napi]
+    pub fn simulate_menu_action(&self, name: String) -> Result<bool> {
+        use gpui::Action as _;
+        use crate::events::clipboard::{Copy, Cut, Paste, SelectAll};
+        let action = match name.as_str() {
+            "copy" => Copy.boxed_clone(),
+            "cut" => Cut.boxed_clone(),
+            "paste" => Paste.boxed_clone(),
+            "selectAll" => SelectAll.boxed_clone(),
+            _ => {
+                return Err(Error::from_reason(format!(
+                    "{name:?} is not an Edit menu item. The items are copy, cut, paste and selectAll"
+                )))
+            }
+        };
+        self.key_input(|window, cx| {
+            // The menu asks the app, which counts the window's focus path and the global listeners.
+            if !cx.is_action_available(action.as_ref()) {
+                return Ok(false);
+            }
+            window.dispatch_action(action, cx);
+            Ok(true)
+        })
+    }
+
     /// Dispatch one keyup (one press in the `simulate_keystrokes` grammar).
     #[napi]
     pub fn simulate_key_up(&self, keystroke: String) -> Result<()> {
@@ -1778,15 +1808,27 @@ impl TestGpuixRenderer {
         AsyncTask::new(PromptForPathsTask::new(receiver))
     }
 
-    /// The test window's own in-memory clipboard, never the system's.
+    /// The test window's own in-memory clipboard, never the system's. It holds the entries as
+    /// written, in order; its `text/plain` is also the GPUI clipboard's text, which an `<input>`
+    /// copies to and pastes from.
     #[napi]
-    pub fn write_clipboard_text(&self, text: String) -> Result<()> {
-        window_call(|_window, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(text)))
+    pub fn write_clipboard(&self, items: Vec<crate::clipboard::ClipboardData>) -> Result<()> {
+        window_call(|_window, cx| {
+            let store = crate::clipboard::TypedClipboard::new(items);
+            cx.write_to_clipboard(match store.text() {
+                Some(text) => gpui::ClipboardItem::new_string(text.to_string()),
+                None => gpui::ClipboardItem { entries: Vec::new() },
+            });
+            cx.set_global(store);
+        })
     }
 
     #[napi]
-    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
-        window_call(|_window, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+    pub fn read_clipboard(&self) -> Result<Vec<crate::clipboard::ClipboardData>> {
+        window_call(|_window, cx| {
+            let text = cx.read_from_clipboard().and_then(|item| item.text());
+            cx.default_global::<crate::clipboard::TypedClipboard>().read(text)
+        })
     }
 
     #[napi]

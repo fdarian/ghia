@@ -263,7 +263,7 @@ fn frame_reset(window: WindowId) {
 }
 
 /// A zero-size canvas that clears the per-frame registries and installs the
-/// frame's copy and mouse-down listeners. Paint it FIRST in the root, before
+/// frame's mouse listeners. Paint it FIRST in the root, before
 /// any text, so each frame holds exactly that frame's visible text elements
 /// in paint order.
 pub fn selection_frame_reset(
@@ -280,7 +280,6 @@ pub fn selection_frame_reset(
             let id = window.window_handle().window_id();
             frame_reset(id);
             super::inline_hit::frame_reset(id);
-            register_copy_listener(window, &selection);
             register_down_listener(window, &selection);
             register_drag_listeners(window, &selection, editing.clone(), on_drag_move, on_drag_end);
         },
@@ -1374,27 +1373,6 @@ fn register_drag_listeners(
         // GpuixView while GPUI still holds the root lease for this mouse-up.
         if was_dragging {
             on_drag_end(cx);
-        }
-    });
-}
-
-fn register_copy_listener(window: &mut Window, selection: &SharedSelection) {
-    use gpui::{ClipboardItem, DispatchPhase, KeyDownEvent};
-
-    let selection = selection.clone();
-    window.on_root_key_event(move |e: &KeyDownEvent, phase, _window, cx| {
-        if phase != DispatchPhase::Bubble {
-            return;
-        }
-        let modifiers = &e.keystroke.modifiers;
-        if e.keystroke.key != "c" || !(modifiers.platform || modifiers.control) {
-            return;
-        }
-        // Release the selection lock before entering the platform clipboard.
-        let text = selection.lock().selected_text();
-        if let Some(text) = text {
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
-            cx.stop_propagation();
         }
     });
 }

@@ -43,6 +43,8 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "setWindowSize",
   "simulateComposition",
   "simulateKeystrokes",
+  // The menu item's action runs the same command as the key, through the same input path as simulateKeystrokes.
+  "simulateMenuAction",
   // Each delivers the event the scripted page reports to its handler, as dispatchNativeEvents does (the tab out
   // moves focus, which reports its focus events the same way).
   "simulateWebviewFail",
@@ -199,7 +201,7 @@ function calls(r, ids) {
     matchesFocus: () => r.matchesFocus(ids.field, ":focus"),
     pointerLockElement: () => r.pointerLockElement(),
     probeElementBounds: () => r.probeElementBounds(ids.box),
-    readClipboardText: () => r.readClipboardText(),
+    readClipboard: () => r.readClipboard(),
     registerFont: () => r.registerFont(SQUARE_FONT),
     releaseAnimation: () => r.releaseAnimation(r.getAnimations(ids.box)[0].id),
     releasePointerCapture: () => r.releasePointerCapture(ids.box, 1),
@@ -274,7 +276,7 @@ function calls(r, ids) {
     webviewState: () => r.webviewState(ids.webview),
     takeSimulatedWindowActions: () => r.takeSimulatedWindowActions(),
     toJSON: () => r.toJSON(),
-    writeClipboardText: () => r.writeClipboardText("x"),
+    writeClipboard: () => r.writeClipboard([{ type: "text/plain", data: "x" }]),
     writeInputFlag: () => r.writeInputFlag(ids.check, "indeterminate", true),
     writeRangeValue: () => r.writeRangeValue(ids.range, "5"),
     // Last: a cancelled animation is not listed, which the calls above read.

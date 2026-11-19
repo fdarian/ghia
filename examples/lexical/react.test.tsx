@@ -15,7 +15,9 @@ import {
   $isRangeSelection,
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
+  type ElementNode,
   type LexicalEditor,
+  type TextNode,
 } from 'lexical'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/react/testing'
 import { settle } from '../base-ui/harness'
@@ -434,6 +436,177 @@ describeNative('Lexical (React bindings) on Ghia', () => {
     expect(paragraphs()).toEqual(['Helloabc'])
     expect(rootElement().textContent).toBe('Helloabc')
     expect(painted()).toContain('Helloabc')
+    expect(uncaught).toEqual([])
+  })
+})
+
+// Two editors in one window, and the clipboard between them. Keys go through the real path (AppKit's key equivalent,
+// the GPUI action, the page's copy, cut and paste events); the test renderer keeps its own clipboard, never the system one.
+const pair: LexicalEditor[] = []
+
+function CaptureAt(props: { index: number }): null {
+  const [captured] = useLexicalComposerContext()
+  pair[props.index] = captured
+  return null
+}
+
+function Pane(props: { index: number }): ReactNode {
+  return (
+    <LexicalComposer
+      initialConfig={{
+        namespace: `lexical-clipboard-${props.index}`,
+        onError: (error: Error) => {
+          throw error
+        },
+      }}
+    >
+      <CaptureAt index={props.index} />
+      <RichTextPlugin
+        contentEditable={<ContentEditable style={{ display: 'block', width: 300, minHeight: 40 }} />}
+        ErrorBoundary={LexicalErrorBoundary}
+      />
+    </LexicalComposer>
+  )
+}
+
+function TwoEditors(): ReactNode {
+  return (
+    <div>
+      <Pane index={0} />
+      <Pane index={1} />
+    </div>
+  )
+}
+
+/** Each top-level block's text runs, `[text, isBold]`. */
+function runs(target: LexicalEditor): Array<Array<[string, boolean]>> {
+  return target.getEditorState().read(() =>
+    $getRoot()
+      .getChildren()
+      .map((block) => (block as ElementNode).getChildren().map((child): [string, boolean] => [child.getTextContent(), (child as TextNode).hasFormat('bold')])),
+  )
+}
+
+function blocks(target: LexicalEditor): string[] {
+  return target.getEditorState().read(() => $getRoot().getChildren().map((child) => child.getTextContent()))
+}
+
+describeNative('Lexical (React bindings) clipboard between two editors on Ghia', () => {
+  let window: ReturnType<typeof createTestRoot>
+  const nextTask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+  const idle = async (): Promise<void> => {
+    await nextTask()
+    await settle(window)
+    await nextTask()
+    await settle(window)
+  }
+  const press = async (keys: string): Promise<void> => {
+    for (const key of keys.split(' ')) {
+      window.renderer.simulateKeystrokes(key)
+      await idle()
+    }
+  }
+  const clipboard = (): Record<string, string> => Object.fromEntries(window.renderer.readClipboard().map((item) => [item.type, item.data]))
+  const focus = async (target: LexicalEditor): Promise<void> => {
+    target.focus()
+    await idle()
+  }
+  const rootOf = (target: LexicalEditor): HTMLElement => {
+    const element = target.getRootElement()
+    if (element === null) throw new Error('the editor has no root element')
+    return element
+  }
+  const empty = async (target: LexicalEditor): Promise<void> => {
+    target.update(() => {
+      const paragraph = $createParagraphNode()
+      $getRoot().clear().append(paragraph)
+      paragraph.select()
+    })
+    await idle()
+  }
+
+  beforeAll(async () => {
+    window = createTestRoot({ width: 640, height: 480, onUncaughtError: (error: unknown) => uncaught.push(error) })
+    window.render(<TwoEditors />)
+    await idle()
+  })
+
+  afterAll(() => {
+    window.unmount()
+  })
+
+  it('16. Cmd+C in one editor and Cmd+V in the other carry the text and its bold, as Chrome does', async () => {
+    const [a, b] = pair as [LexicalEditor, LexicalEditor]
+    await focus(a)
+    await press('H e l l o Space')
+    await press('ControlOrMeta+b')
+    await press('w o r l d')
+    expect(runs(a)).toEqual([[['Hello ', false], ['world', true]]])
+    await press('ControlOrMeta+a')
+    await press('ControlOrMeta+c')
+    const copied = clipboard()
+    expect(Object.keys(copied).sort()).toEqual(['application/x-lexical-editor', 'text/html', 'text/plain'])
+    expect(copied['text/plain']).toBe('Hello world')
+    expect(copied['text/html']).toContain('world')
+    expect(JSON.parse(copied['application/x-lexical-editor'] as string).namespace).toBe('lexical-clipboard-0')
+    await focus(b)
+    await press('ControlOrMeta+v')
+    expect(blocks(b)).toEqual(['Hello world'])
+    expect(runs(b)).toEqual([[['Hello ', false], ['world', true]]])
+    expect(rootOf(b).querySelector('strong')?.textContent).toBe('world')
+    expect(rootOf(a).querySelectorAll('strong').length).toBe(1)
+    expect(window.renderer.getPaintedText().join('\n')).toContain('Hello world')
+    expect(uncaught).toEqual([])
+  })
+
+  it('17. pasting text/plain with two lines gives the paragraphs Lexical makes of it, and the default insertion does not also run', async () => {
+    const [, b] = pair as [LexicalEditor, LexicalEditor]
+    await empty(b)
+    await focus(b)
+    window.renderer.writeClipboard([{ type: 'text/plain', data: 'line one\nline two' }])
+    await press('ControlOrMeta+v')
+    expect(blocks(b)).toEqual(['line one', 'line two'])
+    expect(rootOf(b).querySelectorAll('p').length).toBe(2)
+    expect(rootOf(b).querySelectorAll('br').length).toBe(0)
+    expect(uncaught).toEqual([])
+  })
+
+  it('18. pasting HTML from another app goes through DOMParser and Lexical\'s import: "there" is bold', async () => {
+    const [, b] = pair as [LexicalEditor, LexicalEditor]
+    await empty(b)
+    await focus(b)
+    window.renderer.writeClipboard([
+      { type: 'text/html', data: "<meta charset='utf-8'><p>Hi <b>there</b></p>" },
+      { type: 'text/plain', data: 'Hi there' },
+    ])
+    await press('ControlOrMeta+v')
+    expect(runs(b)).toEqual([[['Hi ', false], ['there', true]]])
+    expect(rootOf(b).querySelector('strong')?.textContent).toBe('there')
+    expect(uncaught).toEqual([])
+  })
+
+  it('19. Cmd+X takes a word out and puts it on the clipboard; the Edit menu\'s Paste puts it back somewhere else', async () => {
+    const [a, b] = pair as [LexicalEditor, LexicalEditor]
+    await empty(a)
+    await focus(a)
+    await press('o n e Space t w o Space t h r e e')
+    expect(blocks(a)).toEqual(['one two three'])
+    const text = rootOf(a).querySelector('span')?.firstChild
+    if (text === null || text === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(text, 4, text, 8)
+    await idle()
+    await press('ControlOrMeta+x')
+    expect(clipboard()['text/plain']).toBe('two ')
+    expect(blocks(a)).toEqual(['one three'])
+    expect(rootOf(a).textContent).toBe('one three')
+    await empty(b)
+    await focus(b)
+    expect(window.renderer.simulateMenuAction('paste')).toBe(true)
+    await idle()
+    expect(blocks(b)).toEqual(['two '])
+    expect(blocks(a)).toEqual(['one three'])
     expect(uncaught).toEqual([])
   })
 })

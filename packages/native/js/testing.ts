@@ -15,6 +15,7 @@ import {
   TestGpuixRenderer,
   measureMotionAnimation,
   validateKeyframes,
+  type ClipboardData,
   type ElementWebAnimationInfo,
   type EventPayload,
   type InputChoiceState,
@@ -260,8 +261,8 @@ interface NativeTestRendererApi
     MotionValueHost,
     KeyframesHost {
   promptForPaths(options?: PathPromptOptions): Promise<string[] | null>
-  writeClipboardText(text: string): void
-  readClipboardText(): string | null
+  writeClipboard(items: ClipboardData[]): void
+  readClipboard(): ClipboardData[]
   flush(): void
   flushIfDirty(): void
   drainEvents(): EventPayload[]
@@ -306,6 +307,7 @@ interface NativeTestRendererApi
   ): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
+  simulateMenuAction(name: string): boolean
   simulateModifiersChanged(modifiers?: string): void
   simulateImeKeyDown(keystroke: string, action: string, text?: string): void
   simulateClick(x: number, y: number, button?: number, modifiers?: string): void
@@ -724,8 +726,8 @@ export class TestRenderer implements NativeRenderer {
   readonly focusPrevious: () => void
   readonly promptForPaths: NonNullable<NativeRenderer["promptForPaths"]>
   /** The test window's own clipboard. It never touches the system's. */
-  readonly writeClipboardText: NonNullable<NativeRenderer["writeClipboardText"]>
-  readonly readClipboardText: NonNullable<NativeRenderer["readClipboardText"]>
+  readonly writeClipboard: NonNullable<NativeRenderer["writeClipboard"]>
+  readonly readClipboard: NonNullable<NativeRenderer["readClipboard"]>
   readonly setWindowSelectionChange: NonNullable<
     NativeRenderer["setWindowSelectionChange"]
   >
@@ -768,8 +770,8 @@ export class TestRenderer implements NativeRenderer {
     this.focusNext = this.native.focusNext.bind(this.native)
     this.focusPrevious = this.native.focusPrevious.bind(this.native)
     this.promptForPaths = this.native.promptForPaths.bind(this.native)
-    this.writeClipboardText = this.native.writeClipboardText.bind(this.native)
-    this.readClipboardText = this.native.readClipboardText.bind(this.native)
+    this.writeClipboard = this.native.writeClipboard.bind(this.native)
+    this.readClipboard = this.native.readClipboard.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
     this.setWindowEventListeners = this.native.setWindowEventListeners.bind(
       this.native
@@ -950,6 +952,20 @@ export class TestRenderer implements NativeRenderer {
     this.native.simulateKeystrokes(keystrokes)
     this.dispatchNativeEvents()
     this.native.flushIfDirty()
+  }
+
+  /** Chooses an Edit menu item (`"copy"`, `"cut"`, `"paste"` or `"selectAll"`) as the menu bar does,
+   *  for the focus the window has now. Returns whether the item was enabled, which these four
+   *  always are (the app-level listeners in `src/events/clipboard.rs` make them available with
+   *  nothing focused too), so it is `true`; a name that is not one of the four throws. */
+  simulateMenuAction(name: "copy" | "cut" | "paste" | "selectAll"): boolean {
+    flushPendingMutations(this)
+    this.native.flushIfDirty()
+    this.dispatchNativeEvents()
+    const enabled = this.native.simulateMenuAction(name)
+    this.dispatchNativeEvents()
+    this.native.flushIfDirty()
+    return enabled
   }
 
   /** One edit of the focused editing host (`<div contenteditable>`), as the browser makes it

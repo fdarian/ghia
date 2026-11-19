@@ -37,3 +37,9 @@ The automation protocol cannot do these, so they are for you to try by hand:
 - **Trackpad drag-select**: drag across paragraphs and past the panel's edges (the panel should scroll), drag backwards, and
   drag from the empty paragraph. Click in the empty paragraph and type.
 - **Bold with the button**: select text, click B (the selection must stay), click B again.
+- **Copy and paste, with Chrome and TextEdit.** Cmd+C in the editor, then Cmd+V into TextEdit (rich text), a Chrome page with a `contenteditable` and
+  the Lexical playground: the text arrives, bold stays bold, and a copy from the Lexical playground pastes here with its formatting (the
+  `application/x-lexical-editor` type travels in Chrome's custom-data format). Paste text from TextEdit and a web page too. Cmd+X cuts, Cmd+A selects
+  all.
+- **Edit menu.** Cut, Copy, Paste and Select All are enabled with and without a focused editor, run the same commands as the keys, and show their
+  shortcuts. Undo and Redo are not in the menu yet (Cmd+Z works as a key).

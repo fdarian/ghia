@@ -14,6 +14,8 @@ import "../dom-globals.js"
 class FakeEl extends HTMLElement {
   parent: FakeEl | null = null
   readonly kids: Array<FakeEl | FakeTx> = []
+  /** A selection set inside an editing host focuses it; these fixtures have no focus to move. */
+  focus(): void {}
   readonly listeners = new ElementListeners()
 
   constructor(

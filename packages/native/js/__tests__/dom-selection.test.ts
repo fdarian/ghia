@@ -14,6 +14,8 @@ import "../dom-globals.js"
 class FakeEl extends HTMLElement {
   parent: FakeEl | null = null
   readonly kids: Array<FakeEl | FakeTx> = []
+  /** A selection set inside an editing host focuses it; these fixtures have no focus to move. */
+  focus(): void {}
 
   constructor(
     readonly type: string,
@@ -700,6 +702,32 @@ describe("node Selection", () => {
       selection.setBaseAndExtent(n(a), 2, n(a), 4)
       placeCaretInEditingHost(filled as unknown as never)
       expect([selection.anchorOffset, selection.focusOffset]).toEqual([2, 4])
+    })
+  })
+
+  describe("a parsed document", () => {
+    it("is not the window's: its nodes are ignored by every method that names them", () => {
+      const parsed = new DOMParser().parseFromString("<p>parsed</p>", "text/html")
+      const paragraph = parsed.body.firstChild as unknown as Node
+      const text = paragraph.firstChild as Node
+      const own = tx("own")
+      selection.collapse(n(own), 1)
+
+      selection.collapse(text, 1)
+      selection.setBaseAndExtent(text, 0, text, 2)
+      selection.selectAllChildren(paragraph)
+      selection.extend(text, 3)
+      const range = new Range()
+      range.selectNodeContents(paragraph)
+      selection.removeAllRanges()
+      selection.addRange(range)
+
+      expect(selection.rangeCount).toBe(0)
+      expect(selection.containsNode(text)).toBe(false)
+
+      selection.collapse(n(own), 1)
+      selection.collapse(text, 1)
+      expect([selection.anchorNode, selection.anchorOffset]).toEqual([n(own), 1])
     })
   })
 

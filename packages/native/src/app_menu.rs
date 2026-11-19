@@ -8,13 +8,19 @@
 //! `gpui::App::set_menus` reads the key equivalent for each item out of the
 //! keymap, so [`init`] must bind the keys before it sets the menus.
 //!
-//! There is deliberately no Edit menu. A menu key equivalent is consumed by
-//! AppKit before the window sees the key event, so an Edit menu carrying cmd-c
-//! would take the keystroke away from the window listener that
-//! `crate::text::paint` installs for text selection, and from the per-focus
-//! clipboard handling in `custom_elements::input`.
+//! The Edit menu is Cut, Copy, Paste and Select All, bound to the actions of
+//! `crate::events::clipboard`. The key window sees a key equivalent first
+//! (`performKeyEquivalent:` runs GPUI's key handling: the page's `keydown`, then
+//! the keybinding and its action), and AppKit offers it to the menu only when
+//! the window answers NO. So the menu carrying cmd-c does not take the keystroke
+//! from the page or from a focused `<input>`; it fires when the key was not
+//! handled, and for a click. The four items are always enabled: the app-level
+//! listeners in `events/clipboard.rs` (`init`) count for `App::is_action_available`
+//! on every window, whatever has focus, so the menu never greys them out.
 
 use gpui::{App, Menu, MenuItem, SystemMenuType};
+
+use crate::events::clipboard::{Copy, Cut, Paste, SelectAll};
 
 gpui::actions!(
     gpuix_app,
@@ -57,7 +63,7 @@ pub(crate) fn init(app_name: &str, cx: &mut App) {
     cx.set_menus(default_menus(app_name));
 }
 
-/// The App menu plus the Window menu, the minimum a macOS app is expected to
+/// The App, Edit and Window menus, the minimum a macOS app is expected to
 /// have. `create_menu_bar` gives the menu named `Window` to
 /// `NSApplication.setWindowsMenu:`, which is what appends the window list.
 pub(crate) fn default_menus(app_name: &str) -> Vec<Menu> {
@@ -73,6 +79,17 @@ pub(crate) fn default_menus(app_name: &str) -> Vec<Menu> {
                 MenuItem::action("Show All", ShowAll),
                 MenuItem::separator(),
                 MenuItem::action(format!("Quit {app_name}"), Quit),
+            ],
+        },
+        Menu {
+            name: "Edit".into(),
+            disabled: false,
+            items: vec![
+                MenuItem::action("Cut", Cut),
+                MenuItem::action("Copy", Copy),
+                MenuItem::action("Paste", Paste),
+                MenuItem::separator(),
+                MenuItem::action("Select All", SelectAll),
             ],
         },
         // No "Enter Full Screen" item: AppKit prepends its own window-tiling
@@ -126,13 +143,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn edit_menu_has_the_clipboard_commands() {
+        let menus = default_menus("Chat");
+        assert_eq!(menus[1].name.as_ref(), "Edit");
+        assert_eq!(
+            item_names(&menus[1]),
+            vec!["Cut", "Copy", "Paste", "-", "Select All"]
+        );
+    }
+
     // `create_menu_bar` only calls `setWindowsMenu:` for this exact name.
     #[test]
     fn window_menu_keeps_the_name_appkit_looks_for() {
         let menus = default_menus("Chat");
-        assert_eq!(menus[1].name.as_ref(), "Window");
+        assert_eq!(menus[2].name.as_ref(), "Window");
         assert_eq!(
-            item_names(&menus[1]),
+            item_names(&menus[2]),
             vec!["Minimize", "Zoom", "-", "Close Window"]
         );
     }
