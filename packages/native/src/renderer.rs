@@ -12055,14 +12055,23 @@ fn build_element_unpumped(
     // is the style a transitioning element already has (motion folds them), so with or without a
     // transition `.card:focus-within { color: red }` reaches the text below.
     let descend_style = style.map(|style| ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id)));
-    let descended = ctx
+    let mut descended = ctx
         .inherited
         .clone()
         .descend_with_custom(descend_style.as_deref(), element.has_inert_prop(), own_custom);
-    let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
     let atomic_overlaid = contents_overlay
         .filter(|_| atomic_root)
         .map(|overlay| style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(&overlay).into_owned());
+    // The lengths of the boxes around an atomic are in `descended` already, but the text colour GPUI paints with is the
+    // one a style declares (`ColorContext::declared`): the colour of the boxes around it reaches it only through the
+    // overlay.
+    if let Some(overlaid) = &atomic_overlaid {
+        descended.colors = ctx
+            .inherited
+            .colors
+            .descend(&ctx.focus_styles.folded(id, overlaid, ctx.focus_handles.contains_key(&id)));
+    }
+    let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
     let style = atomic_overlaid.as_ref().or(style);
     crate::layout::table::enter(&mut ctx.inherited.table_row, &mut ctx.inherited.table_cell, element);
     // The start of a logical inline pair is the right side in an rtl element.
