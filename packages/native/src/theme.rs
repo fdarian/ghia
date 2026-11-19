@@ -192,7 +192,7 @@ impl SyntaxPalette {
 
 // ── Metrics ──────────────────────────────────────────────────────────
 
-/// Every number that decides layout in `<code>`, `<diff>` and `<markdown>`.
+/// Every number that decides layout in `<code-block>`, `<diff>` and `<markdown>`.
 ///
 /// These used to be Rust `const`s, which meant that tuning a row height needed
 /// a native rebuild. They travel in the `theme` prop instead, so the whole
@@ -204,7 +204,7 @@ impl SyntaxPalette {
 /// height up front.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Metrics {
-    // Code blocks. Shared by `<code>` and the markdown fenced block.
+    // Code blocks. Shared by `<code-block>` and the markdown fenced block.
     pub code_text_size: f32,
     pub code_line_height: f32,
     /// Gutter width per line-number digit.
@@ -241,7 +241,7 @@ pub struct Metrics {
     /// column keeps a readable width.
     pub md_table_min_column_content: f32,
     pub md_inline_code_radius: f32,
-    // The fenced-block card. `<code>` paints no card of its own, so these are
+    // The fenced-block card. `<code-block>` paints no card of its own, so these are
     // markdown-only: a document renderer owns its layout, a primitive does not.
     pub md_code_padding_x: f32,
     pub md_code_padding_y: f32,

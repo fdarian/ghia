@@ -159,7 +159,7 @@ describe("painted text log", () => {
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, userSelect: "none" }}>
         <div style={{ fontSize: 20 }}>chrome label</div>
-        <code code={"x = 1"} language="python" showLineNumbers />
+        <code-block code={"x = 1"} language="python" showLineNumbers />
       </div>
     )
 
@@ -174,12 +174,12 @@ describe("painted text log", () => {
 })
 
 describe("standard events on native elements", () => {
-  it("fires onClick on <code>", () => {
+  it("fires onClick on <code-block>", () => {
     const onClick = vi.fn()
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", padding: 20 }}>
-        <code code={"hello"} language="ts" onClick={onClick} />
+        <code-block code={"hello"} language="ts" onClick={onClick} />
       </div>
     )
 

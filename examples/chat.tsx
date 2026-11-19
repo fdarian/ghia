@@ -847,7 +847,7 @@ const CODE_BODY_STYLE = {
 } as const
 
 /**
- * The card `<code>` used to paint for you. The native element is a bare
+ * The card `<code-block>` used to paint for you. The native element is a bare
  * surface now, so the roundness, the fill and the language header live here,
  * in app code, where they can match the rest of the design.
  */
@@ -867,7 +867,7 @@ function CodeBlock({
           <div style={{ fontSize: 12, color: C.secondary }}>{language}</div>
         </div>
       )}
-      <code
+      <code-block
         code={code}
         language={language}
         showLineNumbers={showLineNumbers}

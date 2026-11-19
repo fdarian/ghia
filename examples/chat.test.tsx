@@ -63,7 +63,7 @@ describeNative('chat example', () => {
     renderer.captureScreenshot(screenshot)
 
     expect(renderer.findByType('markdown')).toHaveLength(0)
-    expect(renderer.findByType('code')).toHaveLength(1)
+    expect(renderer.findByType('code-block')).toHaveLength(1)
     expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
     expect(renderer.getPaintedText()).toMatchInlineSnapshot(`
       [

@@ -1,0 +1,82 @@
+<!doctype html>
+<!--
+  Oracle for code-inline.test.tsx: what headless Chrome lays out for `code`, `kbd`, `samp`, `tt` and `pre`, whose user
+  agent style is `font-family: monospace`, and for Chrome's monospace font-size quirk: when an element's family list
+  turns into the generic `monospace` (or leaves it) and its font-size is not an absolute length, the size is scaled by
+  13/16 (the default fixed font size over the default font size). The page reports `fontSizes` (the computed
+  `font-size` of every `data-id` element) and `rects` (`[x, y, width, height]` relative to the `data-case` box); `.base`
+  is a zero-size inline-block on the baseline of the line, so its `y` is where the baseline is. Regenerate the files the
+  test reads (device scale 1 and 2) with `sh dsf-oracle.sh code-inline`.
+
+  The text is in the real Menlo, which `monospace` is on a Mac, so the boxes depend on the machine's fonts; the font
+  sizes do not.
+-->
+<html>
+<head>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1280px; font-family: Helvetica; }
+  p, pre { margin: 0; }
+  .base { display: inline-block; width: 0; height: 0; }
+</style>
+</head>
+<body>
+
+<div data-case data-id="default"><p data-id="default.p">a <code data-id="default.code">b</code> c<span class="base" data-id="default.base"></span></p></div>
+<div data-case data-id="parent-20px"><p style="font-size: 20px" data-id="parent-20px.p">a <code data-id="parent-20px.code">b</code> c<span class="base" data-id="parent-20px.base"></span></p></div>
+<div data-case data-id="parent-larger"><p style="font-size: larger" data-id="parent-larger.p">a <code data-id="parent-larger.code">b</code> c<span class="base" data-id="parent-larger.base"></span></p></div>
+<div data-case data-id="parent-em"><p style="font-size: 1.5em" data-id="parent-em.p">a <code data-id="parent-em.code">b</code> c<span class="base" data-id="parent-em.base"></span></p></div>
+<div data-case data-id="parent-percent"><p style="font-size: 150%" data-id="parent-percent.p">a <code data-id="parent-percent.code">b</code> c<span class="base" data-id="parent-percent.base"></span></p></div>
+<div data-case data-id="parent-rem"><p style="font-size: 2rem" data-id="parent-rem.p">a <code data-id="parent-rem.code">b</code> c<span class="base" data-id="parent-rem.base"></span></p></div>
+<div data-case data-id="parent-calc"><p style="font-size: calc(1em + 4px)" data-id="parent-calc.p">a <code data-id="parent-calc.code">b</code> c<span class="base" data-id="parent-calc.base"></span></p></div>
+<div data-case data-id="grandparent-20px" style="font-size: 20px"><div><p data-id="grandparent-20px.p">a <code data-id="grandparent-20px.code">b</code> c<span class="base" data-id="grandparent-20px.base"></span></p></div></div>
+<div data-case data-id="grandparent-em" style="font-size: 1.5em"><div><p data-id="grandparent-em.p">a <code data-id="grandparent-em.code">b</code> c<span class="base" data-id="grandparent-em.base"></span></p></div></div>
+
+<div data-case data-id="author-menlo"><p data-id="author-menlo.p">a <code style="font-family: Menlo" data-id="author-menlo.code">b</code> c<span class="base" data-id="author-menlo.base"></span></p></div>
+<div data-case data-id="author-monospace"><p data-id="author-monospace.p">a <code style="font-family: monospace" data-id="author-monospace.code">b</code> c<span class="base" data-id="author-monospace.base"></span></p></div>
+<div data-case data-id="monospace-twice"><p data-id="monospace-twice.p">a <code style="font-family: monospace, monospace" data-id="monospace-twice.code">b</code> c<span class="base" data-id="monospace-twice.base"></span></p></div>
+<div data-case data-id="monospace-menlo"><p data-id="monospace-menlo.p">a <code style="font-family: monospace, Menlo" data-id="monospace-menlo.code">b</code> c<span class="base" data-id="monospace-menlo.base"></span></p></div>
+<div data-case data-id="menlo-monospace"><p data-id="menlo-monospace.p">a <code style="font-family: Menlo, monospace" data-id="menlo-monospace.code">b</code> c<span class="base" data-id="menlo-monospace.base"></span></p></div>
+<div data-case data-id="ui-monospace"><p data-id="ui-monospace.p">a <code style="font-family: ui-monospace" data-id="ui-monospace.code">b</code> c<span class="base" data-id="ui-monospace.base"></span></p></div>
+<div data-case data-id="monospace-upper"><p data-id="monospace-upper.p">a <code style="font-family: MONOSPACE" data-id="monospace-upper.code">b</code> c<span class="base" data-id="monospace-upper.base"></span></p></div>
+<div data-case data-id="monospace-sans"><p data-id="monospace-sans.p">a <code style="font-family: monospace, sans-serif" data-id="monospace-sans.code">b</code> c<span class="base" data-id="monospace-sans.base"></span></p></div>
+<div data-case data-id="monospace-quoted"><p data-id="monospace-quoted.p">a <code style="font-family: 'monospace'" data-id="monospace-quoted.code">b</code> c<span class="base" data-id="monospace-quoted.base"></span></p></div>
+
+<div data-case data-id="size-1em"><p data-id="size-1em.p">a <code style="font-size: 1em" data-id="size-1em.code">b</code> c<span class="base" data-id="size-1em.base"></span></p></div>
+<div data-case data-id="size-100percent"><p data-id="size-100percent.p">a <code style="font-size: 100%" data-id="size-100percent.code">b</code> c<span class="base" data-id="size-100percent.base"></span></p></div>
+<div data-case data-id="size-20px"><p data-id="size-20px.p">a <code style="font-size: 20px" data-id="size-20px.code">b</code> c<span class="base" data-id="size-20px.base"></span></p></div>
+<div data-case data-id="size-2em"><p data-id="size-2em.p">a <code style="font-size: 2em" data-id="size-2em.code">b</code> c<span class="base" data-id="size-2em.base"></span></p></div>
+
+<div data-case data-id="kbd"><p data-id="kbd.p">a <kbd data-id="kbd.code">b</kbd> c<span class="base" data-id="kbd.base"></span></p></div>
+<div data-case data-id="samp"><p data-id="samp.p">a <samp data-id="samp.code">b</samp> c<span class="base" data-id="samp.base"></span></p></div>
+<div data-case data-id="tt"><p data-id="tt.p">a <tt data-id="tt.code">b</tt> c<span class="base" data-id="tt.base"></span></p></div>
+<div data-case data-id="pre"><pre data-id="pre.p">a b c</pre></div>
+<div data-case data-id="pre-20px"><pre style="font-size: 20px" data-id="pre-20px.p">a b c</pre></div>
+<div data-case data-id="pre-code"><pre data-id="pre-code.p">a <code data-id="pre-code.code">b</code> c</pre></div>
+
+<div data-case data-id="in-monospace"><p style="font-family: monospace" data-id="in-monospace.p">a <code data-id="in-monospace.code">b</code> c<span class="base" data-id="in-monospace.base"></span></p></div>
+<div data-case data-id="in-monospace-20px"><p style="font-family: monospace; font-size: 20px" data-id="in-monospace-20px.p">a <code data-id="in-monospace-20px.code">b</code> c<span class="base" data-id="in-monospace-20px.base"></span></p></div>
+<div data-case data-id="code-in-code"><p data-id="code-in-code.p">a <code data-id="code-in-code.code">b <code data-id="code-in-code.inner">c</code></code><span class="base" data-id="code-in-code.base"></span></p></div>
+<div data-case data-id="span-in-code"><p data-id="span-in-code.p">a <code data-id="span-in-code.code">b <span data-id="span-in-code.inner">c</span></code><span class="base" data-id="span-in-code.base"></span></p></div>
+<div data-case data-id="menlo-in-code"><p data-id="menlo-in-code.p">a <code data-id="menlo-in-code.code">b <span style="font-family: Menlo" data-id="menlo-in-code.inner">c</span></code><span class="base" data-id="menlo-in-code.base"></span></p></div>
+<div data-case data-id="helvetica-in-code"><p data-id="helvetica-in-code.p">a <code data-id="helvetica-in-code.code">b <span style="font-family: Helvetica" data-id="helvetica-in-code.inner">c</span></code><span class="base" data-id="helvetica-in-code.base"></span></p></div>
+<div data-case data-id="span-monospace"><p data-id="span-monospace.p">a <span style="font-family: monospace" data-id="span-monospace.code">b</span> c<span class="base" data-id="span-monospace.base"></span></p></div>
+<div data-case data-id="code-em-child"><p data-id="code-em-child.p">a <code data-id="code-em-child.code">b <span style="font-size: 2em" data-id="code-em-child.inner">c</span></code><span class="base" data-id="code-em-child.base"></span></p></div>
+
+<div data-case data-id="line-height-px"><p style="line-height: 24px" data-id="line-height-px.p">a <code data-id="line-height-px.code">b</code> c<span class="base" data-id="line-height-px.base"></span></p></div>
+<div data-case data-id="line-height-number"><p style="line-height: 1.5" data-id="line-height-number.p">a <code data-id="line-height-number.code">b</code> c<span class="base" data-id="line-height-number.base"></span></p></div>
+<div data-case data-id="line-height-code"><p data-id="line-height-code.p">a <code style="line-height: 30px" data-id="line-height-code.code">b</code> c<span class="base" data-id="line-height-code.base"></span></p></div>
+
+<script>
+  const rects = {}
+  const fontSizes = {}
+  for (const element of document.querySelectorAll('[data-id]')) {
+    const origin = (element.closest('[data-case]') ?? element).getBoundingClientRect()
+    const { x, y, width, height } = element.getBoundingClientRect()
+    rects[element.dataset.id] = [x - origin.x, y - origin.y, width, height]
+    fontSizes[element.dataset.id] = getComputedStyle(element).fontSize
+  }
+  document.body.setAttribute('data-rects', JSON.stringify({ rects, fontSizes }))
+</script>
+</body>
+</html>

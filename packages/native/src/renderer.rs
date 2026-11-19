@@ -17174,9 +17174,9 @@ mod font_size_cascade_tests {
             cx,
             &[
                 node(1, None, "{}"),
-                custom(2, 1, "code", r#"{"fontSize": 10, "lineHeight": 2}"#),
-                custom(3, 1, "code", r#"{"fontSize": 10, "lineHeight": "30px"}"#),
-                custom(4, 1, "code", r#"{"fontSize": 10, "lineHeight": "3em"}"#),
+                custom(2, 1, "code-block", r#"{"fontSize": 10, "lineHeight": 2}"#),
+                custom(3, 1, "code-block", r#"{"fontSize": 10, "lineHeight": "30px"}"#),
+                custom(4, 1, "code-block", r#"{"fontSize": 10, "lineHeight": "3em"}"#),
             ],
         );
         for id in [2, 3, 4] {

@@ -34,7 +34,7 @@ instead? Start with the [Solid quick start](#solid-quick-start).
 ### 1. Point TypeScript at the Ghia JSX types
 
 **`jsxImportSource` is required.** Without it TypeScript uses DOM types, so
-`<virtual-list>`, `<markdown>`, `<code>` and `style.hover` all fail to
+`<virtual-list>`, `<markdown>`, `<code-block>` and `style.hover` all fail to
 typecheck.
 
 ```json
@@ -1177,7 +1177,7 @@ that `subscribe` delivers. In Solid, `createAppearance()` returns an accessor.
 
 macOS applies `appearance` and `setAppearance`. On Windows and Linux they are
 accepted and ignored, and `getAppearance()` reports GPUI's value for the
-window. Ghia does not change the default theme of `<code>`, `<diff>` or
+window. Ghia does not change the default theme of `<code-block>`, `<diff>` or
 `<markdown>` with the appearance; pass those your own colors.
 
 `TestRenderer` does what the live renderer does: the `appearance` option and
@@ -3261,7 +3261,7 @@ Each **direct host child** is one virtual row. Give every row a stable React key
 </virtual-list>
 ```
 
-A row can contain nested `<div>`, `<span>`, strings, `<markdown>`, `<code>`, `<diff>`, `<input>`, and `<textarea>` elements. Focusable rows stay active when they move offscreen, so keyboard input and native editor state are preserved. A scroller inside a row takes the wheel first. When it is at its limit the list takes the event, and when the list is at its limit the scrollers around it do (see [Scrolling](#scrolling)).
+A row can contain nested `<div>`, `<span>`, strings, `<markdown>`, `<code-block>`, `<diff>`, `<input>`, and `<textarea>` elements. Focusable rows stay active when they move offscreen, so keyboard input and native editor state are preserved. A scroller inside a row takes the wheel first. When it is at its limit the list takes the event, and when the list is at its limit the scrollers around it do (see [Scrolling](#scrolling)).
 
 A row can be `display: "contents"`. It has no box, so its `height`, `padding`, `margin`, `border` and `backgroundColor` do nothing, and the list measures it as its children stacked as a block: children 30 and 25 px tall make a 55 px row, and a row with no children (or only `display: "none"` ones) is 0 px. A browser has no such list, so this is the list's own definition. Its text style, `inert`, `pointerEvents` and `visibility` pass down to the children, and its own listeners hear them (see [Layout like CSS](#layout-like-css)). It can be keyed, reordered and switched to or from a block like any row, and Tab walks its children, never the row.
 
@@ -3411,7 +3411,7 @@ rows and Taffy lays them out again. Draw time is the cost of those rows, not
 the length of the list.
 
 Put a long list on `<virtual-list>`. Keep `overdraw` near one extra
-viewport. Put fat content in one native node (`<markdown>`, `<code>`, `<diff>`),
+viewport. Put fat content in one native node (`<markdown>`, `<code-block>`, `<diff>`),
 not a tree of React spans.
 
 The host `<virtual-list>` still retains every React child. Pass `itemCount`,
@@ -4088,7 +4088,7 @@ so search, selection and copy see `\t`, and it advances to the next tab stop.
 - Only a container sets it. A `tabSize` on a `<span>` inside a
   paragraph does nothing, because a paragraph is one string with one tab size.
   A `<div>` sets it for its own text.
-- The text of `<code>` and `<diff>` inherits it too, so a tab there gets a stop
+- The text of `<code-block>` and `<diff>` inherits it too, so a tab there gets a stop
   where it used to get the font's own tab.
 
 #### Hanging spaces
@@ -6158,7 +6158,7 @@ delivers nothing and changes no size reported. `display: none` and a removed ele
 still 0 by 0.
 
 Observers work on `<div>`, `<span>`, `<input>`, `<textarea>`, `<img>`, `<svg>`,
-`<anchored>`, `<code>`, `<diff>` and `<markdown>`. `<virtual-list>` itself does not
+`<anchored>`, `<code-block>`, `<diff>` and `<markdown>`. `<virtual-list>` itself does not
 report; its rows do, and a row outside the window reports as not painting.
 
 ### Find what is under a point
@@ -6342,7 +6342,7 @@ function onKeyDown(event: KeyEvent) {
 ## Text selection
 
 Every text Ghia paints is **selectable and copyable**, including text inside
-`<code>`, `<diff>` and `<markdown>`. A drag that starts in a heading and ends
+`<code-block>`, `<diff>` and `<markdown>`. A drag that starts in a heading and ends
 inside a fenced code block selects everything between; Cmd+C copies it joined in
 document order.
 
@@ -6478,7 +6478,7 @@ A `Range` is **live**. Taking a node out of its parent moves the boundary points
 | `cloneContents()`, `extractContents()`, `surroundContents(newParent)` | The standard's algorithms, returning a `DocumentFragment` of the window the start container is in. `cloneContents` copies the covered part of the two end texts and the nodes between (`cloneNode`) and leaves the tree alone. `extractContents` moves the nodes between into the fragment, cuts the end texts, leaves the range collapsed where the standard says, and the other live ranges follow it as for ordinary removals. `surroundContents` extracts, empties `newParent`, inserts it at the range and puts the contents in it. `InvalidStateError` when an element lies across a boundary, `InvalidNodeTypeError` for a document or a fragment as `newParent`. |
 | `getClientRects()`, `getBoundingClientRect()` | The CSSOM View rules, read from the painted text: for each Text node the range selects or partly selects, one rect for each line fragment of the selected part (the content area of the font there, as Chrome gives for a text node), and for each element the range selects whole, whose parent it does not select, its border box (`element.getClientRects()`). A collapsed range in a Text node is the caret: one rect with no width and the height of the font; a collapsed range in an element has none. `getBoundingClientRect()` is the union, or `new DOMRect()` with no rects. The read lays out and paints what changed first, so a change made earlier in the same handler is seen. Text that did not paint (`display: none`, `user-select: none`, hidden, or inside an anchored or virtual-list leaf run) has no rects. |
 
-`document.caretPositionFromPoint(x, y)` takes client coordinates and answers with a `CaretPosition` (a global; `offsetNode` is a Text node, `offset` a UTF-16 offset in its data, and `getClientRect()` the rect of the caret there, or `null` when the text did not paint): the character boundary nearest the point, in the painted text under it or the nearest to it. `document.caretRangeFromPoint(x, y)` is the same as a collapsed `Range`. Both are `null` when no text is painted, lay out and paint what changed first, and throw a `TypeError` for a coordinate that is not finite. Only text that is a Text node of a paragraph counts (not text of a `<code>`, `<markdown>` or `<diff>`, nor text under `user-select: none`).
+`document.caretPositionFromPoint(x, y)` takes client coordinates and answers with a `CaretPosition` (a global; `offsetNode` is a Text node, `offset` a UTF-16 offset in its data, and `getClientRect()` the rect of the caret there, or `null` when the text did not paint): the character boundary nearest the point, in the painted text under it or the nearest to it. `document.caretRangeFromPoint(x, y)` is the same as a collapsed `Range`. Both are `null` when no text is painted, lay out and paint what changed first, and throw a `TypeError` for a coordinate that is not finite. Only text that is a Text node of a paragraph counts (not text of a `<code-block>`, `<markdown>` or `<diff>`, nor text under `user-select: none`).
 
 Differs from Chrome: [rects only for painted text, `caretPositionFromPoint` answers the nearest text and never an element, and `createContextualFragment` and `expand()` are missing](./fork/deviations.md#selection-and-ranges).
 
@@ -6665,14 +6665,14 @@ window and a container searches only that container.
 </div>
 ```
 
-It reaches strings, `<code>`, `<markdown>` and `<diff>` with no extra props,
+It reaches strings, `<code-block>`, `<markdown>` and `<diff>` with no extra props,
 because every string Ghia paints goes through the same funnel.
 
 Text in a [`contentVisibility`](#skipping-content-with-contentvisibility) subtree is
 searched as a browser's find does: the text of a skipped `"auto"` element is found
 and counted, and the element is built (and the match painted as the active one) when
 `activeIndex` reaches a match in it; the text below a `"hidden"` element, and
-`display: none` text, is not found. Matches in `<code>`, `<markdown>` and `<diff>` text
+`display: none` text, is not found. Matches in `<code-block>`, `<markdown>` and `<diff>` text
 inside skipped content are not counted, since that text exists only while the
 element renders. Scrolling to the active match is the app's: a skipped element has the
 box `containIntrinsicSize` gives it, so scrolling to the element works before it is built.
@@ -6826,16 +6826,20 @@ Three elements render text with Syntect syntax highlighting computed in
 Rust. Colours come from a theme prop, so a late-arriving highlight recolours runs
 without ever changing layout.
 
-### `<code>`
+### `<code-block>`
 
 A syntax-highlighted code block. One row per line at an exact line height, so the
 block's height is known before highlighting runs.
+
+**Migrating:** this element was `<code code=... language=...>`. `<code>` is now
+HTML's inline element ([HTML tags](#html-tags)): rename the tag to `<code-block>`
+(`findByType("code")` is `findByType("code-block")`), and the props are the same.
 
 It paints **no surface of its own**: no fill, border, radius, padding or language
 header. `style` is the surface, so the card look is yours.
 
 ```tsx
-<code
+<code-block
   code={source}
   language="typescript"        // or path="src/app.ts" to detect from extension
   showLineNumbers
@@ -6870,7 +6874,7 @@ For a language header, or any other chrome, wrap it in a `<div>` you own:
   <div style={{ padding: 6, backgroundColor: '#ffffff09' }}>
     <div style={{ fontSize: 12, color: '#a3a3a3' }}>{language}</div>
   </div>
-  <code code={source} language={language} style={{ padding: 12, minWidth: 0 }} />
+  <code-block code={source} language={language} style={{ padding: 12, minWidth: 0 }} />
 </div>
 ```
 
@@ -6921,7 +6925,7 @@ All three take the same optional `theme` prop. Every field layers on top of the
 built-in dark theme, so overriding one token leaves the rest alone.
 
 ```tsx
-<code
+<code-block
   code={source}
   language="rust"
   theme={{
@@ -6964,7 +6968,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | Element         | Description                                      |
 |-----------------|--------------------------------------------------|
 | `div`           | Container with flexbox layout                    |
-| `code`          | Syntax-highlighted code block                    |
+| `code-block`    | Syntax-highlighted code block                    |
 | `diff`          | Unified diff viewer. Flows by default            |
 | `markdown`      | GitHub-flavoured markdown                        |
 | `input`         | Native single-line text editor                   |
@@ -6982,7 +6986,7 @@ HTML tags (`p`, `h1`, `ul`, `a`, `button`, `table` and the rest) are elements to
 
 ## HTML tags
 
-Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`, `<table>` and the rest of the tags below are host elements that look, lay out and behave as Chrome's defaults make them. A tag is a `div` (or a `span`, for the inline ones) with Chrome's user agent style under it, an implicit [accessibility role](#accessibility) and, for `button` and `a`, focus and key activation. Your own `style` wins over the default property by property, and so does [`<UniversalStyle>`](#universal-style) (the default is under both). `div`, `span`, `label`, `form`, `img`, `svg`, `input`, `textarea`, `code` and `select` are Ghia's own elements and take no part in this table: `code` is the [syntax-highlighted block](#code), not HTML's inline `<code>`, and `select` is not an HTML select.
+Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`, `<table>` and the rest of the tags below are host elements that look, lay out and behave as Chrome's defaults make them. A tag is a `div` (or a `span`, for the inline ones) with Chrome's user agent style under it, an implicit [accessibility role](#accessibility) and, for `button` and `a`, focus and key activation. Your own `style` wins over the default property by property, and so does [`<UniversalStyle>`](#universal-style) (the default is under both). `div`, `span`, `label`, `form`, `img`, `svg`, `input`, `textarea`, `code` and `select` are Ghia's own elements and take no part in this table: `code` is the [syntax-highlighted block](#code), not HTML's inline `<code-block>`, and `select` is not an HTML select.
 
 ```tsx
 <article>
@@ -8480,7 +8484,7 @@ so that animation starts at `0`.
   of a row: a row's content never rises above the next row. The children of a
   `display: contents` element are items of the container around it, and so are
   the children of an `<anchored>` (see [Overlay menus](#overlay-menus)). The
-  other custom elements (`<input>`, `<textarea>`, `<img>`, `<svg>`, `<code>`,
+  other custom elements (`<input>`, `<textarea>`, `<img>`, `<svg>`, `<code-block>`,
   `<diff>`, `<markdown>`, `<virtual-list>`) draw themselves and do not lay
   their children out as a flex or grid container, so a child of one is no item
   and takes no `zIndex` without a `position`.
@@ -9709,7 +9713,7 @@ Differences from the browser:
   does not go on to a container above it. A name still matches, `style()` reads its custom
   properties, and a container unit (`cqw`) looks past it to the one above. A cell is laid
   out by the table algorithm and is as wide as its content whatever it declares
-- Not containers at all: `<anchored>`, `<code>`, `<markdown>`, `<diff>`, and `<input>` (it
+- Not containers at all: `<anchored>`, `<code-block>`, `<markdown>`, `<diff>`, and `<input>` (it
   has no children). `<virtual-list>` takes no `@container` blocks itself (it takes no
   `hover` either), and neither does an inline `<span>`
 - A block is evaluated where the element is built, and what the walks over the tree read
@@ -9758,7 +9762,7 @@ While a scroll moves content under a pointer that stays, `hover` stays on the el
 Nesting is one level deep. A `hover` object cannot contain another `hover` or
 `active`.
 
-They work on **every** element, including `<code>`, `<markdown>`,
+They work on **every** element, including `<code-block>`, `<markdown>`,
 `<diff>`, `<img>`, `<svg>`, the editors and an inline `<span>` (see
 [Events on inline boxes](#events-on-inline-boxes)). The one exception is
 `<virtual-list>`, whose `style` type rejects them: gpui's list has no
@@ -10877,12 +10881,12 @@ do {
 
 ### Testing native elements
 
-`getAllText()` only sees the string nodes (`#text`) in the retained tree. `<code>`, `<diff>`
+`getAllText()` only sees the string nodes (`#text`) in the retained tree. `<code-block>`, `<diff>`
 and `<markdown>` paint their text inside GPUI, so use `getPaintedText()`, which
 returns every string painted in the last frame in paint order:
 
 ```ts
-root.render(<code code={'a\nb'} language="ts" />)
+root.render(<code-block code={'a\nb'} language="ts" />)
 expect(renderer.getPaintedText()).toEqual(['a', 'b'])
 ```
 
@@ -11019,7 +11023,7 @@ Counters you read off the renderer:
   it is none: `LayoutAnimation` (what runs moves a box), `Escapes` (it holds a
   `position: absolute` box whose containing block is outside it),
   `Lifts` (it lifts a box out of itself), `TooLarge` (more than 256 elements),
-  `Scrolls`, `Excluded:<kind>` (it is a scroller, a `<code>` block and so on) and
+  `Scrolls`, `Excluded:<kind>` (it is a scroller, a `<code-block>` block and so on) and
   `ExcludedBelow:<kind>` (something it holds is). A loop that is patched has
   `patchedFrames` equal to its ticks, whatever positioned or translucent ancestor it
   sits under.
@@ -11140,7 +11144,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native text input and multiline textarea
 - [x] Image and SVG elements (`<img>`, `<svg>`), plus `setImage` / `setImagePixels` on `<img>` refs
 - [x] Virtual lists (`<virtual-list>`)
-- [x] Native text components (`<code>`, `<diff>`, `<markdown>`)
+- [x] Native text components (`<code-block>`, `<diff>`, `<markdown>`)
 - [x] Cross-element text selection
 - [x] Text highlighting and search (`highlight`, `useTextSearch`)
 - [x] Headless Select, Combobox, and Tooltip

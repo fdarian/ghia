@@ -231,7 +231,7 @@ pub(crate) fn is_item(tree: &RetainedTree, element: &RetainedElement) -> bool {
 }
 
 /// Whether `element` lays its children out as a flex or grid container. Of the custom elements
-/// only `<anchored>` has children that are laid out; the others (`<input>`, `<img>`, `<code>`,
+/// only `<anchored>` has children that are laid out; the others (`<input>`, `<img>`, `<code-block>`,
 /// ...) draw themselves.
 pub(crate) fn is_flex_or_grid_container(tree: &RetainedTree, element: &RetainedElement) -> bool {
     (crate::text::inline::is_host_container(element) || element.element_type == "anchored")

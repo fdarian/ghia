@@ -2304,7 +2304,7 @@ export class TestRenderer implements NativeRenderer {
   /** Every string painted in the last frame, in paint order.
    *
    *  `getAllText()` only sees string nodes in the retained tree. Native
-   *  elements like `<code>` and `<diff>` paint their text inside GPUI, so this
+   *  elements like `<code-block>` and `<diff>` paint their text inside GPUI, so this
    *  is the only way to assert on what they rendered. */
   getPaintedText(): string[] {
     return this.native.getPaintedText()

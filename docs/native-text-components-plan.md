@@ -72,7 +72,7 @@ Tree-sitter grammar licenses we would inherit.
 
 ### Approach A — native custom elements only
 
-Add `<markdown>`, `<diff>`, `<code>` as `CustomElement` implementations. Fast to ship, matches
+Add `<markdown>`, `<diff>`, `<code-block>` as `CustomElement` implementations. Fast to ship, matches
 Comet closely, but selection stays **trapped inside those elements**. A user's own
 `<div><text>hello</text></div>` is still unselectable, and a drag cannot cross from a markdown
 block into a plain label. That is the wrong shape: selection is a property of *text*, not of a
@@ -274,7 +274,7 @@ change fonts.
 
 ---
 
-# Stage 3 — `<code>` custom element
+# Stage 3 — `<code-block>` custom element
 
 The smallest useful native element, and a de-risking step for Stages 4 and 5.
 
@@ -282,7 +282,7 @@ The smallest useful native element, and a de-risking step for Stages 4 and 5.
 `custom_elements/mod.rs:with_defaults()`.
 
 ```tsx
-<code
+<code-block
   code={source}
   language="typescript"          // or path="src/app.ts" for detection
   showLineNumbers
@@ -423,7 +423,7 @@ still a large win, but it is not the same as windowing in React.
 Stage 0  clipboard              small    ──┐
 Stage 1  selectable text        large    ──┴─► text is selectable + copyable
 Stage 2  tree-sitter syntax     medium   ──┐
-Stage 3  <code>                 medium   ──┴─► native code blocks
+Stage 3  <code-block>           medium   ──┴─► native code blocks
 Stage 6  <list>                 medium   ────► needed before diff/markdown
 Stage 4  <diff>                 large    ────► replaces examples/diff.tsx
 Stage 5  <markdown> (static)    large

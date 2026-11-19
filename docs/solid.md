@@ -765,7 +765,7 @@ interface TestRoot {
 
 > **Info.** Prefer `createTestRoot()` when you can. Reach for `launch()` plus `focus: false` when the check needs a real window or a real process.
 
-`getAllText()` only sees the string (`#text`) nodes. For `<code>`, `<diff>`, and `<markdown>`, use `renderer.getPaintedText()`.
+`getAllText()` only sees the string (`#text`) nodes. For `<code-block>`, `<diff>`, and `<markdown>`, use `renderer.getPaintedText()`.
 
 The subpath re-exports **`@ghia/native/testing`**, including `TestRenderer` and `hasNativeTestRenderer`.
 
@@ -824,7 +824,7 @@ Host elements are the same as React:
 | `text`                       | Selectable text           |
 | `input` / `textarea`         | Native editors            |
 | `virtual-list`               | Visible rows only         |
-| `code` / `diff` / `markdown` | Native text               |
+| `code-block` / `diff` / `markdown` | Native text               |
 | `img` / `svg`                | Images and tintable icons |
 | `anchored`                   | Positioned overlay        |
 

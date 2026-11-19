@@ -1169,11 +1169,11 @@ describeNative("an input on a page with a loop", { timeout: TIMEOUT }, () => {
 
 const PATCH = ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,2 +1,2 @@", "-const a = 1", "+const a = 2", " const b = 3", ""].join("\n")
 
-// A `<code>`, `<markdown>` or `<diff>` is rebuilt by every frame that builds its page and paints the same in a tick: it is no
+// A `<code-block>`, `<markdown>` or `<diff>` is rebuilt by every frame that builds its page and paints the same in a tick: it is no
 // reason for a tick of a loop elsewhere to be drawn whole.
 describeNative("a code block on a page with a loop", { timeout: TIMEOUT }, () => {
   const probes: Record<string, React.ReactNode> = {
-    "a code block": <code testId="probe" code={"const a = 1\nconst b = 2"} language="ts" style={{ width: 240 }} />,
+    "a code block": <code-block testId="probe" code={"const a = 1\nconst b = 2"} language="ts" style={{ width: 240 }} />,
     "a markdown block": <markdown testId="probe" source={"# Title\n\nsome *text* and `code`"} style={{ width: 240 }} />,
     "a diff": <diff testId="probe" patch={PATCH} style={{ width: 300 }} />,
   }

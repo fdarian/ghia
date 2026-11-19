@@ -722,7 +722,7 @@ function CodeBlock(props: { code: string; language?: string; showLineNumbers?: b
           <div style={{ fontSize: 12, color: C.secondary }}>{props.language}</div>
         </div>
       </Show>
-      <code
+      <code-block
         code={props.code}
         language={props.language}
         showLineNumbers={props.showLineNumbers}

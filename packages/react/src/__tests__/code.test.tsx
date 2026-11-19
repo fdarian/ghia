@@ -1,4 +1,4 @@
-/// The native <code> element: syntax highlighting, line numbers, selection.
+/// The native <code-block> element: syntax highlighting, line numbers, selection.
 
 import fs from "fs"
 import path from "path"
@@ -25,17 +25,17 @@ beforeAll(() => {
 const LINE_HEIGHT = 18
 
 function codeBounds(renderer: { findByType(type: string): { id: number }[]; getElementBounds(id: number): { x: number; y: number; width: number; height: number } | null }) {
-  const node = renderer.findByType("code")[0]
+  const node = renderer.findByType("code-block")[0]
   expect(node).toBeDefined()
   const bounds = renderer.getElementBounds(node!.id)
   expect(bounds).not.toBeNull()
   return bounds!
 }
 
-describe("<code>", () => {
+describe("<code-block>", () => {
   it("renders one row per source line", () => {
     const { render, renderer } = createTestRoot()
-    render(<code code={"a\nb\nc"} language="ts" />)
+    render(<code-block code={"a\nb\nc"} language="ts" />)
 
     // Only the code paints. No language header, no chrome of any kind.
     expect(renderer.getPaintedText()).toEqual(["a", "b", "c"])
@@ -45,7 +45,7 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <code code={"// one\r\n// two\r\n"} language="ts" />
+        <code-block code={"// one\r\n// two\r\n"} language="ts" />
       </div>
     )
 
@@ -55,7 +55,7 @@ describe("<code>", () => {
 
   it("paints no surface of its own", () => {
     const { render, renderer } = createTestRoot()
-    render(<code code={"a\nb\nc"} language="ts" />)
+    render(<code-block code={"a\nb\nc"} language="ts" />)
 
     // Exactly the rows: no padding, no header strip, no border.
     expect(codeBounds(renderer).height).toBe(3 * LINE_HEIGHT)
@@ -65,33 +65,33 @@ describe("<code>", () => {
     const cases = ["true", "null", '{"a":1}', "ordinary text"]
     for (const code of cases) {
       const { render, renderer } = createTestRoot()
-      render(<code code={code} language="txt" />)
+      render(<code-block code={code} language="txt" />)
       expect(renderer.getPaintedText()).toContain(code)
     }
   })
 
   it("renders an empty code block without crashing", () => {
     const { render, renderer } = createTestRoot()
-    render(<code code="" language="ts" />)
-    expect(renderer.findByType("code")).toHaveLength(1)
+    render(<code-block code="" language="ts" />)
+    expect(renderer.findByType("code-block")).toHaveLength(1)
   })
 
   it("never paints the language as a header", () => {
     const { render, renderer } = createTestRoot()
-    render(<code code="x = 1" language="python" />)
+    render(<code-block code="x = 1" language="python" />)
     expect(renderer.getPaintedText()).not.toContain("python")
   })
 
   it("grows by the padding from the style prop", () => {
     const { render, renderer } = createTestRoot()
-    render(<code code={"a\nb\nc"} language="ts" style={{ padding: 20 }} />)
+    render(<code-block code={"a\nb\nc"} language="ts" style={{ padding: 20 }} />)
 
     expect(codeBounds(renderer).height).toBe(3 * LINE_HEIGHT + 40)
   })
 
   it("takes the line height and font size from the style prop", () => {
     const { render, renderer } = createTestRoot()
-    render(<code code={"a\nb\nc"} language="ts" style={{ fontSize: 20, lineHeight: "30px" }} />)
+    render(<code-block code={"a\nb\nc"} language="ts" style={{ fontSize: 20, lineHeight: "30px" }} />)
 
     // The row height follows style.lineHeight, so tall glyphs are never clipped.
     expect(codeBounds(renderer).height).toBe(3 * 30)
@@ -100,7 +100,7 @@ describe("<code>", () => {
   it("scales the rows when only fontSize is given", () => {
     const { render, renderer } = createTestRoot()
     // Double the glyphs and the rows must double too, or the lines overlap.
-    render(<code code={"a\nb\nc"} language="ts" style={{ fontSize: 25 }} />)
+    render(<code-block code={"a\nb\nc"} language="ts" style={{ fontSize: 25 }} />)
 
     expect(codeBounds(renderer).height).toBe(3 * 2 * LINE_HEIGHT)
   })
@@ -112,7 +112,7 @@ describe("<code>", () => {
     const a = createTestRoot()
     a.render(
       <div style={{ display: "flex", padding: 24, backgroundColor: "#060606", height: "100%" }}>
-        <code code={TS_SOURCE} language="typescript" />
+        <code-block code={TS_SOURCE} language="typescript" />
       </div>
     )
     a.renderer.captureScreenshot(bare)
@@ -120,7 +120,7 @@ describe("<code>", () => {
     const b = createTestRoot()
     b.render(
       <div style={{ display: "flex", padding: 24, backgroundColor: "#060606", height: "100%" }}>
-        <code
+        <code-block
           code={TS_SOURCE}
           language="typescript"
           style={{ padding: 12, borderRadius: 10, backgroundColor: "#1d1d1d" }}
@@ -134,7 +134,7 @@ describe("<code>", () => {
 
   it("renders line numbers when asked", () => {
     const { render, renderer } = createTestRoot()
-    render(<code code={"a\nb\nc"} language="ts" showLineNumbers />)
+    render(<code-block code={"a\nb\nc"} language="ts" showLineNumbers />)
 
     // Gutter numbers paint before their line, so the log interleaves them.
     expect(renderer.getPaintedText()).toEqual(["1", "a", "2", "b", "3", "c"])
@@ -144,7 +144,7 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <code code={"const answer = 42"} language="ts" />
+        <code-block code={"const answer = 42"} language="ts" />
       </div>
     )
 
@@ -156,7 +156,7 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <code code={"one\ntwo\nthree"} language="ts" />
+        <code-block code={"one\ntwo\nthree"} language="ts" />
       </div>
     )
 
@@ -168,7 +168,7 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <code code={"alpha\nbeta"} language="ts" showLineNumbers />
+        <code-block code={"alpha\nbeta"} language="ts" showLineNumbers />
       </div>
     )
 
@@ -185,7 +185,7 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <code code={"alpha\nbeta"} language="ts" showLineNumbers />
+        <code-block code={"alpha\nbeta"} language="ts" showLineNumbers />
       </div>
     )
 
@@ -200,7 +200,7 @@ describe("<code>", () => {
     const a = createTestRoot()
     a.render(
       <div style={{ display: "flex", padding: 24, backgroundColor: "#060606", height: "100%" }}>
-        <code code={TS_SOURCE} language="typescript" showLineNumbers />
+        <code-block code={TS_SOURCE} language="typescript" showLineNumbers />
       </div>
     )
     a.renderer.captureScreenshot(before)
@@ -208,7 +208,7 @@ describe("<code>", () => {
     const b = createTestRoot()
     b.render(
       <div style={{ display: "flex", padding: 24, backgroundColor: "#060606", height: "100%" }}>
-        <code
+        <code-block
           code={TS_SOURCE}
           language="typescript"
           showLineNumbers
@@ -242,7 +242,7 @@ describe("<code>", () => {
         }}
       >
         {/* The card is the caller's, built from `style` alone. */}
-        <code
+        <code-block
           code={TS_SOURCE}
           language="typescript"
           showLineNumbers
@@ -267,7 +267,7 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ width: 240, height: 120, overflowY: "scroll" }}>
-        <code
+        <code-block
           code={"const wide = '".padEnd(200, "x") + "'"}
           language="ts"
         />
