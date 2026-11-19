@@ -29,13 +29,19 @@ pub(crate) fn general() -> Pasteboard {
 
 #[cfg(any(test, feature = "test-support"))]
 /// A pasteboard nothing else uses, and its name. Release it with `release`.
+///
+/// The name is made here, not by `pasteboardWithUniqueName`: AppKit hands the same name to concurrent
+/// callers (16 threads asking 200 times yield duplicates), and two tests on one board read each other's data.
 pub(crate) fn unique() -> (Pasteboard, String) {
-    unsafe {
-        let pasteboard: Pasteboard = msg_send![class!(NSPasteboard), pasteboardWithUniqueName];
-        let name: *mut AnyObject = msg_send![&*pasteboard, name];
-        let name = string_of(name).expect("a pasteboard has a name");
-        (pasteboard, name)
-    }
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let name = format!(
+        "ghia-test-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let pasteboard: Pasteboard =
+        unsafe { msg_send![class!(NSPasteboard), pasteboardWithName: &*ns_string(&name)] };
+    (pasteboard, name)
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -56,20 +62,6 @@ fn ns_string(text: &str) -> Retained<AnyObject> {
         ];
         string.expect("NSString takes any UTF-8")
     }
-}
-
-/// The text of an `NSString`, `None` for nil. For a name; a pasteboard's contents are read as bytes
-/// (`string_for`), because `UTF8String` stops at a NUL.
-unsafe fn string_of(string: *mut AnyObject) -> Option<String> {
-    if string.is_null() {
-        return None;
-    }
-    let length: usize = unsafe { msg_send![string, lengthOfBytesUsingEncoding: UTF8] };
-    let bytes: *const u8 = unsafe { msg_send![string, UTF8String] };
-    if bytes.is_null() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(bytes, length) }).into_owned())
 }
 
 /// The bytes of an `NSData`.
@@ -270,5 +262,17 @@ mod tests {
                 vec![ClipboardData::new("text/uri-list", "https://a.test/")]
             );
         });
+    }
+
+    #[test]
+    fn concurrent_callers_never_share_a_pasteboard() {
+        let names: Vec<String> = (0..16)
+            .map(|_| std::thread::spawn(|| (0..100).map(|_| unique().1).collect::<Vec<_>>()))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flat_map(|thread| thread.join().unwrap())
+            .collect();
+        let distinct: std::collections::HashSet<&String> = names.iter().collect();
+        assert_eq!(distinct.len(), names.len());
     }
 }
