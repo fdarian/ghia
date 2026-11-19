@@ -136,10 +136,12 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
   that starts a link that was stopped sets the window's `first_step_pending` and lists it; a link that
   `restart_display_link` or `resubscribe_display_link` brings back does not, and a step or a synchronous draw
   (`display_layer`, `windowDidBecomeKey`) clears it. `tick()` only pumps: it draws no frame of its own and records whether
-  its pump ran a link step (`PumpOutcome.stepped`). After a tick, `startFrameLoop` (`runtime.ts`) asks
-  `renderer.startedLinksPending()` (`gpui_macos::started_display_links_pending()`: some listed window still has the flag,
-  a frame request and a running link, the test `step_started_display_links` applies) and, if so, schedules one
-  `setImmediate` (never a second while one is queued) that calls `renderer.stepStartedLinks()`. That is a browser's order:
+  its pump ran a link step (`PumpOutcome.stepped`). After every tick, `startFrameLoop` (`runtime.ts`) schedules one
+  `setImmediate` (never a second while one is queued) that asks `renderer.startedLinksPending()`
+  (`gpui_macos::started_display_links_pending()`: some listed window still has the flag, a frame request and a running
+  link, the test `step_started_display_links` applies) and, if so, calls `renderer.stepStartedLinks()`. The question is
+  asked inside the immediate, not after the tick: a link only one of the tick's microtasks starts (Lexical's commit after a
+  prevented edit, `queueMicrotask(() => flushSync(...))`) does not exist when `tick()` returns. That is a browser's order:
   the input task, its microtasks (an editor that commits its update in one, Lexical, has done it by then), then the frame,
   whose `requestAnimationFrame` callbacks see the committed change. Drawn inside `tick()`, the frame and its rAF callbacks
   ran before those microtasks and painted the change a frame later. The call is an outermost native call
@@ -154,13 +156,13 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
   without counting: the frame request stays and the next vsync draws it, so an animation's next frame is not drawn unpaced.
   A link that is already running is never listed, so continuous input keeps vsync pacing. If the last tick's pump ran a link
   step (`PumpOutcome.stepped`) the call leaves the list for a later tick: that step was the frame, and a second would draw
-  twice. `GPUIX_INPUT_FRAME_OFF=1` (read once, at the first call) makes the call discard the list, which leaves the first
+  twice (inert under the per-key yield, where the pump sends no key after a step in the same call; kept in case it ever does). `GPUIX_INPUT_FRAME_OFF=1` (read once, at the first call) makes the call discard the list, which leaves the first
   step to the vsync. Both methods are optional on the renderer `startFrameLoop` drives (its fakes lack them), no-ops
   returning `false` off macOS, and neither adds a tick or a wake: the frame call is not a tick, does not run from the wake
   callback, and `pending` is still cleared only by `tick_finished`, after the tick (#56). A tick from a sync handler is
   a nested pump and no longer draws either; the frame loop's call after the outermost tick covers it. The automation
-  client's `afterInput` (`liveRendererAsTest`) does the same as the loop: `tick()`, then, if `startedLinksPending()`, a
-  `setImmediate` and `stepStartedLinks()`, then `setTimeout(0)`; `tick()` draws nothing there either.
+  client's `afterInput` (`liveRendererAsTest`) does the same as the loop: `tick()`, a `setImmediate`, `stepStartedLinks()` if
+  `startedLinksPending()` then, and `setTimeout(0)`; `tick()` draws nothing there either.
   A window whose link was started between ticks draws on gpui's pre-dispatch draw of the key and again in the input frame:
   the same total number of draws, moved earlier. It is the cold-first-key case the tests exclude.
   **`selectionchange`** is a coalesced `setTimeout(0)` (`dom/selection.ts`) a handler's selection change queues, and the
