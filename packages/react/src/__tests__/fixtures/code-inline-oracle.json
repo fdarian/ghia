@@ -935,6 +935,228 @@
    19,
    0,
    0
+  ],
+  "atomic-helvetica": [
+   0,
+   0,
+   1280,
+   18
+  ],
+  "atomic-helvetica.p": [
+   0,
+   0,
+   1280,
+   18
+  ],
+  "atomic-helvetica.code": [
+   13.34375,
+   2,
+   15.828125,
+   15
+  ],
+  "atomic-helvetica.inner": [
+   21.171875,
+   0,
+   8,
+   18
+  ],
+  "atomic-helvetica.base": [
+   29.171875,
+   14,
+   0,
+   0
+  ],
+  "atomic-small-code": [
+   0,
+   0,
+   1280,
+   18
+  ],
+  "atomic-small-code.p": [
+   0,
+   0,
+   1280,
+   18
+  ],
+  "atomic-small-code.small": [
+   0,
+   2,
+   6.53125,
+   15
+  ],
+  "atomic-small-code.code": [
+   0,
+   4,
+   6.53125,
+   13
+  ],
+  "atomic-small-code.base": [
+   6.53125,
+   14,
+   0,
+   0
+  ],
+  "atomic-em-chain": [
+   0,
+   0,
+   1280,
+   28
+  ],
+  "atomic-em-chain.p": [
+   0,
+   0,
+   1280,
+   28
+  ],
+  "atomic-em-chain.outer": [
+   13.34375,
+   0,
+   11.75,
+   28
+  ],
+  "atomic-em-chain.block": [
+   13.34375,
+   0,
+   11.75,
+   28
+  ],
+  "atomic-em-chain.code": [
+   13.34375,
+   4,
+   11.75,
+   23
+  ],
+  "atomic-em-chain.base": [
+   25.09375,
+   22,
+   0,
+   0
+  ],
+  "atomic-block-code": [
+   0,
+   0,
+   1280,
+   18
+  ],
+  "atomic-block-code.p": [
+   0,
+   0,
+   1280,
+   18
+  ],
+  "atomic-block-code.block": [
+   13.34375,
+   0,
+   7.828125,
+   18
+  ],
+  "atomic-block-code.code": [
+   13.34375,
+   2,
+   7.828125,
+   15
+  ],
+  "atomic-block-code.base": [
+   21.171875,
+   14,
+   0,
+   0
+  ],
+  "calc-parent-em": [
+   0,
+   0,
+   1280,
+   28
+  ],
+  "calc-parent-em.p": [
+   0,
+   0,
+   1280,
+   28
+  ],
+  "calc-parent-em.code": [
+   20.015625,
+   0,
+   14.453125,
+   28
+  ],
+  "calc-parent-em.base": [
+   53.140625,
+   22,
+   0,
+   0
+  ],
+  "calc-code-1em": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "calc-code-1em.p": [
+   0,
+   0,
+   1280,
+   19
+  ],
+  "calc-code-1em.code": [
+   13.34375,
+   0,
+   9.640625,
+   19
+  ],
+  "calc-code-1em.base": [
+   35.4375,
+   15,
+   0,
+   0
+  ],
+  "calc-parent-percent": [
+   0,
+   0,
+   1280,
+   28
+  ],
+  "calc-parent-percent.p": [
+   0,
+   0,
+   1280,
+   28
+  ],
+  "calc-parent-percent.code": [
+   20.015625,
+   4,
+   11.75,
+   23
+  ],
+  "calc-parent-percent.base": [
+   50.4375,
+   22,
+   0,
+   0
+  ],
+  "calc-code-percent": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "calc-code-percent.p": [
+   0,
+   0,
+   1280,
+   23
+  ],
+  "calc-code-percent.code": [
+   13.34375,
+   0,
+   11.75,
+   23
+  ],
+  "calc-code-percent.base": [
+   37.546875,
+   18,
+   0,
+   0
   ]
  },
  "fontSizes": {
@@ -1093,6 +1315,70 @@
   "line-height-code": "16px",
   "line-height-code.p": "16px",
   "line-height-code.code": "13px",
-  "line-height-code.base": "16px"
+  "line-height-code.base": "16px",
+  "atomic-helvetica": "16px",
+  "atomic-helvetica.p": "16px",
+  "atomic-helvetica.code": "13px",
+  "atomic-helvetica.inner": "16px",
+  "atomic-helvetica.base": "16px",
+  "atomic-small-code": "16px",
+  "atomic-small-code.p": "16px",
+  "atomic-small-code.small": "13.3333px",
+  "atomic-small-code.code": "10.8333px",
+  "atomic-small-code.base": "16px",
+  "atomic-em-chain": "16px",
+  "atomic-em-chain.p": "16px",
+  "atomic-em-chain.outer": "24px",
+  "atomic-em-chain.block": "24px",
+  "atomic-em-chain.code": "19.5px",
+  "atomic-em-chain.base": "16px",
+  "atomic-block-code": "16px",
+  "atomic-block-code.p": "16px",
+  "atomic-block-code.block": "16px",
+  "atomic-block-code.code": "13px",
+  "atomic-block-code.base": "16px",
+  "calc-parent-em": "16px",
+  "calc-parent-em.p": "24px",
+  "calc-parent-em.code": "24px",
+  "calc-parent-em.base": "24px",
+  "calc-code-1em": "16px",
+  "calc-code-1em.p": "16px",
+  "calc-code-1em.code": "16px",
+  "calc-code-1em.base": "16px",
+  "calc-parent-percent": "16px",
+  "calc-parent-percent.p": "24px",
+  "calc-parent-percent.code": "19.5px",
+  "calc-parent-percent.base": "24px",
+  "calc-code-percent": "16px",
+  "calc-code-percent.p": "16px",
+  "calc-code-percent.code": "19.5px",
+  "calc-code-percent.base": "16px"
+ },
+ "scenes": {
+  "transitionRest": 13,
+  "transitionStart": 13,
+  "transitionUp": {
+   "mid": 16.25,
+   "end": 19.5
+  },
+  "transitionBackStart": 19.5,
+  "transitionDown": {
+   "mid": 16.25,
+   "end": 13
+  },
+  "keyframesStart": 13,
+  "keyframes": {
+   "mid": 22.5,
+   "end": 32
+  },
+  "focusBefore": [
+   13,
+   78.28125
+  ],
+  "focused": true,
+  "focusAfter": [
+   13,
+   78.28125
+  ]
  }
 }

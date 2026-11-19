@@ -284,6 +284,26 @@ fn is_generic_monospace(font_family: &str) -> bool {
     font_family.trim().eq_ignore_ascii_case("monospace")
 }
 
+/// What Chrome's monospace scaling multiplied a font size by (a byte, so the context does not grow).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum FontScale {
+    None,
+    /// The family became `monospace` alone.
+    Down,
+    /// The family stopped being `monospace`.
+    Up,
+}
+
+impl FontScale {
+    fn factor(self) -> f64 {
+        match self {
+            Self::None => 1.0,
+            Self::Down => MONOSPACE_FONT_SIZE / INITIAL_FONT_SIZE,
+            Self::Up => INITIAL_FONT_SIZE / MONOSPACE_FONT_SIZE,
+        }
+    }
+}
+
 /// What a length needs besides itself to become px. One context describes one
 /// element; `descend` makes the context its children inherit.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -304,7 +324,7 @@ pub(crate) struct LengthContext {
     /// the family became `monospace` alone, 16/13 where it stopped being, and 1 below an absolute size. A length
     /// that is resolved as this element's `font-size` and was not declared by it (a transition's target, a state's)
     /// is scaled by it too.
-    font_scale: f64,
+    font_scale: FontScale,
     pub(crate) viewport_width: f64,
     pub(crate) viewport_height: f64,
     /// The content box of the nearest ancestor query container that contains the
@@ -322,7 +342,7 @@ impl LengthContext {
         fp.f64(self.parent_font_size);
         fp.f64(self.root_font_size);
         fp.bits(&[self.monospace, self.absolute_size]);
-        fp.f64(self.font_scale);
+        fp.word(self.font_scale as u64);
         fp.f64(self.viewport_width);
         fp.f64(self.viewport_height);
         fp.option_f64(self.container_width);
@@ -337,7 +357,7 @@ impl LengthContext {
             root_font_size: INITIAL_FONT_SIZE,
             monospace: false,
             absolute_size: false,
-            font_scale: 1.0,
+            font_scale: FontScale::None,
             viewport_width,
             viewport_height,
             container_width: None,
@@ -385,12 +405,12 @@ impl LengthContext {
     pub(crate) fn descend_font(&self, font_size: Option<&LinearLength>, font_family: Option<&str>, is_root: bool) -> Self {
         let monospace = font_family.map_or(self.monospace, is_generic_monospace);
         let font_scale = match (monospace != self.monospace, self.absolute_size) {
-            (true, false) if monospace => MONOSPACE_FONT_SIZE / INITIAL_FONT_SIZE,
-            (true, false) => INITIAL_FONT_SIZE / MONOSPACE_FONT_SIZE,
-            _ => 1.0,
+            (true, false) if monospace => FontScale::Down,
+            (true, false) => FontScale::Up,
+            _ => FontScale::None,
         };
         let own_absolute = font_size.is_some_and(LinearLength::is_absolute_font_size);
-        let computed = self.computed_font_size(font_size) * if own_absolute { 1.0 } else { font_scale };
+        let computed = self.computed_font_size(font_size) * if own_absolute { 1.0 } else { font_scale.factor() };
         Self {
             font_size: computed,
             parent_font_size: self.font_size,
@@ -429,9 +449,16 @@ impl LengthContext {
     /// are of the parent's size, not its own, and Chrome's monospace scaling applies to a size that is not
     /// absolute.
     pub(crate) fn declared_font_size(&self, length: &LinearLength) -> f64 {
+        let size = self.keyframe_font_size(length);
+        if length.is_absolute_font_size() { size } else { size * self.font_scale.factor() }
+    }
+
+    /// The px of a `font-size` in a keyframe, a motion target: against the parent's size and with no monospace
+    /// scaling, because Chrome builds the style of a keyframe from the parent's, whose family it keeps (`2em` on a
+    /// `code` is 32px at the end of an animation, 26px as its own declaration).
+    pub(crate) fn keyframe_font_size(&self, length: &LinearLength) -> f64 {
         let parent = Self { font_size: self.parent_font_size, ..*self };
-        let size = parent.resolve(length, parent.font_size);
-        if length.is_absolute_font_size() { size } else { size * self.font_scale }
+        parent.resolve(length, parent.font_size)
     }
 
     /// `percent_basis` is the px a `100%` stands for.
@@ -786,7 +813,7 @@ mod tests {
         root_font_size: 16.0,
         monospace: false,
         absolute_size: false,
-        font_scale: 1.0,
+        font_scale: FontScale::None,
         viewport_width: 800.0,
         viewport_height: 600.0,
         container_width: None,
@@ -936,6 +963,8 @@ mod tests {
         let declared = |size: &str| code.declared_font_size(&crate::css::dimension::parse_font_size(size).unwrap());
         assert_eq!((declared("1em"), declared("1.5em"), declared("150%"), declared("2em")), (13.0, 19.5, 19.5, 26.0));
         assert_eq!((declared("20px"), declared("2rem"), declared("calc(1.5em)")), (20.0, 32.0, 24.0));
+        let keyframe = |size: &str| code.keyframe_font_size(&crate::css::dimension::parse_font_size(size).unwrap());
+        assert_eq!((keyframe("1em"), keyframe("2em"), keyframe("20px")), (16.0, 32.0, 20.0));
         assert_eq!(code.for_state(Some(&parse("1em"))).font_size, 13.0);
         assert_eq!(code.for_state(Some(&parse("20px"))).font_size, 20.0);
         let span = code.descend_style(Some(&styled(r#"{"fontFamily": "Menlo"}"#)), false);

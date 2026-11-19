@@ -1784,7 +1784,7 @@ impl AnimProp {
                 if length.is_negative() {
                     return Err(format!("motion {name} must be non-negative"));
                 }
-                AnimValue::Number(check_finite(name, lengths.declared_font_size(&length).max(0.0))?)
+                AnimValue::Number(check_finite(name, lengths.keyframe_font_size(&length).max(0.0))?)
             }
             Kind::FontWeight => {
                 let weight: FontWeightValue = serde_json::from_value(value.clone())

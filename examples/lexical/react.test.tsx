@@ -477,19 +477,22 @@ describeNative('Lexical (React bindings) on Ghia', () => {
       range.selectNodeContents(node)
       return range.getBoundingClientRect()
     }
-    const [before, inside, after] = [paragraph.firstChild, code, paragraph.lastChild].map((node) => {
+    const runs = [paragraph.firstChild, code, paragraph.lastChild].map((node) => {
       if (node === null) throw new Error('the paragraph lost a run')
       return rectOf(node)
     })
-    for (const rect of [before!, inside!, after!]) {
+    for (const rect of runs) {
       expect(rect.width).toBeGreaterThan(0)
       expect(rect.y).toBeGreaterThanOrEqual(box.y - 0.5)
       expect(rect.y + rect.height).toBeLessThanOrEqual(box.y + box.height + 0.5)
     }
     // One line: the paragraph is no taller than the tallest run and each run starts where the one before ends.
-    expect(box.height).toBeLessThan(2 * inside!.height)
-    expect(inside!.x).toBeGreaterThanOrEqual(before!.x + before!.width - 0.5)
-    expect(after!.x).toBeGreaterThanOrEqual(inside!.x + inside!.width - 0.5)
+    const before = runs[0]!
+    const inside = runs[1]!
+    const after = runs[2]!
+    expect(box.height).toBeLessThan(2 * inside.height)
+    expect(inside.x).toBeGreaterThanOrEqual(before.x + before.width - 0.5)
+    expect(after.x).toBeGreaterThanOrEqual(inside.x + inside.width - 0.5)
     expect(uncaught).toEqual([])
   })
 })

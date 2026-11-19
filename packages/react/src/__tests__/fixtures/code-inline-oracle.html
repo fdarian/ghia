@@ -5,8 +5,10 @@
   turns into the generic `monospace` (or leaves it) and its font-size is not an absolute length, the size is scaled by
   13/16 (the default fixed font size over the default font size). The page reports `fontSizes` (the computed
   `font-size` of every `data-id` element) and `rects` (`[x, y, width, height]` relative to the `data-case` box); `.base`
-  is a zero-size inline-block on the baseline of the line, so its `y` is where the baseline is. Regenerate the files the
-  test reads (device scale 1 and 2) with `sh dsf-oracle.sh code-inline`.
+  is a zero-size inline-block on the baseline of the line, so its `y` is where the baseline is. The elements after
+  the `scenes` comment are not cases: `scenes` is what a transition, a keyframe animation and a `:focus` rule do to the size
+  of a `code` (the animations read paused at 150 ms of 300 and finished). Regenerate the files the test reads (device
+  scale 1 and 2) with `sh dsf-oracle.sh code-inline`.
 
   The text is in the real Menlo, which `monospace` is on a Mac, so the boxes depend on the machine's fonts; the font
   sizes do not.
@@ -18,6 +20,8 @@
   body { margin: 0; width: 1280px; font-family: Helvetica; }
   p, pre { margin: 0; }
   .base { display: inline-block; width: 0; height: 0; }
+  @keyframes code-inline-grow { to { font-size: 2em } }
+  code[data-scene=focus]:focus { font-size: 1em }
 </style>
 </head>
 <body>
@@ -67,6 +71,23 @@
 <div data-case data-id="line-height-number"><p style="line-height: 1.5" data-id="line-height-number.p">a <code data-id="line-height-number.code">b</code> c<span class="base" data-id="line-height-number.base"></span></p></div>
 <div data-case data-id="line-height-code"><p data-id="line-height-code.p">a <code style="line-height: 30px" data-id="line-height-code.code">b</code> c<span class="base" data-id="line-height-code.base"></span></p></div>
 
+<div data-case data-id="atomic-helvetica"><p data-id="atomic-helvetica.p">a <code data-id="atomic-helvetica.code">b<span style="display:inline-block;font-family:Helvetica" data-id="atomic-helvetica.inner">c</span></code><span class="base" data-id="atomic-helvetica.base"></span></p></div>
+<div data-case data-id="atomic-small-code"><p data-id="atomic-small-code.p"><small data-id="atomic-small-code.small"><code style="display:inline-block" data-id="atomic-small-code.code">b</code></small><span class="base" data-id="atomic-small-code.base"></span></p></div>
+<div data-case data-id="atomic-em-chain"><p data-id="atomic-em-chain.p">a <span style="font-size:1.5em" data-id="atomic-em-chain.outer"><span style="display:inline-block" data-id="atomic-em-chain.block"><code data-id="atomic-em-chain.code">b</code></span></span><span class="base" data-id="atomic-em-chain.base"></span></p></div>
+<div data-case data-id="atomic-block-code"><p data-id="atomic-block-code.p">a <span style="display:inline-block" data-id="atomic-block-code.block"><code data-id="atomic-block-code.code">b</code></span><span class="base" data-id="atomic-block-code.base"></span></p></div>
+
+<div data-case data-id="calc-parent-em"><p style="font-size: calc(1.5em)" data-id="calc-parent-em.p">a <code data-id="calc-parent-em.code">b</code> c<span class="base" data-id="calc-parent-em.base"></span></p></div>
+<div data-case data-id="calc-code-1em"><p data-id="calc-code-1em.p">a <code style="font-size: calc(1em)" data-id="calc-code-1em.code">b</code> c<span class="base" data-id="calc-code-1em.base"></span></p></div>
+<div data-case data-id="calc-parent-percent"><p style="font-size: calc(150%)" data-id="calc-parent-percent.p">a <code data-id="calc-parent-percent.code">b</code> c<span class="base" data-id="calc-parent-percent.base"></span></p></div>
+<div data-case data-id="calc-code-percent"><p data-id="calc-code-percent.p">a <code style="font-size: calc(150%)" data-id="calc-code-percent.code">b</code> c<span class="base" data-id="calc-code-percent.base"></span></p></div>
+
+<!--scenes-->
+<div>
+  <p><code data-scene="transition" style="font-size: 1em; transition: font-size .3s linear">b</code></p>
+  <p><code data-scene="keyframes" style="animation: code-inline-grow .3s linear forwards">b</code></p>
+  <p><code data-scene="focus" tabindex="0" style="display: inline-block">bbbbbbbbbb</code></p>
+</div>
+
 <script>
   const rects = {}
   const fontSizes = {}
@@ -76,7 +97,40 @@
     rects[element.dataset.id] = [x - origin.x, y - origin.y, width, height]
     fontSizes[element.dataset.id] = getComputedStyle(element).fontSize
   }
-  document.body.setAttribute('data-rects', JSON.stringify({ rects, fontSizes }))
+
+  const size = (element) => parseFloat(getComputedStyle(element).fontSize)
+  const scenes = {}
+  // A transition or an animation is paused at 150 ms of its 300 and read, then finished and read.
+  const play = (element, animation) => {
+    animation.pause()
+    animation.currentTime = 150
+    const mid = size(element)
+    animation.finish()
+    return { mid, end: size(element) }
+  }
+  const transition = document.querySelector('[data-scene=transition]')
+  scenes.transitionRest = size(transition)
+  transition.style.fontSize = '1.5em'
+  scenes.transitionStart = size(transition)
+  scenes.transitionUp = play(transition, transition.getAnimations()[0])
+  transition.style.fontSize = '1em'
+  scenes.transitionBackStart = size(transition)
+  scenes.transitionDown = play(transition, transition.getAnimations()[0])
+
+  const keyframes = document.querySelector('[data-scene=keyframes]')
+  const grow = keyframes.getAnimations()[0]
+  grow.pause()
+  grow.currentTime = 0
+  scenes.keyframesStart = size(keyframes)
+  scenes.keyframes = play(keyframes, grow)
+
+  const focus = document.querySelector('[data-scene=focus]')
+  scenes.focusBefore = [size(focus), focus.getBoundingClientRect().width]
+  focus.focus()
+  scenes.focused = document.activeElement === focus
+  scenes.focusAfter = [size(focus), focus.getBoundingClientRect().width]
+
+  document.body.setAttribute('data-rects', JSON.stringify({ rects, fontSizes, scenes }))
 </script>
 </body>
 </html>
