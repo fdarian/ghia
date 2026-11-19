@@ -36,8 +36,8 @@ use super::text_selection::{
 };
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::caret::{caret_rect, caret_visible, until_phase_change};
-use crate::events::clipboard::{Copy, Cut, Paste, SelectAll};
 use crate::element_tree::EventPayload;
+use crate::events::clipboard::{Copy, Cut, Paste, SelectAll};
 use crate::events::keyboard::InputRouting;
 use crate::events::sync_dispatch;
 use crate::renderer::{bubbling_event_payload, EventCallback, GpuixView};

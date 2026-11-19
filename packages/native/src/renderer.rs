@@ -2545,8 +2545,10 @@ impl GpuixRenderer {
                         .as_ref()
                         .map(|platform| platform.pump_events_reporting_step())
                 });
-                let running = pumped.as_ref().is_some_and(|pumped| pumped.running);
-                let pump_stepped_a_link = pumped.as_ref().is_some_and(|pumped| pumped.link_stepped);
+                let running = pumped.as_ref().is_some_and(|outcome| outcome.is_some());
+                let pump_stepped_a_link = pumped
+                    .flatten()
+                    .is_some_and(|outcome| outcome.stepped);
                 #[cfg(feature = "test-support")]
                 {
                     let delay = self
