@@ -12,6 +12,12 @@ import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 const ROW = 40
 const ROWS = 10
 const CLIP = { width: 200, height: 100 }
+/**
+ * A scroller records the subtrees it can move up to three of its viewports past its clip once it is laid out (and under
+ * `GPUIX_RETAIN_VERIFY`, which makes every row a root), and those are built, not skipped. What a test needs skipped in a
+ * scroller lies past the clip and that.
+ */
+const SCROLLER_RECORDS_TO = CLIP.height * 4
 
 function mount(code: () => unknown) {
   const app = createTestRoot({ width: 300, height: 400 })
@@ -74,8 +80,7 @@ describe.skipIf(!hasNativeTestRenderer)("content outside a clip", () => {
     let target!: HostElement
     const app = mount(() => (
       <div ref={(host) => (scroller = host)} style={{ ...CLIP, overflow: "auto" }}>
-        {/* Past the clip and the overscan of the rows a scroll can move. */}
-        <div style={{ width: 150, height: 250, flexShrink: 0 }} />
+        <div style={{ width: 150, height: SCROLLER_RECORDS_TO + ROW, flexShrink: 0 }} />
         <div ref={(host) => (target = host)} style={{ width: 150, height: 30, flexShrink: 0 }} />
       </div>
     ))
@@ -90,7 +95,8 @@ describe.skipIf(!hasNativeTestRenderer)("content outside a clip", () => {
     expect(intersections).toEqual([false])
     expect(sizes).toEqual([30])
 
-    scroller.scrollTop = 200
+    // The most it scrolls: the target is its last 30 of 470.
+    scroller.scrollTop = SCROLLER_RECORDS_TO + ROW + 30 - CLIP.height
     app.renderer.flush()
     app.renderer.dispatchNativeEvents()
     expect(intersections).toEqual([false, true])
@@ -99,18 +105,33 @@ describe.skipIf(!hasNativeTestRenderer)("content outside a clip", () => {
 
   it("keeps Tab working into a focusable that is skipped, and scrolls it into view", () => {
     let scroller!: HostElement
+    let skipped!: HostElement
     const app = mount(() => (
       <div ref={(host) => (scroller = host)} style={{ ...CLIP, overflow: "scroll" }}>
-        <For each={[0, 1, 2, 3, 4, 5]}>
-          {(index) => <div testId={`i${index}`} tabIndex={0} style={{ width: 150, height: ROW, flexShrink: 0 }} />}
-        </For>
+        <div testId="first" tabIndex={0} style={{ width: 150, height: ROW, flexShrink: 0 }} />
+        <div style={{ width: 150, height: SCROLLER_RECORDS_TO, flexShrink: 0 }} />
+        <div
+          testId="skipped"
+          ref={(host) => (skipped = host)}
+          tabIndex={0}
+          style={{ width: 150, height: ROW, flexShrink: 0 }}
+        />
       </div>
     ))
     expect(app.skippedPerFrame()).toBeGreaterThan(0)
     const focused = () => app.renderer.getElement(app.renderer.getFocusedElementId())?.testId ?? null
-    app.renderer.simulateKeystrokes("Tab Tab Tab Tab")
-    expect(focused()).toBe("i3")
+    app.renderer.simulateKeystrokes("Tab")
+    expect(focused()).toBe("first")
+    app.renderer.simulateKeystrokes("Tab")
+    expect(focused()).toBe("skipped")
     expect(scroller.scrollTop).toBeGreaterThan(0)
+    const shown = skipped.getBoundingClientRect()
+    expect(shown.y).toBeGreaterThanOrEqual(0)
+    expect(shown.y + shown.height).toBeLessThanOrEqual(CLIP.height)
+    // `first` is skipped now, as far above the clip as `skipped` was below it.
+    app.renderer.simulateKeystrokes("Shift+Tab")
+    expect(focused()).toBe("first")
+    expect(scroller.scrollTop).toBe(0)
     app.unmount()
   })
 })
