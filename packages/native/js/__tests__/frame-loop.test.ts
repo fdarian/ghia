@@ -210,4 +210,118 @@ describe("startFrameLoop without display-link wakes", () => {
     loop.stop()
     expect(ticks).toBe(4)
   })
+
+  it("draws the input frame from a setImmediate after the tick and its microtasks, once", async () => {
+    const events: string[] = []
+    let pending = true
+    const renderer = {
+      ...wakeableRenderer(() => {
+        events.push("tick")
+        queueMicrotask(() => events.push("microtask"))
+        return true
+      }),
+      startedLinksPending: () => pending,
+      stepStartedLinks: () => {
+        events.push("frame")
+        pending = false
+        return true
+      },
+    }
+    const loop = startFrameLoop(renderer)
+    // A second tick before the immediate runs does not queue a second frame call.
+    renderer.wake?.()
+    await nextImmediate()
+    await nextImmediate()
+    loop.stop()
+    expect(events.filter((event) => event === "frame")).toHaveLength(1)
+    expect(events.slice(0, 3)).toEqual(["tick", "microtask", "frame"])
+  })
+
+  it("makes no frame call when no link is waiting, and adds no tick", async () => {
+    let ticks = 0
+    let calls = 0
+    const loop = startFrameLoop({
+      ...wakeableRenderer(() => {
+        ticks += 1
+        return true
+      }),
+      startedLinksPending: () => false,
+      stepStartedLinks: () => {
+        calls += 1
+        return false
+      },
+    })
+    for (let immediates = 0; immediates < 3; immediates++) await nextImmediate()
+    loop.stop()
+    expect(calls).toBe(0)
+    expect(ticks).toBe(1)
+  })
+
+  it("does not draw the input frame of a stopped loop", async () => {
+    let ticks = 0
+    let calls = 0
+    let pending = 1
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          return true
+        },
+        keyEventPending: () => pending-- > 0,
+        startedLinksPending: () => true,
+        stepStartedLinks: () => {
+          calls += 1
+          return true
+        },
+      },
+      { frameMs: 10_000 },
+    )
+    loop.stop()
+    await nextImmediate()
+    expect(calls).toBe(0)
+    expect(ticks).toBe(1)
+  })
+
+  it("draws the input frame of a timer loop before the key's re-tick", async () => {
+    const events: string[] = []
+    let pending = 1
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          events.push("tick")
+          return true
+        },
+        keyEventPending: () => pending-- > 0,
+        startedLinksPending: () => events.length === 1,
+        stepStartedLinks: () => {
+          events.push("frame")
+          return true
+        },
+      },
+      { frameMs: 10_000 },
+    )
+    await nextImmediate()
+    await nextImmediate()
+    loop.stop()
+    expect(events).toEqual(["tick", "frame", "tick"])
+  })
+
+  it("reports an error the frame call throws and keeps the loop", async () => {
+    const errors: unknown[] = []
+    const loop = startFrameLoop(
+      {
+        ...wakeableRenderer(() => true),
+        startedLinksPending: () => true,
+        stepStartedLinks: () => {
+          throw new Error("refused")
+        },
+      },
+      { onError: (error) => errors.push(error) },
+    )
+    await nextImmediate()
+    loop.stop()
+    expect(errors).toHaveLength(1)
+  })
 })
