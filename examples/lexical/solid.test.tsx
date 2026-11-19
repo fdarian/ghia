@@ -19,7 +19,7 @@ import { registerRichText } from '@lexical/rich-text'
 import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND, ListItemNode, ListNode, registerList } from '@lexical/list'
 import { createEmptyHistoryState, registerHistory } from '@lexical/history'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/solid/testing'
-import { markerInk, markerPixels, readScreenshot } from './screenshot'
+import { markerInk, markerPixels, readScreenshot, screenshotFile } from './screenshot'
 
 // Vanilla Lexical (createEditor, registerRichText, registerHistory, setRootElement) inside a @ghia/solid component,
 // running unchanged on Ghia's contenteditable support. The editor lives across the steps, so this file mounts its own root instead of using
@@ -655,7 +655,7 @@ describeNative('vanilla Lexical lists in @ghia/solid on Ghia', () => {
 
   const items = (): HTMLElement[] => [...element.querySelectorAll('li')] as HTMLElement[]
   const markers = (name: string): { ink: number[]; shapes: string[] } => {
-    const file = `${import.meta.dirname}/screens/lists-solid-${name}.png`
+    const file = screenshotFile(`lists-solid-${name}.png`)
     window.renderer.captureScreenshot(file)
     const shot = readScreenshot(file)
     const scale = shot.width / window.renderer.getWindowSize().width

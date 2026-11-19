@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import path from 'node:path'
 import zlib from 'node:zlib'
 
 /** A decoded screenshot (8-bit RGBA, not interlaced, which is what the test renderer writes). */
@@ -6,6 +7,13 @@ export interface Screenshot {
   width: number
   height: number
   at(x: number, y: number): [number, number, number, number]
+}
+
+/** Where a test's screenshot goes: `lexical/screens/` is gitignored and absent from a fresh checkout. */
+export function screenshotFile(name: string): string {
+  const dir = path.join(import.meta.dirname, 'screens')
+  fs.mkdirSync(dir, { recursive: true })
+  return path.join(dir, name)
 }
 
 export function readScreenshot(file: string): Screenshot {

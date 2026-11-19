@@ -25,7 +25,7 @@ import { ListItemNode, ListNode, INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_L
 import { ListPlugin } from '@lexical/react/LexicalListPlugin'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/react/testing'
 import { settle } from '../base-ui/harness'
-import { markerInk, markerPixels, readScreenshot } from './screenshot'
+import { markerInk, markerPixels, readScreenshot, screenshotFile } from './screenshot'
 
 // Real Lexical (LexicalComposer, RichTextPlugin, ContentEditable, HistoryPlugin, OnChangePlugin) running unchanged on
 // Ghia's contenteditable support. Runs on the plugins an app's Vite config has, which `vitest.config.ts` cannot share:
@@ -674,7 +674,7 @@ describeNative('Lexical (React bindings) lists on Ghia', () => {
 
   const items = (): HTMLElement[] => [...(listEditor!.getRootElement() as HTMLElement).querySelectorAll('li')] as HTMLElement[]
   const markers = (name: string): { ink: number[]; shapes: string[] } => {
-    const file = `${import.meta.dirname}/screens/lists-react-${name}.png`
+    const file = screenshotFile(`lists-react-${name}.png`)
     window.renderer.captureScreenshot(file)
     const shot = readScreenshot(file)
     const scale = shot.width / window.renderer.getWindowSize().width
