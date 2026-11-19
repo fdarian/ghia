@@ -13,7 +13,7 @@ describe("HTML tags", () => {
   })
 
   it("leave out the elements Ghia builds itself", () => {
-    for (const type of ["div", "span", "label", "form", "img", "svg", "input", "textarea", "code", "select", "nativeview"]) {
+    for (const type of ["div", "span", "label", "form", "img", "svg", "input", "textarea", "code-block", "select", "nativeview"]) {
       expect(isHtmlTag(type), type).toBe(false)
     }
   })

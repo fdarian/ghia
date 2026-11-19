@@ -8639,7 +8639,7 @@ impl Inherited {
         self.custom = custom;
         self.lengths = self
             .lengths
-            .descend(style.and_then(|style| style.font_size.as_ref()), self.above_root);
+            .descend_style(style, self.above_root);
         self.above_root = false;
         self.font_features = None;
         self.font_variations = None;
@@ -13765,8 +13765,9 @@ fn build_atomics(
             }
             let overlay = (!chain.is_empty()).then(|| {
                 let mut overlay = StyleDesc::inherited_through(&chain);
-                if overlay.font_size.is_some() {
-                    // Resolved here: `em` means the font of the box that declared it.
+                if overlay.font_size.is_some() || inherited.lengths.font_size != ctx.inherited.lengths.font_size {
+                    // Resolved here: `em` means the font of the box that declared it. A size that only the monospace
+                    // family scaled is not declared by any box, and the atomic still inherits it.
                     overlay.font_size = Some(crate::css::length::LinearLength::px(inherited.lengths.font_size));
                 }
                 Box::new(overlay)
@@ -13784,7 +13785,7 @@ fn build_atomics(
             });
             let lengths = inherited
                 .lengths
-                .descend(declared.as_ref().and_then(|style| style.font_size.as_ref()), false);
+                .descend_style(declared.as_deref(), false);
             let line_height = declared
                 .as_ref()
                 .and_then(|style| style.line_height.clone())
@@ -14127,7 +14128,7 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
     if let Some(color) = colors.declared() {
         el = el.text_color(color);
     }
-    if style.font_size.is_some() {
+    if lengths.sets_font_size(style) {
         el = el.text_size(gpui::px(lengths.font_size as f32));
     }
     if let Some(ref family) = style.font_family {

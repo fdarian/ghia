@@ -43,10 +43,6 @@ The protocol has no `eval`, so it reads the painted tree (tags, text, bounds), a
 
 ## Known gaps on Ghia
 
-- **`<code>` is Ghia's syntax-highlighted block,** not the inline HTML element. Lexical renders the Code format as `<code>`, so text
-  formatted as code draws as an empty block until that is resolved. The Code button is there as on the web; the seeded document
-  leaves it out.
-
 The automation protocol cannot do these, so they are for you to try by hand:
 
 - **Double click** a word, then **triple click** a paragraph (the protocol sends every press with a click count of 1). Then Cmd+B.

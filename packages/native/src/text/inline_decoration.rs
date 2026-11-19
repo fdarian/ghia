@@ -237,7 +237,7 @@ pub fn of(
             };
             let declared = motion.declared(*id, base, states(*id, base));
             colors = colors.descend(&declared);
-            lengths = lengths.descend(declared.font_size.as_ref(), false);
+            lengths = lengths.descend_style(Some(&*declared), false);
             if declared.display.as_deref() == Some("contents") {
                 continue;
             }

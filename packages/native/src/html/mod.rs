@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn the_tags_ghia_builds_itself_are_not_in_the_table() {
-        for tag in ["div", "span", "label", "form", "img", "svg", "input", "textarea", "code", "select", "#text", "nativeview"] {
+        for tag in ["div", "span", "label", "form", "img", "svg", "input", "textarea", "code-block", "select", "#text", "nativeview"] {
             assert!(!is_tag(tag), "<{tag}> has a built-in meaning");
         }
     }

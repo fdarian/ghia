@@ -6986,7 +6986,7 @@ HTML tags (`p`, `h1`, `ul`, `a`, `button`, `table` and the rest) are elements to
 
 ## HTML tags
 
-Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`, `<table>` and the rest of the tags below are host elements that look, lay out and behave as Chrome's defaults make them. A tag is a `div` (or a `span`, for the inline ones) with Chrome's user agent style under it, an implicit [accessibility role](#accessibility) and, for `button` and `a`, focus and key activation. Your own `style` wins over the default property by property, and so does [`<UniversalStyle>`](#universal-style) (the default is under both). `div`, `span`, `label`, `form`, `img`, `svg`, `input`, `textarea`, `code` and `select` are Ghia's own elements and take no part in this table: `code` is the [syntax-highlighted block](#code), not HTML's inline `<code-block>`, and `select` is not an HTML select.
+Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`, `<table>` and the rest of the tags below are host elements that look, lay out and behave as Chrome's defaults make them. A tag is a `div` (or a `span`, for the inline ones) with Chrome's user agent style under it, an implicit [accessibility role](#accessibility) and, for `button` and `a`, focus and key activation. Your own `style` wins over the default property by property, and so does [`<UniversalStyle>`](#universal-style) (the default is under both). `div`, `span`, `label`, `form`, `img`, `svg`, `input`, `textarea` and `select` are Ghia's own elements and take no part in this table: `select` is not an HTML select. `<code>` is HTML's inline element, as in a browser (the syntax-highlighted block is [`<code-block>`](#code-block); an app that used `<code code=... language=...>` renames the tag).
 
 ```tsx
 <article>
@@ -7010,7 +7010,7 @@ Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`,
 | `li` | `list-item` | role `listitem`; see [Lists](#lists) |
 | `dl`, `dd` | `block` | `dl` has `1em` block margins; `dd` has a `40px` start margin; `dl`, `dt` and `dd` are a description list, a term and a definition |
 | `figure`, `blockquote` | `block` | `1em` block margins and `40px` inline margins; roles `figure` and `blockquote` |
-| `pre` | `block` | `white-space: pre`, `1em` block margins, `Menlo` at the inherited size |
+| `pre` | `block` | `white-space: pre`, `1em` block margins, the generic `monospace` family (see [Monospace size](#monospace-size)) |
 | `address` | `block` | Italic |
 | `fieldset`, `hr` | `block` | A `2px` groove border for the fieldset (role `group`, as for `details`); a `1px` inset grey rule with `0.5em` margins for `hr` (role `separator`) |
 | `dialog` | `none` | Closed: see [Deviations](#html-tag-deviations) |
@@ -7019,7 +7019,7 @@ Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`,
 | `u`, `s` | `inline` | Underline, strikethrough |
 | `small`, `sub`, `sup` | `inline` | `0.8333em`; `sub` and `sup` also move the baseline |
 | `mark` | `inline` | Yellow background, black text |
-| `kbd`, `samp` | `inline` | `Menlo` at the inherited size |
+| `code`, `kbd`, `samp`, `tt` | `inline` | The generic `monospace` family (see [Monospace size](#monospace-size)); `code` has the role `code` |
 | `a`, `abbr`, `q`, `time` | `inline` | Nothing |
 | `br`, `wbr` | `inline` | `br` is a line break; `wbr` is a place where a line may break |
 | `button` | `inline-block` | Chrome's non-native button look (see below); a tab stop; key and form behaviour |
@@ -7029,11 +7029,15 @@ Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`,
 
 ### Inline and block
 
-A tag whose default `display` is `inline` takes part in a paragraph like a `<span>` (see [Inline text](#inline-text)): `a`, `strong`, `em`, `b`, `i`, `u`, `s`, `small`, `mark`, `abbr`, `cite`, `q`, `sub`, `sup`, `time`, `kbd`, `var`, `samp`, `br` and `wbr`. A run of strings and inline tags is one paragraph that wraps, selects and is searched as one. A block tag in the middle of the run ends the paragraph and starts the next after it. `style={{ display }}` overrides the default either way: `<em style={{ display: 'block' }}>` is a block, and `<p style={{ display: 'inline' }}>` joins its paragraph.
+A tag whose default `display` is `inline` takes part in a paragraph like a `<span>` (see [Inline text](#inline-text)): `a`, `strong`, `em`, `b`, `i`, `u`, `s`, `small`, `mark`, `abbr`, `cite`, `q`, `sub`, `sup`, `time`, `code`, `kbd`, `var`, `samp`, `tt`, `br` and `wbr`. A run of strings and inline tags is one paragraph that wraps, selects and is searched as one. A block tag in the middle of the run ends the paragraph and starts the next after it. `style={{ display }}` overrides the default either way: `<em style={{ display: 'block' }}>` is a block, and `<p style={{ display: 'inline' }}>` joins its paragraph.
 
 An element is an inline box when its effective `display` is `inline`, whatever its tag: it shows what a `<span>` shows, and a motion value it binds is limited to what a span can animate (see [Animate an inline span](#animate-an-inline-span)). An `<a>` or `<span>` with `display: 'block'` is a block, so it takes a transform and a motion value in `style.x`; a `<div>` with `display: 'inline'` is an inline box and does not. `display: "inline-block"` makes any tag an [atomic inline](#inline-block-inline-flex-inline-grid-and-inline-table), which is what `button` is by default, and a `<button>` stays one when its `display` says `inline`: it computes to `inline-block`, as in Chrome.
 
 `<br>` is a line feed whatever `white-space` is, and a space before it is dropped as at the end of a line. `<wbr>` adds a zero width space, which is not read out.
+
+### Monospace size
+
+`pre`, `code`, `kbd`, `samp` and `tt` use the generic `monospace` (Menlo on macOS), and, as in Chrome, it is drawn at 13px where the text around it is 16px: `<p>a <code>b</code></p>` has a 13px `code` in a 16px paragraph. The rule is Chrome's: a `font-size` that is not an absolute length is scaled by 13/16 where an element's `font-family` becomes the generic `monospace` alone, and by 16/13 where it stops being (a `span` with `font-family: Menlo` inside a `code` is 16px again). So `code` in a `font-size: 150%` parent (24px) is 19.5px; in a parent of `font-size: 20px`, `2rem` or `calc(1em + 4px)` it is the same size as the parent, since a size with a `px`, `rem` or viewport part is absolute, and so is everything that inherits it. An `em` or `%` size set on the element itself is scaled too (`font-size: 1em` on a `code` is 13px, `2em` is 26px). To turn it off, name more than the generic: `font-family: monospace, monospace` is 16px, as is `Menlo`, `ui-monospace` and a quoted `'monospace'`. The scaled size is the element's computed `font-size`, which `em` and `getComputedStyle` read.
 
 ### The `<button>` tag
 
@@ -7073,7 +7077,7 @@ What differs from Chrome is listed once in [deviations.md](./fork/deviations.md#
 - `a` has no link colour or underline (`a:any-link` needs the `href` attribute). Write the style you want.
 - `dialog` is always `display: none`: `open` is not forwarded. Set `display: "block"` yourself to show one.
 - `q` has no quotes, `legend` does not sit on the fieldset's border, `details` has no open state, `abbr[title]` has no dotted underline and a nested `h1` is not smaller.
-- `pre`, `kbd` and `samp` use `Menlo` at the inherited size, not the generic `monospace` at `13px`.
+- `font-size` has no keywords (`larger`, `xx-large`), so Chrome's monospace size below holds for lengths, `em` and `%` only.
 - `<fieldset disabled>` does not disable its controls (see [Form control state](#form-control-state-disabled-enabled)).
 - `th` is always a column header (`scope` is not forwarded).
 

@@ -124,6 +124,14 @@ impl LinearLength {
         Self::from_terms(terms)
     }
 
+    /// Whether a `font-size` of this length is absolute in Chrome's sense: any part but `em` and `%`, which stay
+    /// relative to the parent's size.
+    fn is_absolute_font_size(&self) -> bool {
+        LengthUnit::ALL
+            .iter()
+            .any(|unit| !matches!(unit, LengthUnit::Percent | LengthUnit::Em) && self.term(*unit) != 0.0)
+    }
+
     /// The term of `unit`.
     pub(crate) fn term(&self, unit: LengthUnit) -> f64 {
         match &self.0 {
@@ -244,6 +252,17 @@ impl LinearLength {
 /// `Window::rem_size` is 16px until set, which gpuix never does.
 pub(crate) const INITIAL_FONT_SIZE: f64 = 16.0;
 
+/// Chrome's default fixed font size, the size of the generic `monospace` family where the default font size is
+/// [`INITIAL_FONT_SIZE`].
+const MONOSPACE_FONT_SIZE: f64 = 13.0;
+
+/// Whether a `font-family` list is the generic `monospace` alone, which is what makes Chrome scale a font size that
+/// is not an absolute length (`monospace, monospace` and `Menlo, monospace` are not: that is the trick that turns the
+/// scaling off).
+fn is_generic_monospace(font_family: &str) -> bool {
+    font_family.trim().eq_ignore_ascii_case("monospace")
+}
+
 /// What a length needs besides itself to become px. One context describes one
 /// element; `descend` makes the context its children inherit.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -255,6 +274,11 @@ pub(crate) struct LengthContext {
     parent_font_size: f64,
     /// The computed `font-size` of the root element, which `rem` means.
     pub(crate) root_font_size: f64,
+    /// Whether the computed `font-family` is the generic `monospace` alone.
+    monospace: bool,
+    /// Whether the `font-size` is, or is inherited from, an absolute length (`px`, `rem`, a viewport unit): Chrome's
+    /// monospace scaling leaves such a size alone.
+    absolute_size: bool,
     pub(crate) viewport_width: f64,
     pub(crate) viewport_height: f64,
     /// The content box of the nearest ancestor query container that contains the
@@ -271,6 +295,7 @@ impl LengthContext {
         fp.f64(self.font_size);
         fp.f64(self.parent_font_size);
         fp.f64(self.root_font_size);
+        fp.bits(&[self.monospace, self.absolute_size]);
         fp.f64(self.viewport_width);
         fp.f64(self.viewport_height);
         fp.option_f64(self.container_width);
@@ -283,6 +308,8 @@ impl LengthContext {
             font_size: INITIAL_FONT_SIZE,
             parent_font_size: INITIAL_FONT_SIZE,
             root_font_size: INITIAL_FONT_SIZE,
+            monospace: false,
+            absolute_size: false,
             viewport_width,
             viewport_height,
             container_width: None,
@@ -310,13 +337,44 @@ impl LengthContext {
     /// fraction of it. `rem` is the root's, except for the root element itself,
     /// whose `rem` is still the initial size. No declaration inherits.
     pub(crate) fn descend(&self, font_size: Option<&LinearLength>, is_root: bool) -> Self {
-        let computed = self.computed_font_size(font_size);
+        self.descend_font(font_size, None, is_root)
+    }
+
+    /// [`descend`](Self::descend) for an element with `style`, whose `font-family` decides Chrome's monospace
+    /// scaling too.
+    pub(crate) fn descend_style(&self, style: Option<&crate::style::StyleDesc>, is_root: bool) -> Self {
+        self.descend_font(
+            style.and_then(|style| style.font_size.as_ref()),
+            style.and_then(|style| style.font_family.as_deref()),
+            is_root,
+        )
+    }
+
+    /// Chrome scales a font size that is not an absolute length by 13/16 when the family becomes the generic
+    /// `monospace` alone, and back by 16/13 when it stops being (`code` in a `font-size: 150%` parent is 19.5px of
+    /// 24, a `font-family: Menlo` span in it 24 again), so the default `code` is 13px beside 16px text. An absolute
+    /// size is never scaled, and neither does a family list longer than `monospace`.
+    fn descend_font(&self, font_size: Option<&LinearLength>, font_family: Option<&str>, is_root: bool) -> Self {
+        let monospace = font_family.map_or(self.monospace, is_generic_monospace);
+        let absolute_size = self.absolute_size || font_size.is_some_and(LinearLength::is_absolute_font_size);
+        let mut computed = self.computed_font_size(font_size);
+        if monospace != self.monospace && !absolute_size {
+            computed *= if monospace { MONOSPACE_FONT_SIZE / INITIAL_FONT_SIZE } else { INITIAL_FONT_SIZE / MONOSPACE_FONT_SIZE };
+        }
         Self {
             font_size: computed,
             parent_font_size: self.font_size,
             root_font_size: if is_root { computed } else { self.root_font_size },
+            monospace,
+            absolute_size,
             ..*self
         }
+    }
+
+    /// Whether an element with `style` has to set its text size to [`font_size`](Self::font_size): it declares one,
+    /// or its family put it through the monospace scaling.
+    pub(crate) fn sets_font_size(&self, style: &crate::style::StyleDesc) -> bool {
+        style.font_size.is_some() || (style.font_family.is_some() && self.font_size != self.parent_font_size)
     }
 
     /// The context of a state refinement (`focusVisible`) of the element that has
@@ -693,6 +751,8 @@ mod tests {
         font_size: 20.0,
         parent_font_size: 10.0,
         root_font_size: 16.0,
+        monospace: false,
+        absolute_size: false,
         viewport_width: 800.0,
         viewport_height: 600.0,
         container_width: None,
@@ -744,6 +804,83 @@ mod tests {
         let resized = initial.with_viewport(300.0, 200.0);
         assert_eq!((resized.viewport_width, resized.viewport_height), (300.0, 200.0));
         assert_eq!(resized.font_size, INITIAL_FONT_SIZE);
+    }
+
+    fn styled(json: &str) -> crate::style::StyleDesc {
+        crate::retained_tree::parse_style(json.as_bytes()).expect("a style")
+    }
+
+    /// The font sizes of an element with each of `styles` in a chain below `parent`.
+    fn sizes(parent: LengthContext, styles: &[&str]) -> Vec<f64> {
+        let mut context = parent;
+        styles
+            .iter()
+            .map(|json| {
+                context = context.descend_style(Some(&styled(json)), false);
+                context.font_size
+            })
+            .collect()
+    }
+
+    // The expected sizes are the ones headless Chrome computes (`code-inline-oracle.html`).
+    const MONOSPACE: &str = r#"{"fontFamily": "monospace"}"#;
+
+    #[test]
+    fn the_generic_monospace_is_13px_where_the_default_size_is_16() {
+        let root = context(800.0, 600.0);
+        assert_eq!(sizes(root, &[MONOSPACE]), [13.0]);
+        assert_eq!(sizes(root, &[r#"{"fontFamily": "MONOSPACE"}"#]), [13.0]);
+        assert_eq!(sizes(root, &[MONOSPACE, "{}", MONOSPACE]), [13.0, 13.0, 13.0]);
+    }
+
+    #[test]
+    fn a_family_list_that_is_more_than_the_generic_monospace_does_not_scale() {
+        let root = context(800.0, 600.0);
+        for family in ["monospace, monospace", "Menlo, monospace", "monospace, Menlo", "monospace, sans-serif", "'monospace'", "ui-monospace", "Menlo"] {
+            let style = format!(r#"{{"fontFamily": "{family}"}}"#);
+            assert_eq!(sizes(root, &[style.as_str()]), [16.0], "{family}");
+        }
+    }
+
+    #[test]
+    fn leaving_the_monospace_family_scales_back() {
+        let root = context(800.0, 600.0);
+        assert_eq!(sizes(root, &[MONOSPACE, r#"{"fontFamily": "Menlo"}"#, "{}"]), [13.0, 16.0, 16.0]);
+    }
+
+    #[test]
+    fn a_relative_size_is_scaled_and_an_absolute_one_is_not() {
+        let root = context(800.0, 600.0);
+        assert_eq!(sizes(root, &[r#"{"fontSize": "150%"}"#, MONOSPACE]), [24.0, 19.5]);
+        assert_eq!(sizes(root, &[r#"{"fontSize": "1.5em"}"#, MONOSPACE, r#"{"fontFamily": "Menlo"}"#]), [24.0, 19.5, 24.0]);
+        for absolute in ["20px", "2rem", "calc(1em + 4px)", "2vw"] {
+            let style = format!(r#"{{"fontSize": "{absolute}"}}"#);
+            let size = sizes(root, &[style.as_str()])[0];
+            assert_eq!(sizes(root, &[style.as_str(), MONOSPACE]), [size, size], "{absolute}");
+        }
+    }
+
+    #[test]
+    fn a_size_beside_the_family_is_scaled_unless_it_is_absolute() {
+        let root = context(800.0, 600.0);
+        let with = |size: &str| {
+            let style = format!(r#"{{"fontFamily": "monospace", "fontSize": "{size}"}}"#);
+            sizes(root, &[style.as_str()])[0]
+        };
+        assert_eq!((with("1em"), with("100%"), with("2em")), (13.0, 13.0, 26.0));
+        assert_eq!((with("20px"), with("0px")), (20.0, 0.0));
+        let in_monospace = sizes(root, &[MONOSPACE, r#"{"fontSize": "2em"}"#]);
+        assert_eq!(in_monospace, [13.0, 26.0]);
+    }
+
+    #[test]
+    fn a_state_that_declares_no_family_keeps_the_scaled_size() {
+        let element = context(800.0, 600.0).descend_style(Some(&styled(MONOSPACE)), false);
+        assert_eq!(element.for_state(None).font_size, 13.0);
+        assert!(element.sets_font_size(&styled(MONOSPACE)));
+        assert!(!element.sets_font_size(&styled("{}")));
+        let plain = context(800.0, 600.0).descend_style(Some(&styled(r#"{"fontFamily": "Menlo"}"#)), false);
+        assert!(!plain.sets_font_size(&styled(r#"{"fontFamily": "Menlo"}"#)));
     }
 
     #[test]
