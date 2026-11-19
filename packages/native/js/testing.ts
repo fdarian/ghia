@@ -22,6 +22,9 @@ import {
   type MotionValuePlayback,
   type PatchCounters,
   type WebAnimationEffectInfo,
+  type CaretPoint,
+  type PaintedNodeSelection,
+  type TextRect,
   type WebAnimationInfo,
   type WebAnimationKeyframeInfo,
   type WebAnimationTimingUpdate,
@@ -266,6 +269,10 @@ interface NativeTestRendererApi
   requiresTick(): boolean
   tick(): boolean
   postNativeEvent(kind: string, x?: number | null, y?: number | null): void
+  postNativeKeys(text: string): void
+  pumpNativeEvents(): void
+  setYieldAfterKeyEvent(yieldAfter: boolean): void
+  keyEventPending(): boolean
   simulateKeystrokes(keystrokes: string): void
   setSyncEventHandler(handler: ((event: EventPayload) => SyncDispatchResult) | null): void
   dispose(): void
@@ -494,6 +501,12 @@ interface NativeTestRendererApi
   getSelectedText(): string | null
   getPaintedText(): string[]
   getPaintedHighlights(): HighlightMatch[]
+  getPaintedNodeSelection(): PaintedNodeSelection
+  getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): TextRect[]
+  getInputMethodBounds(hostId: number, start: number, end: number): TextRect | null
+  getInputMethodIndexAt(hostId: number, x: number, y: number): number | null
+  caretPositionFromPoint(x: number, y: number): CaretPoint | null
+  moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | null): CaretPoint | null
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
@@ -857,6 +870,34 @@ export class TestRenderer implements NativeRenderer {
     this.native.postNativeEvent(kind, x, y)
   }
 
+  /** Queues a `keyDown` and a `keyUp` for each letter or space of `text` in AppKit's queue for
+   *  the test window (`-[NSApp postEvent:atStart:NO]`), all of them before the next pump. Not
+   *  delivered by `tick()` one key at a time: `pumpNativeEvents()` is the live window's pump. */
+  postNativeKeys(text: string): void {
+    this.native.postNativeKeys(text)
+  }
+
+  /** One call of the pump a live window's `tick()` runs. It ends around the first key event it
+   *  reaches (`setYieldAfterKeyEvent`, on by default), so queued keys take one call each, with a
+   *  turn of the event loop between them for the app's microtasks, as the frame loop gives a
+   *  live window. Then hands the events the handlers queued to JS, as `tick()` does. */
+  pumpNativeEvents(): void {
+    invalidateComputedStyles()
+    this.native.pumpNativeEvents()
+    this.dispatchNativeEvents()
+  }
+
+  /** Whether the pump ends after a key event (see `pumpNativeEvents`). A setting of this renderer. */
+  setYieldAfterKeyEvent(yieldAfter: boolean): void {
+    this.native.setYieldAfterKeyEvent(yieldAfter)
+  }
+
+  /** Whether the last `pumpNativeEvents` left a key queued or ended after sending one: the
+   *  live frame loop ticks again at once then. */
+  keyEventPending(): boolean {
+    return this.native.keyEventPending()
+  }
+
   // ── Native end-to-end simulation ────────────────────────────────
   // These methods go through the full GPUI pipeline:
   //   native simulate → GPUI dispatch → hit test → event handler →
@@ -899,6 +940,8 @@ export class TestRenderer implements NativeRenderer {
    *  Unlike `nativeSimulateKeystrokes`, this focuses nothing first, which is
    *  the only way to test that `autoFocus` (or a click) actually moved focus. */
   simulateKeystrokes(keystrokes: string): void {
+    // What a script changed since the last flush (the selection a key's text goes to) is native's before the key is.
+    flushPendingMutations(this)
     this.native.flushIfDirty()
     // Events already queued reach JS before a key does, as on a live window.
     // Delivered after it, they would undo what the key's own synchronous focus
@@ -995,19 +1038,23 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
-  /** Focus a text input, then run an input method composition in it, one step
-   *  per key. Each step is what macOS does for a key the input method takes: a
-   *  `keydown` with `key` `"Process"`, the composition events and the `change`
-   *  of the edit, then the `keyup` of that key. A text input is the only element
-   *  that composes, so `elementId` must be one.
-   *  @param elementId - the `<input>` or `<textarea>` to compose in
+  /** Focus a text input or an editing host (`contenteditable`), then run an input method
+   *  composition in it, one step per key. Each step is what macOS does for a key the input
+   *  method takes: a `keydown` with `key` `"Process"`, the composition events and the edit
+   *  (`change` of an input, `beforeinput` and `input` of a host), then the `keyup` of that key.
+   *  Composing needs the platform's text input, which only these two have: a host that is
+   *  focused with the selection in it, or none of it is reached.
+   *  @param elementId - the `<input>`, `<textarea>` or editing host to compose in
    *  @param steps - the keys the input method consumes, in order */
   simulateComposition(elementId: number, steps: readonly CompositionStep[]): void {
+    flushPendingMutations(this)
     this.native.flushIfDirty()
     this.native.focusElement(elementId)
     // Focus events are queued but a key is delivered synchronously: let the
     // focus handlers run first, as in a browser.
     this.dispatchNativeEvents()
+    // The text input of an editing host is registered by the frame that paints it focused.
+    this.native.flushIfDirty()
     for (const step of steps) {
       this.native.simulateImeKeyDown(
         step.key,
@@ -2253,6 +2300,43 @@ export class TestRenderer implements NativeRenderer {
    *  draw one box per visual row, so each entry carries its `rects`. */
   getPaintedHighlights(): HighlightMatch[] {
     return this.native.getPaintedHighlights()
+  }
+
+  /**
+   * What the last frame drew for the node selection (`getSelection()` over nodes): `washes` has one entry for
+   * each washed paragraph, with the washed text as UTF-16 offsets into the paragraph and a box for each line,
+   * and `caret` the caret of the editing host (its box in window coordinates, and whether it is in the lit
+   * phase of its blink) or nothing when none was painted. It reads what the frame painted, so a wash or a caret
+   * that did not follow a change shows here as it does on screen.
+   */
+  getPaintedNodeSelection(): PaintedNodeSelection {
+    return this.native.getPaintedNodeSelection()
+  }
+
+  getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): TextRect[] {
+    return this.native.getTextRangeRects(startNodeId, startOffset, endNodeId, endOffset)
+  }
+
+  /**
+   * Where the platform's input method is told the characters `start..end` (UTF-16 offsets into the text of
+   * the paragraphs the selection reaches) of the editing host `hostId` are, in window coordinates: the rect
+   * it positions its candidate window by. `null` when the host tells it nothing.
+   */
+  getInputMethodBounds(hostId: number, start: number, end: number): TextRect | null {
+    return this.native.getInputMethodBounds(hostId, start, end)
+  }
+
+  /** The character offset the platform's input method is told for a window point, `null` outside the text it knows. */
+  getInputMethodIndexAtPoint(hostId: number, x: number, y: number): number | null {
+    return this.native.getInputMethodIndexAt(hostId, x, y)
+  }
+
+  caretPositionFromPoint(x: number, y: number): CaretPoint | null {
+    return this.native.caretPositionFromPoint(x, y)
+  }
+
+  moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | null): CaretPoint | null {
+    return this.native.moveCaretVisually(nodeId, offset, op, goalX)
   }
 
   /** Syntax-cache counters as `[hits, misses, documents]`. */

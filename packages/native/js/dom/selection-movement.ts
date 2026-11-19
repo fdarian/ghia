@@ -4,8 +4,8 @@
  * (grapheme cluster) or a word of it.
  *
  * It has no layout, so the line of a text and the visual order of bidirectional text are unknown:
- * `left` and `right` read as `backward` and `forward`, and `line`, `paragraph` and the other
- * granularities are not here (see deviations.md). A block element or a `<br>` between two Text
+ * `left` and `right` read as `backward` and `forward`. Moves by line are native's (`editing/line-movement.ts`),
+ * and `paragraph` and `sentence` are not here (see deviations.md). A block element or a `<br>` between two Text
  * nodes reads as one `\n` that is not in any node, so a caret takes one step over a paragraph break
  * and none over the edge of an inline element. A `contenteditable="false"` element inside an editing
  * host is one atomic stop of one character, whatever it holds: a caret steps over it whole.
@@ -117,11 +117,16 @@ function flatten(scope: Node, islands: boolean): Flat {
 }
 
 /** The nearest block holding `node` (or `node` itself, a block), below `scope`; `scope` when none does. */
-function enclosingBlock(node: Node, scope: Node): Node {
+export function enclosingBlock(node: Node, scope: Node): Node {
   for (let current: Node | null = node; current !== null && current !== scope; current = current.parentNode) {
     if (isBlock(current)) return current
   }
   return scope
+}
+
+/** Whether two points under `scope` are in different blocks, so a range between them runs over a block edge. */
+export function crossesBlock(scope: Node, a: Node, b: Node): boolean {
+  return enclosingBlock(a, scope) !== enclosingBlock(b, scope)
 }
 
 /** The offset in `flat.text` of a boundary point, or `undefined` when the text has no segment the point belongs to. */

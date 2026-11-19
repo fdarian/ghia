@@ -903,4 +903,76 @@ describeNative("white-space", () => {
       expect(clamp({}, text, 5, ["ab", "cd", "cdef"])).toEqual({ lines: 2, at: [0, 1, 1] })
     })
   })
+
+  describe("a block whose only content is a line break", () => {
+    function heights(testRoot: TestRoot, ids: string[]) {
+      return ids.map((id) => testRoot.renderer.getElementBounds(testRoot.renderer.findByTestId(id)!.id)!.height)
+    }
+
+    it("is one line tall, as Chrome lays it out (a trailing <br> adds no line, a second one adds a line)", () => {
+      const testRoot = paint(
+        <div style={{ width: 400, ...TEXT }}>
+          <div testId="text">one</div>
+          <div testId="br">
+            <br />
+          </div>
+          <div testId="trailing">
+            a
+            <br />
+          </div>
+          <div testId="two">
+            <br />
+            <br />
+          </div>
+          <div testId="space">
+            {" "}
+            <br />
+            {" "}
+          </div>
+          <div testId="span">
+            <span />
+          </div>
+        </div>
+      )
+      // The oracle: `<div><br></div>` 20, `a<br>` 20, `<br><br>` 40, an empty `<span>` 0 (headless Chrome, 16px/20px).
+      expect(heights(testRoot, ["text", "br", "trailing", "two", "space", "span"])).toEqual([LINE, LINE, LINE, 2 * LINE, LINE, 0])
+    })
+
+    it("is a line of the block's own line height", () => {
+      const testRoot = paint(
+        <div style={{ width: 400, ...TEXT }}>
+          <p testId="p" style={{ margin: 0, lineHeight: "30px" }}>
+            <br />
+          </p>
+          <div testId="after">after</div>
+        </div>
+      )
+      expect(heights(testRoot, ["p", "after"])).toEqual([30, LINE])
+    })
+
+    it("is one line when the line feed is a preserved one", () => {
+      const testRoot = paint(
+        <div style={{ width: 400, ...TEXT }}>
+          <div testId="one" style={{ whiteSpace: "pre" }}>
+            {"\n"}
+          </div>
+          <div testId="two" style={{ whiteSpace: "pre" }}>
+            {"\n\n"}
+          </div>
+        </div>
+      )
+      expect(heights(testRoot, ["one", "two"])).toEqual([LINE, 2 * LINE])
+    })
+
+    it("has no text to paint, find or copy", () => {
+      const testRoot = paint(
+        <div style={{ width: 400, ...TEXT }}>
+          <div>
+            <br />
+          </div>
+        </div>
+      )
+      expect(testRoot.renderer.getPaintedText()).toEqual([])
+    })
+  })
 })

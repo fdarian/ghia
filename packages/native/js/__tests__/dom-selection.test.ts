@@ -793,11 +793,11 @@ describe("node Selection", () => {
       expect([selection.anchorOffset, selection.focusOffset, selection.direction]).toEqual([2, 0, "backwards"])
     })
 
-    it("line and the other granularities that need layout throw NotSupportedError", () => {
+    it("paragraph and sentence granularities throw NotSupportedError", () => {
       const a = tx("ab")
       editable("div", a)
       at(a, 1)
-      for (const granularity of ["line", "lineboundary", "paragraph", "paragraphboundary", "sentence", "sentenceboundary", "documentboundary"]) {
+      for (const granularity of ["paragraph", "paragraphboundary", "sentence", "sentenceboundary"]) {
         expect(errorName(() => selection.modify("move", "forward", granularity))).toBe("NotSupportedError")
       }
       expect(selection.focusOffset).toBe(1)

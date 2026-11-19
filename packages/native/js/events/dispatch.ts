@@ -181,6 +181,8 @@ export interface DomDispatchResult {
   propagationStopped: boolean
   /** Set for a `dragover`: what the drop would do. */
   dropEffect?: HostDropEffect
+  /** Set for a `keydown`: JS made the edit the key stands for, so native must not type it as text. */
+  handled?: boolean
 }
 
 export interface DomEventRoot {

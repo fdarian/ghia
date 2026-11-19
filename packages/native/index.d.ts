@@ -53,6 +53,12 @@ export declare class GpuixRenderer {
   tick(): boolean
   isInitialized(): boolean
   /**
+   * Whether the last `tick()` left a key event queued or ended after sending one, so the
+   * frame loop has to tick again at once instead of waiting for a wake or its timer. Only a
+   * macOS window yields per key event; everything else answers false.
+   */
+  keyEventPending(): boolean
+  /**
    * Registers the function native calls synchronously for events whose
    * default JS can cancel: `keydown`, `keyup`. It takes the `EventPayload`
    * and returns `{ defaultPrevented, propagationStopped }`. Pass `null` to
@@ -618,6 +624,19 @@ export declare class GpuixRenderer {
    */
   getPaintedHighlights(): Array<HighlightMatch>
   /**
+   * The rects of the text between two DOM positions: the content area of the font for each line
+   * the range covers, in window coordinates, or none when the text did not paint. Both ends are
+   * `#text` nodes of one paragraph.
+   */
+  getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): Array<TextRect>
+  /** The DOM position at a window point, in the text under it or nearest to it, or null. */
+  caretPositionFromPoint(x: number, y: number): CaretPoint | null
+  /**
+   * A DOM position moved along the lines of the painted text (`lineUp`, `lineDown`, `lineStart`,
+   * `lineEnd`), keeping `goalX` for a move up or down; null where there is no line to go to.
+   */
+  moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | undefined | null): CaretPoint | null
+  /**
    * Press space-separated keys in Playwright's `keyboard.press` grammar
    * (`"Enter"`, `"Shift+Tab"`, `"Meta+a"`, `"a"`, `"Space"`) through the
    * focused element's input pipeline, each as a keydown then a keyup.
@@ -789,6 +808,28 @@ export declare class TestGpuixRenderer {
    * the OS. `tick()` is what delivers it to the window.
    */
   postNativeEvent(kind: string, x?: number | undefined | null, y?: number | undefined | null): void
+  /**
+   * Queues a `keyDown` and a `keyUp` for each letter or space of `text` in AppKit's queue for
+   * the test window (`-[NSApp postEvent:atStart:NO]`, from this thread), so every key is
+   * waiting before the next `pumpNativeEvents`. The window is neither key nor on screen.
+   */
+  postNativeKeys(text: string): void
+  /**
+   * One call of the pump a live window's `tick()` runs (`gpui_macos::pump_app_nonblocking`),
+   * then the test context until it is parked: with `setYieldAfterKeyEvent(true)`, the default,
+   * it ends around the first key event it reaches (before it when an event or a step came
+   * first, else after it). `tick()` is not that pump: it hands every queued event to the
+   * window. Draws nothing.
+   */
+  pumpNativeEvents(): void
+  /** Whether the last `pumpNativeEvents` left a key event queued or ended after sending one. */
+  keyEventPending(): boolean
+  /**
+   * Whether the pump gives each key event a pump of its own so that JS runs a microtask
+   * checkpoint on both sides of it (`MacPlatform::set_yield_after_key_event`). On by default, as
+   * in a live window; a setting of this renderer.
+   */
+  setYieldAfterKeyEvent(yieldAfter: boolean): void
   /**
    * Registers the function native calls synchronously for `keydown` and
    * `keyup`; see `GpuixRenderer::setSyncEventHandler`. Without one, those
@@ -1155,6 +1196,28 @@ export declare class TestGpuixRenderer {
    * so a soft-wrapped match is provably two boxes.
    */
   getPaintedHighlights(): Array<HighlightMatch>
+  /** The rects of the text between two DOM positions, see the live renderer's. */
+  getTextRangeRects(startNodeId: number, startOffset: number, endNodeId: number, endOffset: number): Array<TextRect>
+  /**
+   * What the last frame drew for the node selection (`setNodeSelection`): one wash for each washed
+   * paragraph, with the bytes and the boxes, and the caret. Test renderer only.
+   */
+  getPaintedNodeSelection(): PaintedNodeSelection
+  /**
+   * Where the input method of the focused editing host `host_id` is told the characters `start..end`
+   * are (the rect it positions its candidate window by), in window coordinates; null when it is told
+   * nothing. Test renderer only.
+   */
+  getInputMethodBounds(hostId: number, start: number, end: number): TextRect | null
+  /**
+   * The character offset the input method of the editing host `host_id` is told for a window point,
+   * null where it names none. Test renderer only.
+   */
+  getInputMethodIndexAt(hostId: number, x: number, y: number): number | null
+  /** The DOM position at a window point, see the live renderer's. */
+  caretPositionFromPoint(x: number, y: number): CaretPoint | null
+  /** A DOM position moved along the lines of the painted text, see the live renderer's. */
+  moveCaretVisually(nodeId: number, offset: number, op: string, goalX?: number | undefined | null): CaretPoint | null
   /**
    * Drag-select from one point to another: mouse down, move, up.
    *
@@ -1702,6 +1765,18 @@ export interface BuildCounters {
   retainReasons: string
 }
 
+/** A DOM position, with where its caret is. */
+export interface CaretPoint {
+  /** The `#text` node. */
+  nodeId: number
+  /** The element that holds the paragraph of the node, from which JS finds the node. */
+  containerId: number
+  /** UTF-16 code units into the node's data. */
+  offset: number
+  /** Window x of the caret. For a move up or down, the x the caret is kept at. */
+  x: number
+}
+
 /**
  * Ask the update feed whether a newer signed bundle exists.
  *
@@ -1943,14 +2018,15 @@ export interface EventPayload {
    * DOM `InputEvent.inputType` of an edit of the text (`insertText`,
    * `deleteContentBackward`, `historyUndo`, ...), `""` for the number
    * stepper. `data` is the inserted text for the insert types and absent
-   * otherwise; `isComposing` says the edit belongs to a composition.
-   * Populated for: change.
+   * otherwise; `isComposing` says the edit belongs to a composition. For an
+   * `editpointer` it is the phase: `press`, `down`, `drag` or `up`.
+   * Populated for: change, editinput, editpointer.
    */
   inputType?: string
   /**
    * DOM `shiftKey`, `ctrlKey`, `altKey`, `metaKey`: the booleans of
    * `modifiers`, under the DOM names.
-   * Populated for: keydown, keyup.
+   * Populated for: keydown, keyup; `shift_key` also for editpointer.
    */
   shiftKey?: boolean
   ctrlKey?: boolean
@@ -2077,6 +2153,23 @@ export interface EventPayload {
    * handled at `element_id` only.
    */
   path?: Array<number>
+  /**
+   * The range an `editinput` replaces, as DOM positions: `[startNode, startOffset, endNode,
+   * endOffset]`, node ids and UTF-16 offsets into the data of the `#text` nodes. Absent when the
+   * edit goes where the selection is. `input_type` is the kind of edit (`insert`, `mark`, `unmark`)
+   * and `data` its text. An `editpointer` names the DOM position under the pointer as a collapsed
+   * range (the same two numbers twice), absent where the host paints no text.
+   * Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`), and
+   * editpointer, a press or drag in one (`editing/pointer.rs`).
+   */
+  editRange?: Array<number>
+  /**
+   * Where the selection goes in the text an `editinput` of kind `mark` puts in: `[start, end]` in UTF-16
+   * code units from the start of that text. Absent: at its end. `is_composing` is whether the platform's
+   * composition was running when the edit was asked for.
+   * Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`).
+   */
+  editSelection?: Array<number>
   /**
    * Id of the other element of a boundary or focus event (JS makes it
    * `event.relatedTarget`, the element itself, or `null` when absent).
@@ -2558,6 +2651,37 @@ export interface ObservationClip {
   height: number
 }
 
+/** The caret of an editing host as the last painted frame drew it. */
+export interface PaintedNodeCaret {
+  /** The paragraph that holds it, as `container:index`; empty for the caret of an empty line, which has no paragraph. */
+  key: string
+  /** Where it is, in window coordinates. */
+  rect: TextRect
+  /** Whether it is in the phase of its blink that has a colour; it is painted in no colour in the other. */
+  lit: boolean
+}
+
+/** What the last painted frame drew for the node selection: the wash and the caret. */
+export interface PaintedNodeSelection {
+  washes: Array<PaintedWash>
+  /**
+   * `None` when no paragraph painted a caret: the selection is not collapsed, its host has no focus or the
+   * window is not key.
+   */
+  caret?: PaintedNodeCaret
+}
+
+/** One paragraph's node-selection wash as the last painted frame drew it. */
+export interface PaintedWash {
+  /** The paragraph, as `container:index`. */
+  key: string
+  /** The washed bytes of the paragraph text, as UTF-16 offsets into it. */
+  start: number
+  end: number
+  /** One box for each line the wash covers, in window coordinates. */
+  rects: Array<TextRect>
+}
+
 /**
  * How ticks were drawn by patching the frame before them, over the life of the window, see
  * `get_patch_counters`.
@@ -2778,8 +2902,18 @@ export interface Size {
 export interface SyncDispatchResult {
   defaultPrevented: boolean
   propagationStopped: boolean
+  /** See `DispatchOutcome::handled`. */
+  handled?: boolean
   /** The `dropEffect` a `dragover` ended with. */
   dropEffect?: string
+}
+
+/** A rect in window coordinates. */
+export interface TextRect {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 /** `selectionStart`, `selectionEnd` and `selectionDirection` of a text control. */

@@ -48,11 +48,11 @@ pub type SharedSelection = Arc<Mutex<SelectionState>>;
 
 /// One painted text element, registered per frame in paint order.
 #[derive(Clone)]
-struct RegEntry {
-    key: Arc<str>,
-    doc: selection::DocPos,
-    text: SharedString,
-    layout: TextLayout,
+pub(crate) struct RegEntry {
+    pub(crate) key: Arc<str>,
+    pub(crate) doc: selection::DocPos,
+    pub(crate) text: SharedString,
+    pub(crate) layout: TextLayout,
     /// See [`selection::RegisteredText::group`].
     group: Option<u64>,
     /// See [`selection::RegisteredText::line`].
@@ -60,7 +60,11 @@ struct RegEntry {
     /// See [`selection::RegisteredText::cell`].
     cell: Option<selection::TableCell>,
     /// From the space `layout` is in to the window: a press hits the text where it is drawn.
-    to_window: TransformationMatrix,
+    pub(crate) to_window: TransformationMatrix,
+    /// The bytes the node selection washed, which a replay of the text puts back with it.
+    pub(crate) node_wash: Vec<Range<usize>>,
+    /// The caret of the editing host that this paragraph painted, in the space of `layout`.
+    pub(crate) caret: Option<Bounds<gpui::Pixels>>,
 }
 
 impl RegEntry {
@@ -264,6 +268,7 @@ fn frame_reset(window: WindowId) {
 /// in paint order.
 pub fn selection_frame_reset(
     selection: SharedSelection,
+    editing: crate::editing::pointer::EditingPointer,
     on_drag_move: impl Fn(WindowId, gpui::Point<gpui::Pixels>, &mut gpui::App) + 'static,
     on_drag_end: impl Fn(&mut gpui::App) + 'static,
 ) -> impl IntoElement {
@@ -277,7 +282,7 @@ pub fn selection_frame_reset(
             super::inline_hit::frame_reset(id);
             register_copy_listener(window, &selection);
             register_down_listener(window, &selection);
-            register_drag_listeners(window, &selection, on_drag_move, on_drag_end);
+            register_drag_listeners(window, &selection, editing.clone(), on_drag_move, on_drag_end);
         },
     )
     .absolute()
@@ -381,6 +386,8 @@ pub(crate) fn same_text_apart_from_transform(
         && left.group == right.group
         && left.line == right.line
         && left.cell == right.cell
+        && left.node_wash == right.node_wash
+        && left.caret == right.caret
 }
 
 /// Whether two [`log_painted_text`] writes log the same text.
@@ -444,8 +451,10 @@ fn describe_text(entry: &RegEntry, doc: &selection::DocPos, with_matrix: bool, m
     let bounds = entry.layout.bounds();
     let bounds = Bounds::new(bounds.origin + moved, bounds.size);
     let matrix = if with_matrix { format!(" {:?}", entry.to_window) } else { String::new() };
+    let node_wash = if entry.node_wash.is_empty() { String::new() } else { format!(" node wash {:?}", entry.node_wash) };
+    let caret = entry.caret.map_or_else(String::new, |caret| format!(" caret {caret:?}"));
     format!(
-        "text {} {:?} {:?} {:?} {:?} {:?} {:?}{matrix}",
+        "text {} {:?} {:?} {:?} {:?} {:?} {:?}{node_wash}{caret}{matrix}",
         entry.key,
         doc,
         entry.text,
@@ -480,6 +489,14 @@ pub fn painted_text(window: WindowId) -> Vec<String> {
 /// Every highlight wash `window` painted in its last frame, in paint order. Test-facing.
 pub fn painted_highlights(window: WindowId) -> Vec<PaintedHighlight> {
     with_frame(window, |frame| frame.highlights.clone())
+}
+
+/// The paragraphs of `window`'s last frame that the node selection washed or put its caret in, with the
+/// bytes of each. Test-facing.
+pub(crate) fn node_washed(window: WindowId) -> Vec<RegEntry> {
+    with_frame(window, |frame| {
+        frame.registry().iter().filter(|entry| !entry.node_wash.is_empty() || entry.caret.is_some()).cloned().collect()
+    })
 }
 
 /// Byte offset to UTF-16 code-unit offset, so the log speaks JS's units.
@@ -563,6 +580,12 @@ pub struct SelectableText {
     pub run_styles: Vec<super::paragraph::RunStyle>,
     pub selection: SharedSelection,
     pub wash_color: Hsla,
+    /// The bytes washed for the node selection ([`crate::editing::node_selection`]), in `wash_color`
+    /// like the painted selection. It lives in the tree and not in `selection`, so a change to it
+    /// invalidates the paragraph and not the frame.
+    pub node_wash: Vec<Range<usize>>,
+    /// The caret of an editing host that is in this paragraph, painted over the wash.
+    pub caret: Option<crate::editing::caret::CaretPaint>,
     /// Paints additional quads under the glyphs before the selection wash:
     /// inline-code pills, word-diff highlights. Receives the laid-out text so
     /// it can turn byte ranges into rects with [`range_rects`].
@@ -638,6 +661,8 @@ impl SelectableText {
             run_styles: Vec::new(),
             selection,
             wash_color,
+            node_wash: Vec::new(),
+            caret: None,
             extra_wash: None,
             links: Vec::new(),
             on_link: None,
@@ -674,6 +699,8 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         run_styles,
         selection,
         wash_color,
+        node_wash,
+        caret,
         extra_wash,
         links,
         on_link,
@@ -814,8 +841,11 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                 None => Vec::new(),
             };
             paint_highlight_washes(&layout, element_id, sub, &text, &washes, window);
+            let node_wash = if selectable { node_wash.clone() } else { Vec::new() };
             let ranges = if selectable {
-                selection.lock().wash_ranges(&key)
+                let mut ranges = selection.lock().wash_ranges(&key);
+                ranges.extend(node_wash.iter().cloned());
+                ranges
             } else {
                 Vec::new()
             };
@@ -833,6 +863,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     ));
                 }
             }
+            let painted_caret = caret.as_ref().and_then(|caret| caret.paint(&layout, window, cx.background_executor().now()));
             if selectable {
                 let entry = RegEntry {
                     key: key.clone(),
@@ -843,6 +874,8 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     line: line.clone(),
                     cell,
                     to_window: window.transform(),
+                    node_wash,
+                    caret: painted_caret,
                 };
                 crate::tape::write_placed(
                     Kind::Text,
@@ -1056,6 +1089,9 @@ struct RegistryHit {
     index: usize,
     /// The position in the space of the entry's layout.
     local: gpui::Point<gpui::Pixels>,
+    /// How far the position is from the text in the window's pixels, vertical then horizontal: `(0.0, 0.0)`
+    /// where a text contains it.
+    distance: (f32, f32),
 }
 
 /// The text a window position lands in, and the byte offset in it.
@@ -1081,12 +1117,25 @@ fn registry_point(
     window: WindowId,
     position: gpui::Point<gpui::Pixels>,
 ) -> Option<RegistryHit> {
+    registry_point_among(window, position, &|_| true)
+}
+
+/// [`registry_point`] over the texts `allow` lets through. `allow` runs while the frame is borrowed,
+/// so it must not read the painted frame.
+fn registry_point_among(
+    window: WindowId,
+    position: gpui::Point<gpui::Pixels>,
+    allow: &dyn Fn(&RegEntry) -> bool,
+) -> Option<RegistryHit> {
     with_frame(window, |frame| {
         let reg = frame.registry();
         let mut contained: Option<(usize, gpui::Point<gpui::Pixels>)> = None;
         let mut nearest: Option<(usize, gpui::Point<gpui::Pixels>, (f32, f32))> = None;
 
         for (ei, entry) in reg.iter().enumerate() {
+            if !allow(entry) {
+                continue;
+            }
             let Some(local) = entry.local(position) else {
                 continue;
             };
@@ -1120,12 +1169,41 @@ fn registry_point(
             }
         }
 
-        let (ei, local) = contained.or(nearest.map(|(ei, local, _)| (ei, local)))?;
+        let ((ei, local), distance) = match contained {
+            Some(hit) => (hit, (0.0, 0.0)),
+            None => nearest.map(|(ei, local, distance)| ((ei, local), distance))?,
+        };
         let index = match reg[ei].layout.index_for_position(local) {
             Ok(ix) | Err(ix) => ix,
         };
-        Some(RegistryHit { entry: ei, index, local })
+        Some(RegistryHit { entry: ei, index, local, distance })
     })
+}
+
+/// The text of the last painted frame that `key` names (`selection_key`), if it painted.
+pub(crate) fn painted_text_by_key(window: WindowId, key: &str) -> Option<RegEntry> {
+    with_frame(window, |frame| frame.registry().iter().find(|entry| &*entry.key == key).cloned())
+}
+
+/// Every text of the last painted frame, in document order.
+pub(crate) fn painted_texts_in_document_order(window: WindowId) -> Vec<RegEntry> {
+    with_frame(window, |frame| {
+        let entries = frame.registry();
+        let docs: Vec<&selection::DocPos> = entries.iter().map(|entry| &entry.doc).collect();
+        selection::document_order(&docs).into_iter().map(|ix| entries[ix].clone()).collect()
+    })
+}
+
+/// The text a window position lands in, as [`registry_point`] finds it among the texts `allow` lets
+/// through (which must not read the painted frame), with the position in the space of its layout and how
+/// far from the text it is (vertical, then horizontal, in the window's pixels).
+pub(crate) fn painted_text_at_among(
+    window: WindowId,
+    position: gpui::Point<gpui::Pixels>,
+    allow: &dyn Fn(&RegEntry) -> bool,
+) -> Option<(RegEntry, gpui::Point<gpui::Pixels>, (f32, f32))> {
+    let hit = registry_point_among(window, position, allow)?;
+    with_frame(window, |frame| frame.registry().get(hit.entry).cloned()).map(|entry| (entry, hit.local, hit.distance))
 }
 
 /// Like [`registry_point`], but only when the pointer shares a text's vertical
@@ -1251,13 +1329,19 @@ fn register_down_listener(window: &mut Window, selection: &SharedSelection) {
 fn register_drag_listeners(
     window: &mut Window,
     selection: &SharedSelection,
+    editing: crate::editing::pointer::EditingPointer,
     on_drag_move: impl Fn(WindowId, gpui::Point<gpui::Pixels>, &mut gpui::App) + 'static,
     on_drag_end: impl Fn(&mut gpui::App) + 'static,
 ) {
     use gpui::{DispatchPhase, MouseButton, MouseMoveEvent, MouseUpEvent};
 
     let move_selection = selection.clone();
+    let move_editing = editing.clone();
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+        // A drag that began in an editing host is the host's: it never reaches the painted selection.
+        if phase == DispatchPhase::Bubble && move_editing.moved(event, window, cx) {
+            return;
+        }
         if phase != DispatchPhase::Bubble || !event.dragging() {
             return;
         }
@@ -1274,8 +1358,11 @@ fn register_drag_listeners(
     });
 
     let up_selection = selection.clone();
-    window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+    window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
         if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+            return;
+        }
+        if editing.released(window, cx) {
             return;
         }
         let mut selection = up_selection.lock();
@@ -1622,6 +1709,8 @@ mod tests {
                 line: None,
                 cell: None,
                 to_window: TransformationMatrix::unit(),
+                node_wash: Vec::new(),
+                caret: None,
             });
             frame.highlights.push(PaintedHighlight {
                 element_id: 1,

@@ -357,6 +357,9 @@ impl FocusState {
     }
 
     fn push_change(&mut self, tree: &RetainedTree, change: &FocusChange) {
+        if let Some(from) = change.from {
+            tree.composition.focus_left(from);
+        }
         self.outbox.extend(change_events(tree, change));
     }
 

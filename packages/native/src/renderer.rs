@@ -119,7 +119,7 @@ pub(crate) fn dimension_u32(value: f64, label: &str) -> Result<u32> {
     raw_dimension_u32(value, label).map_err(Error::from_reason)
 }
 
-fn raw_element_id(id: f64) -> std::result::Result<u64, String> {
+pub(crate) fn raw_element_id(id: f64) -> std::result::Result<u64, String> {
     if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > 9_007_199_254_740_991.0 {
         return Err(format!("Invalid element id: {id}"));
     }
@@ -1890,6 +1890,19 @@ impl GpuixRenderer {
         self.with_initialized_window(|window, cx| window.paint_if_dirty(cx))
     }
 
+    /// Runs a read of the painted text after the window painted what changed. `None` before `init`.
+    #[cfg(target_os = "macos")]
+    fn read_painted_dom<R>(&self, read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<Option<R>> {
+        let Some(window) = self.paint_pending_changes()? else { return Ok(None) };
+        let tree = self.tree.lock().unwrap();
+        read(&crate::editing::Reads { tree: &tree, window }).map(Some).map_err(Error::from_reason)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn read_painted_dom<R>(&self, _read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<Option<R>> {
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     #[cfg(target_os = "macos")]
     fn with_initialized_window(
         &self,
@@ -2178,6 +2191,9 @@ impl GpuixRenderer {
         let displays = crate::screen::all_displays()?;
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
+        // Key handlers run JS, and each key needs its own microtask checkpoint: see
+        // docs/fork/frames-and-wakes.md.
+        platform.set_yield_after_key_event(true);
 
         let tree = self.tree.clone();
         let callback = self.event_callback_for_view();
@@ -2544,6 +2560,27 @@ impl GpuixRenderer {
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.initialized.lock().unwrap()
+    }
+
+    /// Whether the last `tick()` left a key event queued or ended after sending one, so the
+    /// frame loop has to tick again at once instead of waiting for a wake or its timer. Only a
+    /// macOS window yields per key event; everything else answers false.
+    #[napi]
+    pub fn key_event_pending(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            MAC_PLATFORM.with(|platform| {
+                platform
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|platform| platform.key_event_pending())
+            })
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
     }
 
     /// Registers the function native calls synchronously for events whose
@@ -4744,6 +4781,40 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// The rects of the text between two DOM positions: the content area of the font for each line
+    /// the range covers, in window coordinates, or none when the text did not paint. Both ends are
+    /// `#text` nodes of one paragraph.
+    #[napi]
+    pub fn get_text_range_rects(
+        &self,
+        start_node_id: f64,
+        start_offset: f64,
+        end_node_id: f64,
+        end_offset: f64,
+    ) -> Result<Vec<crate::editing::geometry::TextRect>> {
+        self.read_painted_dom(|reads| reads.text_range_rects(start_node_id, start_offset, end_node_id, end_offset))
+            .map(Option::unwrap_or_default)
+    }
+
+    /// The DOM position at a window point, in the text under it or nearest to it, or null.
+    #[napi]
+    pub fn caret_position_from_point(&self, x: f64, y: f64) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.caret_position_from_point(x, y)).map(Option::flatten)
+    }
+
+    /// A DOM position moved along the lines of the painted text (`lineUp`, `lineDown`, `lineStart`,
+    /// `lineEnd`), keeping `goalX` for a move up or down; null where there is no line to go to.
+    #[napi]
+    pub fn move_caret_visually(
+        &self,
+        node_id: f64,
+        offset: f64,
+        op: String,
+        goal_x: Option<f64>,
+    ) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.move_caret_visually(node_id, offset, &op, goal_x)).map(Option::flatten)
+    }
+
     /// Press space-separated keys in Playwright's `keyboard.press` grammar
     /// (`"Enter"`, `"Shift+Tab"`, `"Meta+a"`, `"a"`, `"Space"`) through the
     /// focused element's input pipeline, each as a keydown then a keyup.
@@ -6339,6 +6410,10 @@ pub(crate) struct GpuixView {
     pub(crate) retain: crate::retain::Retain,
     /// What the retained roots wrote into the registries the last time they were built.
     pub(crate) tapes: crate::tape::Tapes,
+    /// The caret of the editing host the node selection is in, see `editing::caret`.
+    pub(crate) editing_caret: Rc<crate::editing::caret::EditingCaret>,
+    /// The press in an editing host that is down, see `editing::pointer`.
+    pub(crate) editing_pointer: Rc<crate::editing::pointer::EditingPointerState>,
     /// Where the pointer is and what it is pressing.
     /// Shared with the window's mouse-down listener, which dispatches a press
     /// without reaching the view.
@@ -7361,6 +7436,8 @@ impl GpuixView {
                 retain
             },
             tapes: Default::default(),
+            editing_caret: crate::editing::caret::EditingCaret::new(Theme::dark().caret),
+            editing_pointer: Default::default(),
             pointer: Rc::new(RefCell::new(crate::events::state::PointerState::with_requests(
                 pointer_requests,
             ))),
@@ -7484,7 +7561,8 @@ impl GpuixView {
                 return false;
             };
             if crate::custom_elements::input_choice::is_text_editor(element)
-                || crate::html::editing::is_editable(&tree, focused)
+                || (crate::html::editing::is_editable(&tree, focused)
+                    && !crate::scroll::KeyScroll::scrolls_under_editable(key_name, shift))
                 || crate::custom_elements::input_range::takes_key(element, key_name)
             {
                 return false;
@@ -8128,6 +8206,11 @@ pub(crate) struct BuildCtx<'a> {
     pub retain: &'a mut crate::retain::Retain,
     /// See `GpuixView::tapes`.
     pub tapes: &'a crate::tape::Tapes,
+    /// See `GpuixView::editing_caret`.
+    pub editing_caret: Rc<crate::editing::caret::EditingCaret>,
+    /// The tree `tree` was read from, for the text input of an editing host, which asks it again
+    /// when the platform does.
+    pub shared_tree: Arc<Mutex<RetainedTree>>,
 }
 
 impl BuildCtx<'_> {
@@ -9026,6 +9109,22 @@ impl GpuixView {
         }
     }
 
+    /// Restarts the blink clock of the editing caret when the selection moved or the caret came into view,
+    /// before anything that paints it is built: by the frame built whole and by the patcher alike, or a
+    /// patch of the paragraph that holds it is built against the anchor of the edit before. Returns
+    /// whether the caret is shown.
+    pub(crate) fn sync_editing_caret(&self, tree: &RetainedTree, window: &gpui::Window, cx: &gpui::App) -> bool {
+        let shown = crate::editing::caret::is_shown(tree, &self.focus_handles, window);
+        self.editing_caret.sync(window.window_handle().window_id(), tree.node_selection.generation(), shown, cx.background_executor().now());
+        shown
+    }
+
+    /// Whether the caret of the node selection is painted: its editing host has focus and the window is key.
+    pub(crate) fn editing_caret_shown(&self, window: &gpui::Window) -> bool {
+        let tree = self.tree.lock().unwrap();
+        crate::editing::caret::is_shown(&tree, &self.focus_handles, window)
+    }
+
     pub(crate) fn focused_element_id(&self, window: &gpui::Window) -> Option<u64> {
         self.focus_handles
             .iter()
@@ -9397,6 +9496,8 @@ impl GpuixView {
             scroller: start.scroller,
             retain: &mut self.retain,
             tapes: &self.tapes,
+            editing_caret: self.editing_caret.clone(),
+            shared_tree: self.tree.clone(),
         }
     }
 
@@ -9892,6 +9993,7 @@ impl GpuixView {
             .copied()
             .collect();
         let value_bindings = self.bindings_of(self.motion_value_key(&tree, window));
+        let caret_shown = crate::editing::caret::is_shown(&tree, &self.focus_handles, window);
         let sources = crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
@@ -9909,6 +10011,7 @@ impl GpuixView {
             dormant: &|id| dormancy.holds(id),
             clock_due: &|id| {
                 self.custom_registry.clock_due(id)
+                    || self.editing_caret.due(id, caret_shown)
                     || match value_bindings {
                         Some(index) => self.motion_values.element_due(index, id),
                         None => motion_value_due(&self.motion_values, &tree, id),
@@ -10495,6 +10598,7 @@ impl gpui::Render for GpuixView {
         if !window.is_layout_pass() {
             self.tapes.begin_rows();
         }
+        let caret_shown = self.sync_editing_caret(&tree, window, cx);
         self.retain.begin_frame(crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
@@ -10512,6 +10616,7 @@ impl gpui::Render for GpuixView {
             dormant: &|id| dormancy.holds(id),
             clock_due: &|id| {
                 self.custom_registry.clock_due(id)
+                    || self.editing_caret.due(id, caret_shown)
                     || match value_bindings {
                         Some(index) => self.motion_values.element_due(index, id),
                         None => motion_value_due(&self.motion_values, &tree, id),
@@ -10621,6 +10726,7 @@ impl gpui::Render for GpuixView {
             use gpui::prelude::*;
             let drag_move_view = cx.weak_entity();
             let drag_end_view = drag_move_view.clone();
+            let editing_pointer = crate::editing::pointer::EditingPointer::new(self.editing_pointer.clone(), tree_arc.clone(), callback.clone());
             let mut root = gpui::div()
                 .size_full()
                 .on_modifiers_changed(crate::events::keyboard::note_modifiers(self.routing.clone()))
@@ -10637,6 +10743,7 @@ impl gpui::Render for GpuixView {
                         activation: activation.clone(),
                         window_actions: self.simulated_window_actions.clone(),
                         resync_by_frame: self.resync_by_frame,
+                        editing: editing_pointer.clone(),
                     },
                     self.pointer.borrow().observed(),
                     self.hover_after_scroll.clone(),
@@ -10649,6 +10756,7 @@ impl gpui::Render for GpuixView {
                 ))
                 .child(selection_frame_reset(
                     self.selection.clone(),
+                    editing_pointer,
                     move |window, position, app| {
                         // This listener can run inside an update of GpuixView (an
                         // accessibility activation does). A nested update panics, so wait.
@@ -12824,6 +12932,14 @@ pub(crate) fn build_host_container(
         content.insert(0, nativeview_layer(element, style, ctx));
         placements.insert(0, Placement { rank: 0, document: 0 });
     }
+    if !skipped {
+        if let Some(input) =
+            crate::editing::input_handler::layer(&ctx.shared_tree, ctx.tree, element.id, ctx.focus_handles, ctx.event_callback, window)
+        {
+            content.push(input);
+            placements.push(Placement { rank: 0, document: u32::MAX });
+        }
+    }
     host.extend(content);
     if placements.iter().any(|placement| placement.rank != 0) {
         host = host.paint_ranks(placements.iter().map(|placement| placement.rank).collect());
@@ -13227,9 +13343,17 @@ fn build_plan(
                     ctx.inherited = outside;
                 }
             }
-            crate::text::inline::Child::EmptyLine => {
+            crate::text::inline::Child::EmptyLine | crate::text::inline::Child::BlankLine => {
                 placements.push(Placement { rank: 0, document: at });
-                content_elements.push(gpui::div().into_any_element());
+                let caret = crate::editing::caret::held_by_empty_line(&ctx.editing_caret, ctx.tree, ctx.focus_handles, element.id, plan, index, window);
+                let line = matches!(child, crate::text::inline::Child::BlankLine).then(crate::editing::caret::blank_line);
+                content_elements.push(match caret {
+                    Some(caret) => {
+                        caret.follow_clock(&mut ctx.retain, window, cx);
+                        crate::editing::caret::empty_line(caret, line)
+                    }
+                    None => line.unwrap_or_else(|| gpui::div().into_any_element()),
+                });
             }
             crate::text::inline::Child::AnonymousCell(_) | crate::text::inline::Child::AnonymousTable(_) => {
                 unreachable!("handled before")
@@ -13385,7 +13509,12 @@ fn paragraph_content(
             &motion,
         )
     };
-    ctx.retain.digest(|| format!("{} {:?}", paragraph.text, styles.runs));
+    let node_wash: Vec<std::ops::Range<usize>> = ctx.tree.node_selection.wash_range(paragraph).into_iter().collect();
+    let caret = crate::editing::caret::held_by(&ctx.editing_caret, ctx.tree, ctx.focus_handles, paragraph, window);
+    if let Some(caret) = &caret {
+        caret.follow_clock(&mut ctx.retain, window, cx);
+    }
+    ctx.retain.digest(|| format!("{} {:?} {node_wash:?} {:?}", paragraph.text, styles.runs, caret.as_ref().map(|caret| (caret.byte, caret.shown))));
     // A box in the paragraph, or the paragraph being inline content of a box, puts the texts around
     // and inside the boxes on one line for copy.
     let line = ctx
@@ -13467,6 +13596,8 @@ fn paragraph_content(
                 .clone()
                 .map(crate::text::HighlightSource::Resolved),
             run_styles: styles.runs,
+            node_wash,
+            caret,
             opacity_groups: styles.groups,
             aligned_boxes,
             atomics,
@@ -14298,7 +14429,17 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 
     // Phase 3: apply. Cannot fail.
     let mut destroyed_ids: Vec<f64> = Vec::new();
+    let mut node_selection = None;
+    let mut reshaped = false;
     for batch_op in parsed {
+        reshaped |= matches!(
+            batch_op,
+            BatchOp::DestroyElement { .. }
+                | BatchOp::DetachChild { .. }
+                | BatchOp::AppendChild { .. }
+                | BatchOp::InsertBefore { .. }
+                | BatchOp::SetText { .. }
+        );
         match batch_op {
             BatchOp::CreateElement { id, element_type } => {
                 tree.create_element(id, element_type);
@@ -14343,6 +14484,9 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
             BatchOp::SetKeyboardFocusDim { enabled } => {
                 tree.set_keyboard_focus_dim(enabled);
             }
+            BatchOp::SetNodeSelection { selection } => {
+                node_selection = Some(selection);
+            }
             BatchOp::SetUniversalStyle { .. } => {
                 let shared = universal_styles
                     .next()
@@ -14366,6 +14510,13 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 
     // Every mutation above only noted what the sheets must match again; this is where they do.
     tree.flush_styles();
+
+    // After the last change to the tree: the paragraphs a selection reaches are the ones that are there now.
+    match node_selection {
+        Some(selection) => crate::editing::node_selection::set(tree, selection, reshaped),
+        None if reshaped => crate::editing::node_selection::refresh(tree),
+        None => {}
+    }
 
     // Release styles nothing references any more. Without this a dragged
     // element, which produces a distinct style every frame, would grow the

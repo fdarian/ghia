@@ -428,6 +428,10 @@ class TextDomBinding implements TextBinding {
     return this.text.text
   }
 
+  get native(): TextBinding["native"] {
+    return this.state.mounted ? { renderer: this.state.container.nativeRenderer, id: this.text.nativeId } : undefined
+  }
+
   createText(data: string): Text {
     return createDomText(this.state.container, data) as unknown as Text
   }

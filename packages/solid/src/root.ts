@@ -134,6 +134,14 @@ export function createRoot(
       // The flush stands in for the microtask checkpoint a browser runs before it renders.
       schedule: (run) => runThenAlways(run, flush, "Running scheduled work failed"),
     })
+    // After `state.attach`, which refuses a second root: `<html>` queued before that would sit in a registered queue,
+    // and `flushPendingMutations` would send it over the live root's tree.
+    try {
+      container.ensureDocumentElements()
+    } catch (error) {
+      detach()
+      throw error
+    }
     renderer.setWindowKeyEvents?.(
       // Always on: the Tab and Escape defaults run on the key event, and
       // `window` listeners can be added at any time.

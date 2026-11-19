@@ -118,7 +118,7 @@ export interface FrameLoopOptions {
 }
 
 type FrameLoopRenderer = Pick<GpuixRenderer, "requiresTick" | "tick"> &
-  Partial<Pick<GpuixRenderer, "setFrameWakeCallback" | "setSyncEventHandler">>
+  Partial<Pick<GpuixRenderer, "setFrameWakeCallback" | "setSyncEventHandler" | "keyEventPending">>
 
 /** The last window closed: the sync handler captures the renderer, so it has to be
  *  released for the renderer to be collectable. */
@@ -162,6 +162,14 @@ export function startFrameLoop(
     }
     // On the wake path nothing re-arms a timer: an idle app is not ticked until the run loop has work.
     if (stopped || frameWake) return
+    // A tick that left a key queued runs one key per tick, so the next key waits for no timer.
+    if (renderer.keyEventPending?.()) {
+      scheduledFrame = setImmediate(() => {
+        scheduledFrame = undefined
+        loop()
+      })
+      return
+    }
     const delay = Math.max(0, (options.frameMs ?? DEFAULT_FRAME_MS) - (performance.now() - started))
     timer = setTimeout(loop, delay)
   }

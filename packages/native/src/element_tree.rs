@@ -110,13 +110,14 @@ pub struct EventPayload {
     /// DOM `InputEvent.inputType` of an edit of the text (`insertText`,
     /// `deleteContentBackward`, `historyUndo`, ...), `""` for the number
     /// stepper. `data` is the inserted text for the insert types and absent
-    /// otherwise; `isComposing` says the edit belongs to a composition.
-    /// Populated for: change.
+    /// otherwise; `isComposing` says the edit belongs to a composition. For an
+    /// `editpointer` it is the phase: `press`, `down`, `drag` or `up`.
+    /// Populated for: change, editinput, editpointer.
     pub input_type: Option<String>,
 
     /// DOM `shiftKey`, `ctrlKey`, `altKey`, `metaKey`: the booleans of
     /// `modifiers`, under the DOM names.
-    /// Populated for: keydown, keyup.
+    /// Populated for: keydown, keyup; `shift_key` also for editpointer.
     pub shift_key: Option<bool>,
     pub ctrl_key: Option<bool>,
     pub alt_key: Option<bool>,
@@ -230,6 +231,21 @@ pub struct EventPayload {
     /// gives handlers the elements as `composedPath()`. Absent means the event is
     /// handled at `element_id` only.
     pub path: Option<Vec<f64>>,
+
+    /// The range an `editinput` replaces, as DOM positions: `[startNode, startOffset, endNode,
+    /// endOffset]`, node ids and UTF-16 offsets into the data of the `#text` nodes. Absent when the
+    /// edit goes where the selection is. `input_type` is the kind of edit (`insert`, `mark`, `unmark`)
+    /// and `data` its text. An `editpointer` names the DOM position under the pointer as a collapsed
+    /// range (the same two numbers twice), absent where the host paints no text.
+    /// Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`), and
+    /// editpointer, a press or drag in one (`editing/pointer.rs`).
+    pub edit_range: Option<Vec<f64>>,
+
+    /// Where the selection goes in the text an `editinput` of kind `mark` puts in: `[start, end]` in UTF-16
+    /// code units from the start of that text. Absent: at its end. `is_composing` is whether the platform's
+    /// composition was running when the edit was asked for.
+    /// Populated for: editinput, the text input of an editing host (`editing/input_handler.rs`).
+    pub edit_selection: Option<Vec<f64>>,
 
     /// Id of the other element of a boundary or focus event (JS makes it
     /// `event.relatedTarget`, the element itself, or `null` when absent).
@@ -402,6 +418,8 @@ impl Default for EventPayload {
             submitter_id: None,
             target: None,
             path: None,
+            edit_range: None,
+            edit_selection: None,
             related_target: None,
             client_x: None,
             client_y: None,

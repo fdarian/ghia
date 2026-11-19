@@ -5,6 +5,7 @@ import type { NativeRenderer } from "../host.js"
 import type { RangeBoundaries } from "./live-ranges.js"
 import { Node, type Element, type Text } from "./nodes.js"
 import { boundariesOf, Range, StaticRange } from "./range.js"
+import { moveByLine, moveToDocumentBoundary, moveToLineBoundary, type MovedPosition } from "../editing/line-movement.js"
 import { movePoint } from "./selection-movement.js"
 import type { MovementGranularity } from "./text-segmentation.js"
 import { childCount, comparePoints, isInclusiveAncestor, nodeLength } from "./tree-order.js"
@@ -36,11 +37,15 @@ const GRANULARITIES: ReadonlySet<string> = new Set([
   "documentboundary",
 ])
 
+/** What `modify` can do: the rest of `GRANULARITIES` are names the standard has and this does not do yet. */
+const SUPPORTED: ReadonlySet<string> = new Set(["character", "word", "line", "lineboundary", "documentboundary"])
+
 const INTERNAL = {
   hooks: Symbol.for("@ghia/native/selection-hooks"),
   holds: Symbol.for("@ghia/native/selection-holds"),
   painted: Symbol.for("@ghia/native/selection-painted"),
   caret: Symbol.for("@ghia/native/selection-caret"),
+  subscribe: Symbol.for("@ghia/native/selection-subscribe"),
 } as const
 
 const CREATE = Symbol("create selection")
@@ -112,7 +117,16 @@ abstract class SelectionClass {
   #shared = false
   #changePending = false
   #hooks: SelectionHooks | undefined
-  readonly #rangeChanged = (): void => this.#queueChange()
+  #nodeSelectionListener: (() => void) | undefined
+  readonly #rangeChanged = (): void => {
+    this.#goalX = null
+    this.#queueChange()
+  }
+  /**
+   * The window x that consecutive `modify` moves by line keep, so a caret that went through a short
+   * line comes back to its column. Any other change of the selection forgets it.
+   */
+  #goalX: number | null = null
 
   constructor(token?: symbol) {
     if (token !== CREATE) throw new TypeError("Illegal constructor")
@@ -328,10 +342,11 @@ abstract class SelectionClass {
   }
 
   /**
-   * Moves or extends the selection by a character or a word of the text under the editing host the
-   * focus is in, or the document. `left` and `right` read as `backward` and `forward`. Arguments the
-   * standard has no name for do nothing, as in Chrome; granularities that need layout throw
-   * `NotSupportedError`.
+   * Moves or extends the selection by a `character`, a `word`, a `line`, to the `lineboundary` or
+   * the `documentboundary`, in the text under the editing host the focus is in, or the document.
+   * `left` and `right` read as `backward` and `forward`. Arguments the standard has no name for do
+   * nothing, as in Chrome; `sentence`, `paragraph` and their boundaries throw `NotSupportedError`.
+   * Moves by line keep the x of the caret across consecutive calls.
    */
   modify(alter: string, direction: string, granularity: string): void {
     const alterKey = String(alter).toLowerCase()
@@ -340,10 +355,9 @@ abstract class SelectionClass {
     if (alterKey !== "move" && alterKey !== "extend") return
     if (!["forward", "backward", "left", "right"].includes(directionKey)) return
     if (!GRANULARITIES.has(granularityKey)) return
-    if (granularityKey !== "character" && granularityKey !== "word") {
+    if (!SUPPORTED.has(granularityKey)) {
       throw namedError("NotSupportedError", `Selection.modify("${granularityKey}") is not supported yet.`)
     }
-    const unit: MovementGranularity = granularityKey
     const own = this.#own
     if (own === null) return
     const forward = directionKey === "forward" || directionKey === "right"
@@ -353,8 +367,11 @@ abstract class SelectionClass {
       const focus = this.#direction === "forwards"
         ? { node: bounds.endNode, offset: bounds.endOffset }
         : { node: bounds.startNode, offset: bounds.startOffset }
-      const moved = this.#moved(focus.node, focus.offset, forward, unit)
-      if (moved !== null) this.#extendTo(moved.node, moved.offset, bounds)
+      const moved = this.#moved(focus.node, focus.offset, forward, granularityKey)
+      if (moved !== null) {
+        this.#extendTo(moved.node, moved.offset, bounds)
+        this.#goalX = moved.goalX
+      }
       return
     }
 
@@ -363,17 +380,32 @@ abstract class SelectionClass {
     const from = forward
       ? { node: bounds.endNode, offset: bounds.endOffset }
       : { node: bounds.startNode, offset: bounds.startOffset }
-    if (!collapsed && unit === "character") {
+    if (!collapsed && granularityKey === "character") {
       this.#assign(from.node, from.offset, from.node, from.offset, "forwards")
       return
     }
-    const moved = this.#moved(from.node, from.offset, forward, unit)
-    if (moved !== null) this.#assign(moved.node, moved.offset, moved.node, moved.offset, "forwards")
+    const moved = this.#moved(from.node, from.offset, forward, granularityKey)
+    if (moved !== null) {
+      this.#assign(moved.node, moved.offset, moved.node, moved.offset, "forwards")
+      this.#goalX = moved.goalX
+    }
   }
 
-  #moved(node: Node, offset: number, forward: boolean, unit: MovementGranularity): { node: Node; offset: number } | null {
+  #moved(node: Node, offset: number, forward: boolean, granularity: string): MovedPosition | null {
     const host = editingHostOf(node)
-    return movePoint(host === null ? node.getRootNode() : host, node, offset, forward, unit)
+    const scope = host === null ? node.getRootNode() : host
+    switch (granularity) {
+      case "line":
+        return moveByLine(scope, node, offset, forward, this.#goalX)
+      case "lineboundary":
+        return moveToLineBoundary(node, offset, forward)
+      case "documentboundary":
+        return moveToDocumentBoundary(scope, forward)
+      default: {
+        const moved = movePoint(scope, node, offset, forward, granularity as MovementGranularity)
+        return moved === null ? null : { node: moved.node, offset: moved.offset, goalX: null }
+      }
+    }
   }
 
   #requireOwn(method: string): { range: Range; bounds: RangeBoundaries } {
@@ -408,6 +440,7 @@ abstract class SelectionClass {
     endOffset: number,
     direction: Direction
   ): void {
+    this.#goalX = null
     const held = this.#range !== null
     const current = this.#range === null ? null : boundariesOf(this.#range)
     const changed =
@@ -437,6 +470,7 @@ abstract class SelectionClass {
   #hold(range: Range): void {
     this.#release()
     this.#range = range
+    this.#goalX = null
     this.#shared = false
     boundariesOf(range).onAdjust = this.#rangeChanged
   }
@@ -451,10 +485,12 @@ abstract class SelectionClass {
     if (this.#range === null) return
     this.#release()
     this.#range = null
+    this.#goalX = null
     this.#shared = false
     this.#direction = "forwards"
     this.#hooks?.heldChanged()
     if (announce) this.#queueChange()
+    else this.#nodeSelectionListener?.()
   }
 
   /** Painted text and a node range are exclusive, so a new node range removes what was painted. */
@@ -469,6 +505,7 @@ abstract class SelectionClass {
    * change and before the task runs hears it, so the task is queued whether or not one listens now.
    */
   #queueChange(): void {
+    this.#nodeSelectionListener?.()
     if (this.#changePending || this.#hooks === undefined) return
     this.#changePending = true
     setTimeout(() => {
@@ -479,6 +516,10 @@ abstract class SelectionClass {
 
   [INTERNAL.hooks](hooks: SelectionHooks): void {
     this.#hooks = hooks
+  }
+
+  [INTERNAL.subscribe](listener: () => void): void {
+    this.#nodeSelectionListener = listener
   }
 
   [INTERNAL.holds](): boolean {
@@ -536,6 +577,14 @@ export function getSelection(): Selection {
 export function setSelectionHooks(hooks: SelectionHooks): void {
   const instance = shared.instance as unknown as Record<symbol, (hooks: SelectionHooks) => void>
   instance[INTERNAL.hooks](hooks)
+}
+
+/**
+ * Calls `listener` whenever the node range changes: a new one, a boundary that moved (a selection method,
+ * or a tree change under it) or none. One listener: the one that sends the selection to native.
+ */
+export function subscribeNodeSelection(listener: () => void): void {
+  ;(shared.instance as unknown as Record<symbol, (listener: () => void) => void>)[INTERNAL.subscribe](listener)
 }
 
 /** Whether the selection holds a node range, which a painted selection replaces. */

@@ -32,6 +32,7 @@ function setup() {
     eventHandlers: new Map(),
     allocateId: () => ++nextId,
   })
+  root.ensureDocumentElements()
   const element = createHostElement("div")
   return { root, element, listeners }
 }

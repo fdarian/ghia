@@ -102,6 +102,9 @@ const DETACHED: Readonly<Record<string, Method>> = {
   getSubtreeAnimations: returnEmptyList,
   getDocumentAnimations: returnEmptyList,
   getPaintedHighlights: returnEmptyList,
+  getTextRangeRects: returnEmptyList,
+  caretPositionFromPoint: returnNull,
+  moveCaretVisually: returnNull,
   getTextValue: () => "",
   getTextSelection: () => ({ start: 0, end: 0, direction: "none" }),
   getInputChoice: () => ({

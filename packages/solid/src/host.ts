@@ -142,12 +142,13 @@ export class HostRoot implements MotionBindingHost {
   readonly eventHandlers: EventHandlerMap
   readonly allocateId: () => number
 
-  /** The window's `<html>`: its native root. A child of this root only in that it is mounted through it. */
-  html: HostElement
+  /** The window's `<html>`: its native root. A child of this root only in that it is mounted through it. Made by `ensureDocumentElements`, which comes before anything reads it. */
+  html!: HostElement
   /** The `<head>` in `html`, before `body`. */
-  head: HostElement
+  head!: HostElement
   /** The `<body>` in `html`, where the app's top-level nodes are. */
-  body: HostElement
+  body!: HostElement
+  private hasDocumentElements = false
 
   constructor(options: {
     mutations: MutationRenderer
@@ -159,10 +160,6 @@ export class HostRoot implements MotionBindingHost {
     this.nativeRenderer = options.nativeRenderer
     this.eventHandlers = options.eventHandlers
     this.allocateId = options.allocateId
-    const elements = this.mountDocumentElements()
-    this.html = elements.html
-    this.head = elements.head
-    this.body = elements.body
   }
 
   /** The app's top-level nodes: what `body` holds. */
@@ -170,9 +167,13 @@ export class HostRoot implements MotionBindingHost {
     return this.body.childList
   }
 
-  /** Makes the `<html>`, `<head>` and `<body>` again for a root that was torn down and renders once more. */
+  /**
+   * Makes the `<html>`, `<head>` and `<body>` when there are none, or again for a root that was torn down and renders once more.
+   * Not in the constructor: it queues `<html>`, which a root the renderer refuses must not have done.
+   */
   ensureDocumentElements(): void {
-    if (this.html.mounted) return
+    if (this.hasDocumentElements && this.html.mounted) return
+    this.hasDocumentElements = true
     const elements = this.mountDocumentElements()
     this.html = elements.html
     this.head = elements.head
@@ -782,6 +783,11 @@ class TextDomBinding implements TextBinding {
 
   get data(): string {
     return this.text.text
+  }
+
+  get native(): TextBinding["native"] {
+    const text = this.text
+    return text.root && text.mounted ? { renderer: text.root.nativeRenderer, id: text.nativeId } : undefined
   }
 
   setData(data: string): void {

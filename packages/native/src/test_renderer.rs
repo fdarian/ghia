@@ -257,6 +257,27 @@ impl Drop for VisualTestState {
             .update_window(self.window, |_, window, _| window.refresh())
             .ok();
         self.cx.run_until_parked();
+        // Dropping a macOS window queues its close on the main dispatch queue, and that close
+        // updates the app: closed here, while the app lives, a later pump of the run loop
+        // (`pumpNativeEvents` of the next renderer) does not find the block with no app to run it.
+        #[cfg(target_os = "macos")]
+        {
+            // SAFETY: napi calls run on the main thread, and the test platform has made
+            // NSApplication.
+            //
+            // Spin the run loop once before the window is removed: the layer's pending
+            // `displayLayer:` (the window's frame request) runs in a Core Animation commit,
+            // and one that ran after the removal would find no window and log
+            // `window not found`.
+            unsafe { crate::native_event::run_main_queue() };
+            self.cx.run_until_parked();
+            self.cx
+                .update_window(self.window, |_, window, _| window.remove_window())
+                .ok();
+            self.cx.run_until_parked();
+            // SAFETY: as above.
+            unsafe { crate::native_event::run_main_queue() };
+        }
     }
 }
 
@@ -647,6 +668,12 @@ pub struct TestGpuixRenderer {
     /// on, so input AppKit receives for the test window wakes an idle frame loop.
     #[cfg(target_os = "macos")]
     frame_wake: crate::renderer::FrameWake,
+    /// Whether `pumpNativeEvents` gives each key event a pump of its own, as a live window does.
+    #[cfg(target_os = "macos")]
+    yield_after_key_event: std::sync::atomic::AtomicBool,
+    /// Whether the last `pumpNativeEvents` left a key queued or ended after sending one.
+    #[cfg(target_os = "macos")]
+    key_event_pending: std::sync::atomic::AtomicBool,
 }
 
 impl TestGpuixRenderer {
@@ -859,6 +886,10 @@ impl TestGpuixRenderer {
             held_buttons: Mutex::new([false; 3]),
             #[cfg(target_os = "macos")]
             frame_wake: Default::default(),
+            #[cfg(target_os = "macos")]
+            yield_after_key_event: std::sync::atomic::AtomicBool::new(true),
+            #[cfg(target_os = "macos")]
+            key_event_pending: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -947,6 +978,93 @@ impl TestGpuixRenderer {
         {
             let _ = (kind, x, y);
             Err(Error::from_reason("postNativeEvent needs macOS"))
+        }
+    }
+
+    /// Queues a `keyDown` and a `keyUp` for each letter or space of `text` in AppKit's queue for
+    /// the test window (`-[NSApp postEvent:atStart:NO]`, from this thread), so every key is
+    /// waiting before the next `pumpNativeEvents`. The window is neither key nor on screen.
+    #[napi]
+    pub fn post_native_keys(&self, text: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let ns_view = with_test_state(|cx, window, _view| {
+                cx.update_window(window, |_, window, _| appkit::ns_view(window))
+                    .map_err(|error| Error::from_reason(error.to_string()))?
+            })?;
+            // SAFETY: the view is the live content view of the test window, and napi calls run
+            // on the main thread.
+            unsafe { crate::native_event::post_keys(ns_view, &text) }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = text;
+            Err(Error::from_reason("postNativeKeys needs macOS"))
+        }
+    }
+
+    /// One call of the pump a live window's `tick()` runs (`gpui_macos::pump_app_nonblocking`),
+    /// then the test context until it is parked: with `setYieldAfterKeyEvent(true)`, the default,
+    /// it ends around the first key event it reaches (before it when an event or a step came
+    /// first, else after it). `tick()` is not that pump: it hands every queued event to the
+    /// window. Draws nothing.
+    #[napi]
+    pub fn pump_native_events(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let result = with_test_state(|cx, _window, _view| {
+                let yield_after_key = self
+                    .yield_after_key_event
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                // SAFETY: napi calls run on the main thread, and the test platform has made
+                // NSApplication.
+                let outcome = objc::rc::autoreleasepool(|| unsafe {
+                    gpui_macos::pump_app_nonblocking(yield_after_key)
+                });
+                self.key_event_pending
+                    .store(outcome.yielded_to_key, std::sync::atomic::Ordering::Relaxed);
+                cx.run_until_parked();
+                Ok(())
+            });
+            self.frame_wake.tick_finished();
+            result
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("pumpNativeEvents needs macOS"))
+    }
+
+    /// Whether the last `pumpNativeEvents` left a key event queued or ended after sending one.
+    #[napi]
+    pub fn key_event_pending(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.key_event_pending.load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    /// Whether the pump gives each key event a pump of its own so that JS runs a microtask
+    /// checkpoint on both sides of it (`MacPlatform::set_yield_after_key_event`). On by default, as
+    /// in a live window; a setting of this renderer.
+    #[napi]
+    pub fn set_yield_after_key_event(&self, yield_after: bool) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            self.yield_after_key_event
+                .store(yield_after, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = yield_after;
+            Err(Error::from_reason("setYieldAfterKeyEvent needs macOS"))
         }
     }
 
@@ -1323,6 +1441,23 @@ impl TestGpuixRenderer {
     }
 
     // ── Test-specific methods ────────────────────────────────────────
+
+    /// Runs a read of the painted text once the window painted what changed. Inside a handler of a
+    /// simulated input the paint is a pass that swaps no frame, which leaves the registries of the
+    /// text it painted.
+    fn read_painted_dom<R>(&self, read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<R> {
+        let unflushed = take_unflushed();
+        if unflushed != Dirty::Clean {
+            self.flush_for(unflushed)?;
+        }
+        let window = window_call(|window, cx| {
+            crate::renderer::settle_pending_layout(window, cx);
+            window.paint_if_dirty(cx);
+            window.window_handle().window_id()
+        })?;
+        let tree = self.tree.lock().unwrap();
+        read(&crate::editing::Reads { tree: &tree, window }).map_err(Error::from_reason)
+    }
 
     /// [`Self::flush`] for the changes of a bounds read that was waiting on mutations.
     fn flush_for(&self, dirty: Dirty) -> Result<()> {
@@ -2023,6 +2158,58 @@ impl TestGpuixRenderer {
             .into_iter()
             .map(Into::into)
             .collect())
+    }
+
+    /// The rects of the text between two DOM positions, see the live renderer's.
+    #[napi]
+    pub fn get_text_range_rects(
+        &self,
+        start_node_id: f64,
+        start_offset: f64,
+        end_node_id: f64,
+        end_offset: f64,
+    ) -> Result<Vec<crate::editing::geometry::TextRect>> {
+        self.read_painted_dom(|reads| reads.text_range_rects(start_node_id, start_offset, end_node_id, end_offset))
+    }
+
+    /// What the last frame drew for the node selection (`setNodeSelection`): one wash for each washed
+    /// paragraph, with the bytes and the boxes, and the caret. Test renderer only.
+    #[napi]
+    pub fn get_painted_node_selection(&self) -> Result<crate::editing::node_selection::PaintedNodeSelection> {
+        self.read_painted_dom(|reads| Ok(reads.painted_node_selection()))
+    }
+
+    /// Where the input method of the focused editing host `host_id` is told the characters `start..end`
+    /// are (the rect it positions its candidate window by), in window coordinates; null when it is told
+    /// nothing. Test renderer only.
+    #[napi]
+    pub fn get_input_method_bounds(&self, host_id: f64, start: f64, end: f64) -> Result<Option<crate::editing::geometry::TextRect>> {
+        self.read_painted_dom(|reads| reads.input_method_bounds(host_id, start, end))
+    }
+
+    /// The character offset the input method of the editing host `host_id` is told for a window point,
+    /// null where it names none. Test renderer only.
+    #[napi]
+    pub fn get_input_method_index_at(&self, host_id: f64, x: f64, y: f64) -> Result<Option<f64>> {
+        self.read_painted_dom(|reads| reads.input_method_index_at(host_id, x, y))
+    }
+
+    /// The DOM position at a window point, see the live renderer's.
+    #[napi]
+    pub fn caret_position_from_point(&self, x: f64, y: f64) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.caret_position_from_point(x, y))
+    }
+
+    /// A DOM position moved along the lines of the painted text, see the live renderer's.
+    #[napi]
+    pub fn move_caret_visually(
+        &self,
+        node_id: f64,
+        offset: f64,
+        op: String,
+        goal_x: Option<f64>,
+    ) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.move_caret_visually(node_id, offset, &op, goal_x))
     }
 
     /// Drag-select from one point to another: mouse down, move, up.

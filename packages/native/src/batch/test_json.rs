@@ -88,6 +88,17 @@ pub(crate) fn encode(json: &str) -> Vec<u8> {
                 out.push(opcode::SET_KEYBOARD_FOCUS_DIM);
                 out.push(serde_json::from_str::<bool>(args[0].get()).expect("a bool") as u8);
             }
+            "setNodeSelection" => {
+                out.push(opcode::SET_NODE_SELECTION);
+                if args[0].get() == "null" {
+                    out.push(0);
+                } else {
+                    out.push(1);
+                    for arg in &args[..5] {
+                        id(&mut out, arg);
+                    }
+                }
+            }
             "setUniversalStyle" => {
                 out.push(opcode::SET_UNIVERSAL_STYLE);
                 let style = args[0].get();

@@ -4,6 +4,8 @@ import { isElementType, isSvgElementType } from "../dom/element-types.js"
 import { Document, DOM_BINDING, registerDocument, type DocumentFragment, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
 import { Range } from "../dom/range.js"
+import { createCaretPosition, type CaretPosition } from "../editing/caret-position.js"
+import { caretFromPoint, setElementLookup } from "../editing/geometry.js"
 import { getSelection, holdsNodeSelection, setSelectionHooks, type Selection } from "../dom/selection.js"
 import { bumpTreeVersion } from "../dom/tree-version.js"
 import { createTreeWalker, type NodeFilterLike, type TreeWalker } from "../dom/tree-walker.js"
@@ -483,6 +485,27 @@ export class GpuixDocument<Element = unknown> extends Document {
     return this.elementsFromPoint(x, y)[0] ?? null
   }
 
+  /**
+   * The place in a Text node at the point `(x, y)` of the window that mounted last, in CSS pixels from
+   * its top left corner: the text under the point, or the nearest painted text, and the offset of the
+   * character boundary nearest to it. `null` when no text is painted. A point over no text still
+   * answers, with the nearest one (deviations.md).
+   */
+  caretPositionFromPoint(x: number, y: number, _options?: unknown): CaretPosition | null {
+    const found = caretFromPoint(finiteCoordinate(x, "x"), finiteCoordinate(y, "y"))
+    return found === null ? null : createCaretPosition(found.node, found.offset)
+  }
+
+  /** `caretPositionFromPoint` as a collapsed `Range`. */
+  caretRangeFromPoint(x: number, y: number): Range | null {
+    const found = caretFromPoint(finiteCoordinate(x, "x"), finiteCoordinate(y, "y"))
+    if (found === null) return null
+    const range = new Range()
+    range.setStart(found.node, found.offset)
+    range.collapse(true)
+    return range
+  }
+
   /** The text selection of the window that mounted last. */
   getSelection(): Selection {
     return getSelection()
@@ -657,6 +680,8 @@ export function elementOf(renderer: object, id: number): object | undefined {
   }
   return entry.source.elementById(id)
 }
+
+setElementLookup(elementOf)
 
 /** @internal Records that `owner`'s window just moved focus, for the tie-break of `activeElement`. */
 export function noteFocusEvent(owner: object): void {

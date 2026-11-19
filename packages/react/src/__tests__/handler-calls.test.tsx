@@ -67,8 +67,10 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "nativeSimulateMouseMove",
   "nativeSimulateMouseUp",
   "nativeSimulateScrollWheel",
-  // Both enter the test state, which the handler's own native call holds: they throw "cannot run inside an event handler".
+  // All of them enter the test state, which the handler's own native call holds: they throw "cannot run inside an event handler".
   "postNativeEvent",
+  "postNativeKeys",
+  "pumpNativeEvents",
   "tick",
 ])
 
@@ -156,9 +158,15 @@ function calls(r, ids) {
     getNativeviewWarnings: () => r.getNativeviewWarnings(ids.nativeview),
     getMotionValueVelocity: () => r.getMotionValueVelocity(910),
     getPaintedFrameCount: () => r.getPaintedFrameCount(),
+    getInputMethodBounds: () => r.getInputMethodBounds(ids.box, 0, 0),
+    getInputMethodIndexAtPoint: () => r.getInputMethodIndexAtPoint(ids.box, 1, 1),
     getPaintedHighlights: () => r.getPaintedHighlights(),
+    getPaintedNodeSelection: () => r.getPaintedNodeSelection(),
     getPaintedText: () => r.getPaintedText(),
     getRetainMismatches: () => r.getRetainMismatches(),
+    getTextRangeRects: () => r.getTextRangeRects(ids.box, 0, ids.box, 0),
+    caretPositionFromPoint: () => r.caretPositionFromPoint(1, 1),
+    moveCaretVisually: () => r.moveCaretVisually(ids.box, 0, "lineEnd"),
     getRetainedElementCount: () => r.getRetainedElementCount(),
     getRoot: () => r.getRoot(),
     getScrollMetrics: () => r.getScrollMetrics(ids.scroller),
@@ -229,6 +237,7 @@ function calls(r, ids) {
     setTextLeafEnabled: () => r.setTextLeafEnabled(true),
     setStyleCache: () => r.setStyleCache("on"),
     getRegistrySlots: () => r.getRegistrySlots(),
+    keyEventPending: () => r.keyEventPending(),
     setRetainLift: () => r.setRetainLift(["svg"]),
     setRetainPlanning: () => r.setRetainPlanning(true),
     setRetainEnabled: () => r.setRetainEnabled(true),
@@ -245,6 +254,7 @@ function calls(r, ids) {
     setWindowTitle: () => r.setWindowTitle("handler-calls"),
     setWindowMediaChange: () => r.setWindowMediaChange(false),
     setWindowSelectionChange: () => r.setWindowSelectionChange(false, 1),
+    setYieldAfterKeyEvent: () => r.setYieldAfterKeyEvent(true),
     simulateEditingComposition: () => {
       placeCaretInEditor()
       r.simulateEditingComposition([{ action: "mark", text: "a" }, { action: "unmark" }])

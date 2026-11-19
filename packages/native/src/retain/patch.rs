@@ -297,6 +297,10 @@ impl GpuixView {
             let tree = tree_arc.lock().unwrap();
             self.sync_focus_handles(&tree, window, cx);
         }
+        {
+            let tree = self.tree.lock().unwrap();
+            self.sync_editing_caret(&tree, window, cx);
+        }
         let stepped = self.step_clocks(window, now);
         let mut units = Vec::with_capacity(ids.len());
         let mut tapes = Vec::with_capacity(ids.len());

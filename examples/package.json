@@ -30,6 +30,7 @@
     "native-text": "ghia dev native-text.tsx",
     "chat": "ghia dev chat.main.tsx",
     "chat-solid": "ghia dev solid/main.tsx",
+    "lexical": "ghia dev lexical/editor.main.tsx",
     "chat-solid:build": "ghia build solid/main.tsx",
     "infinite-chat": "ghia dev infinite-chat.main.tsx",
     "timeline": "ghia dev timeline.main.tsx",

@@ -187,4 +187,27 @@ describe("startFrameLoop without display-link wakes", () => {
     loop.stop()
     expect(ticks).toBeGreaterThan(1)
   })
+
+  it("ticks again with setImmediate, not the timer, while a key event is pending", async () => {
+    let ticks = 0
+    let pending = 3
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          return true
+        },
+        keyEventPending: () => {
+          pending -= 1
+          return pending >= 0
+        },
+      },
+      { frameMs: 10_000 },
+    )
+    expect(ticks).toBe(1)
+    for (let immediates = 0; immediates < 5; immediates++) await nextImmediate()
+    loop.stop()
+    expect(ticks).toBe(4)
+  })
 })

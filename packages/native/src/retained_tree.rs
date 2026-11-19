@@ -960,6 +960,10 @@ pub struct RetainedTree {
     pub root_id: Option<u64>,
     /// Dim other focusables while a control has keyboard focus. Set per root.
     keyboard_focus_dim: bool,
+    /// The selection of nodes JS holds in this root, see [`crate::editing::node_selection`].
+    pub(crate) node_selection: crate::editing::node_selection::NodeSelection,
+    /// The text an input method has marked in an editing host, see [`crate::editing::composition`].
+    pub(crate) composition: crate::editing::composition::Composition,
     next_revision: u64,
     /// Whether a paint-only restyle is classified for a patch frame (`StyleChange::strict`). The
     /// view says so (`GpuixView::sync_commit_patching`): patching on and the retention planning.
@@ -1038,6 +1042,8 @@ impl RetainedTree {
             universal: None,
             root_id: None,
             keyboard_focus_dim: true,
+            node_selection: Default::default(),
+            composition: Default::default(),
             next_revision: 1,
             commit_patching: false,
             patch_barrier: 0,
@@ -1450,6 +1456,13 @@ impl RetainedTree {
     /// props, whose text is matched at paint and never enters a `GroupList`.
     pub(crate) fn mark_render_changed(&mut self, id: u64) {
         self.mark_changed_detail(id, false, Dirty::Layout);
+    }
+
+    /// [`Self::mark_render_changed`] for a change that no root of a patch follows: it is a barrier, so a patch
+    /// of the frame before declines (`Unpatchable::Edited`) and the frame is built whole, through retention.
+    pub(crate) fn mark_render_changed_unfollowed(&mut self, id: u64) {
+        self.mark_render_changed(id);
+        self.patch_barrier = self.next_revision.wrapping_sub(1).max(1);
     }
 
     /// [`Self::mark_render_changed`] for a style change that only paints: the window is not asked to

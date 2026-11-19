@@ -25,6 +25,7 @@ export const WIRE_OPCODE = {
   setAttribute: 13,
   setStyleSheet: 14,
   setAdoptedStyleSheets: 15,
+  setNodeSelection: 16,
 } as const
 
 export const WIRE_VALUE_TAG = {
@@ -37,6 +38,19 @@ export const WIRE_VALUE_TAG = {
   string: 6,
   json: 7,
 } as const
+
+/**
+ * The selection of nodes, as a `setNodeSelection` carries it. A boundary is a native node id and an
+ * offset: UTF-16 code units for a text node, a child index for an element.
+ */
+export interface WireNodeSelection {
+  anchorId: number
+  anchorOffset: number
+  focusId: number
+  focusOffset: number
+  /** The editing host the caret is in, 0 for none. */
+  hostId: number
+}
 
 /** What a `setCustomProp` carries: anything JSON can hold. */
 export type WireValue = number | string | boolean | object | null | undefined
@@ -280,6 +294,21 @@ export class WireWriter {
     this.begin(WIRE_OPCODE.setAdoptedStyleSheets, (1 + sheetIds.length) * MAX_ID_BYTES)
     this.id(sheetIds.length)
     for (const sheetId of sheetIds) this.id(sheetId)
+  }
+
+  /** The selection of nodes in this root, or `null` when it has none here. */
+  setNodeSelection(selection: WireNodeSelection | null): void {
+    this.begin(WIRE_OPCODE.setNodeSelection, 1 + 5 * MAX_ID_BYTES)
+    if (selection === null) {
+      this.bytes[this.position++] = 0
+      return
+    }
+    this.bytes[this.position++] = 1
+    this.id(selection.anchorId)
+    this.id(selection.anchorOffset)
+    this.id(selection.focusId)
+    this.id(selection.focusOffset)
+    this.id(selection.hostId)
   }
 
   /** The batch written so far, and the writer ready for the next one. */

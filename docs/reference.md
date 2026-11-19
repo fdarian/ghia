@@ -549,6 +549,7 @@ is atomic: native decodes it whole and resolves every style before it touches an
 | 13 | `setAttribute` | id, string name, bool present, then (when present) string value |
 | 14 | `setStyleSheet` | sheet id, bool present, then (when present) string text |
 | 15 | `setAdoptedStyleSheets` | varint count, then that many sheet ids |
+| 16 | `setNodeSelection` | bool present, then (when present) anchor id, anchor offset, focus id, focus offset, host id |
 
 A string child is an element of type `"#text"` (a DOM text node): the adapters send `createElement id "#text"` and then `setText`. It takes no style, listener, prop or child, and `setText` is for it only.
 
@@ -563,6 +564,8 @@ empty value is a present attribute, not a removal.
 ids. A sheet applies only while `setAdoptedStyleSheets` lists it (the list replaces the previous one; the order is the order of
 the cascade, after the sheets of the document's `<style>` elements). `CSSStyleSheet` and `document.adoptedStyleSheets` send both
 ([Stylesheets](#stylesheets)).
+
+**A `setNodeSelection` carries the selection of nodes** (`getSelection()` over a `Range`, see [Editing hosts](#editing-hosts)) of the root the batch is for: two boundary points, each a node id and a varint offset (UTF-16 code units in a `#text` node, a child index in an element, as in a DOM boundary point), and the id of the editing host that a collapsed selection is the caret of, 0 for none. 0 in the bool clears it. The writer puts it last in the batch, from the selection as it is when the queue flushes, and only when it differs from what the root was sent; a selection that moves to another root clears the one it left. Native paints it (the wash): see [editing.md](./fork/editing.md#painting-the-node-selection).
 
 **A `setCustomProp` value** is a tag byte and its payload:
 
@@ -1476,7 +1479,7 @@ The window behaves as active for focus:
 - `onFocus`, `onBlur`, `focusin` and `focusout` fire on a click, on `focusElement`,
   `focus()`, `autoFocus` and Tab, and `:focus`, `:focus-visible` and the
   `focus`, `focusVisible` and `focusWithin` styles apply;
-- an `<input>` and a `<textarea>` draw and blink their caret;
+- an `<input>` and a `<textarea>` draw and blink their caret, and so does the caret of a focused editing host;
 - text from `fill()` and `press()` arrives together with the focus events, in a
   window that is not key as in one that is.
 
@@ -1648,6 +1651,14 @@ arms no timer. Each tick drains only ready AppKit events and Core Foundation
 sources, then returns without blocking JavaScript I/O. Wakes coalesce while
 JavaScript is busy, and work that arrived meanwhile wakes the next tick. Input
 wakes JavaScript as it arrives, once per batch of events, not at the next vsync.
+A key event (`keydown`, `keyup`, a modifier change) is the exception: it gets a
+tick of its own, with the events or the frame step before it ending their tick
+first, so each key has a microtask checkpoint on both sides, as a browser gives
+each key task ([frames-and-wakes.md](fork/frames-and-wakes.md#one-key-event-per-pump)).
+The tick that ended for a key wakes the loop again at once, and `renderer.keyEventPending()`
+reports it; with `frameMs` set, the timer path ticks again on the next turn of the
+event loop in that case instead of waiting out `frameMs`. Mouse events queued
+together are still handled in one tick.
 
 A visible window that is not the key window animates at the display rate. A
 window that is occluded or minimised gets no frames; animations keep time and
@@ -5274,7 +5285,7 @@ node selection's focus, and only while it is `document.activeElement`.
 
 | Step | Event |
 |---|---|
-| 1 | `keydown` (the key's default action runs only if no handler called `preventDefault()`) |
+| 1 | `keydown` (the key's default action runs only if no handler called `preventDefault()`; an editing host hears it whether or not a listener is on its path) |
 | 2 | `beforeinput`: an `InputEvent` that bubbles, is cancelable (except for `insertCompositionText`) and is composed, aimed at the host |
 | 3 | the change to the DOM: text goes through `insertData`, `deleteContents` and `insertNode`, so a `MutationObserver` records `characterData`, and live ranges and the selection move |
 | 4 | `input`: an `InputEvent` that bubbles, is not cancelable, with the same `inputType`, `data` and `isComposing` |
@@ -5287,18 +5298,55 @@ A composition runs `compositionstart`, `beforeinput` (`insertCompositionText`, `
 for an event that has none. `beforeinput` carries the one range the edit will affect: the caret or the selection for `insertText`, the
 marked text for `insertCompositionText`, and the characters a Backspace or Delete removes. `input` has none.
 
+**Text comes from the platform's text input, not from `keydown`.** A focused editing host registers the window's input handler, so what the
+keyboard types is what the platform gives it, once, after the `keydown`: a character, a dead key's result, an emoji from the picker, text
+from dictation. It runs `beforeinput` (`insertText`; `insertReplacementText` when the platform names a non-empty range to replace),
+the change and `input`. A `keydown` that was prevented gives no text. Nothing the page does on `keydown` has to repeat it.
+
+**An input method's composition runs in an editing host.** The platform marks text (`setMarkedText`) and the host fires `compositionstart` the first
+time, then for each change `beforeinput` (`insertCompositionText`, `isComposing` true, not cancelable), `compositionupdate`, the change and `input`;
+the key that commits it replaces the marked text with the final text (the same four events when it differs) and fires `compositionend` with the
+committed text, and the caret ends after it. A dead key (Option+E, then E) is a composition of one character, `´` then `é`. `unmark` ends it with
+`compositionend` and keeps the text; marking no text cancels it, the text goes and `compositionend` has no data. The keys an input method takes
+are `keydown`s with `key` `"Process"`, and `isComposing` is true on the events after the first. The composition ends, with `compositionend`,
+when the host loses focus (before `blur`) and when the next edit finds that the selection has left the marked text. The platform is told where the
+marked text is on screen, for its candidate window, and which character a point is on, in the paragraphs the selection reaches. What is not
+there yet is under [deviations.md](./fork/deviations.md#events-and-input).
+
 A `keydown` that was not prevented, with no Ctrl, Alt or Cmd, on a focused editing host (not an `<input>` or `<textarea>` inside it) makes:
 
 | Key | `inputType` | `data` |
 |---|---|---|
-| One printable character (one grapheme) | `insertText` | the key |
 | Enter, Shift+Enter | `insertParagraph`, `insertLineBreak` | `null` |
 | Backspace, Delete | `deleteContentBackward`, `deleteContentForward` | `null` |
 
+The platform does not type these keys as text as well: Enter makes no line feed in the text.
+
+**Keys that move the selection.** The same keys, with Ctrl, Alt or Cmd, on a focused editing host whose node selection is inside it, move the caret and delete by a unit of text. The table is Chrome's on macOS (the AppKit key bindings that Chrome runs). Each is a `keydown` default: a handler that calls `preventDefault()` stops it, and one that performs it tells the platform so, so nothing else is typed or scrolled for the key. A key that is not in the table is left to the platform.
+
+| Keys | Does |
+|---|---|
+| Left, Right | `selection.modify("move", ..., "character")`; a range collapses to its start (Left) or end (Right) |
+| Alt+Left, Alt+Right | by word |
+| Cmd+Left, Cmd+Right | to the start or end of the painted row (`lineboundary`) |
+| Up, Down | by painted row, keeping the column across rows (a range collapses to its start or end first); on the first or last row, to the start or end of the host's text |
+| Cmd+Up, Cmd+Down | to the start or end of the host (`documentboundary`) |
+| Shift with any of the above | `modify("extend", ...)` with the same granularity |
+| Shift+Home, Shift+End | extend to the start or end of the host |
+| Cmd+A | `selectAllChildren(host)`: the host's contents, not the document's |
+| Alt+Backspace, Alt+Delete | `deleteWordBackward`, `deleteWordForward` |
+| Cmd+Backspace | `deleteSoftLineBackward`, from the caret to the start of the painted row |
+| Ctrl+B, Ctrl+F; Ctrl+P, Ctrl+N (Shift extends) | the same as Left, Right; Up, Down |
+| Ctrl+H, Ctrl+D | the same as Backspace, Delete |
+
+A deletion fires `beforeinput` (cancelable) with `targetRanges` of the text it will remove, which is worked out from the caret without moving the selection, then changes the DOM and fires `input`; a selection that is not collapsed is deleted whole under the same `inputType`. Home and End alone do not move the caret: on macOS Chrome scrolls the nearest scroller for them (and for Page Up and Page Down), and so does a focused editing host here. The keys that are not done are listed there too.
+
+**The pointer in an editing host.** A press of the primary button on an editing host, or on text in it, focuses the host and then puts the caret at the character under the pointer (the nearer edge of it), as Chrome does: `focus` and `focusin` listeners see the selection as it was before the press, and the focus puts no caret at the start of the host first. A drag extends the selection from there, the focus following the pointer even outside the host, where it is the nearest position in the host. Shift+click extends the focus and keeps the anchor (a plain click when the selection is not in the host). A double click selects the word under the pointer, a triple click the contents of its block (the nearest `p`, `div`, `li`, heading and the like below the host; the host's own contents when there is none), and a drag that follows either extends by words or blocks, from the word or block the press began in, in the direction the pointer went. A press on an empty paragraph (`<p><br></p>`) puts the caret in it, as `(paragraph, 0)`. A point on a `contenteditable="false"` element goes to the nearest editable position outside it (next to an island that sits in a paragraph, on the side the point is nearer), and a press on a focusable control inside an island is the control's. A host that paints no text has its caret at `(host, 0)`. It is the default of `mousedown`: `preventDefault()` on it keeps the caret and the focus where they were, and `pointerdown`'s does not (it holds back the `mousedown` that follows, not the selection). The selection is a node selection, so it is painted as the caret or the wash above, `selectionchange` fires and a framework editor reads it; a press outside every editing host keeps making painted text selection. Not done: [no auto-scroll at the edge while dragging, and no `selectstart`](./fork/deviations.md#events-and-input).
+
 A selected range is replaced or deleted whole; a caret deletes one grapheme, into the neighbouring Text of the host when it sits at the edge of
 its own, or the whole `contenteditable="false"` element it is next to (one stop, whatever it holds). Text typed over a selection that spans two blocks goes into the block the selection began in. The caret ends after the inserted text, or at the deletion. `insertParagraph` and `insertLineBreak` fire `beforeinput` and change
-nothing. The text of an edit comes from `keydown`'s `key`, no caret is painted, and the other `inputType`s do nothing: see
-[deviations.md](./fork/deviations.md#events-and-input). Tab and Escape keep their usual actions. The scroll keys (arrows, Page Up and Down, Home, End, Space) do not scroll the page while an editing host or an element inside one has focus, as with a focused `<input>`.
+nothing, and so does a deletion whose range runs over a block edge. The other `inputType`s do nothing: see
+[deviations.md](./fork/deviations.md#events-and-input). Tab and Escape keep their usual actions. The arrow keys and Space do not scroll the page while an editing host or an element inside one has focus, as with a focused `<input>`; Home, End, Page Up and Page Down do, as in Chrome on macOS.
 ### Listeners and DOM members on an element
 
 A host element (a React ref, a Solid `HostElement`) has the members a library written for the DOM reaches for:
@@ -5426,7 +5474,7 @@ A `Range` is **live**. Taking a node out of its parent moves the boundary points
 | `toString()` | The text the range covers: the end texts cut at the offsets, and the text of the nodes between. |
 | `deleteContents()`, `insertNode(node)` | `deleteContents` cuts the data of the two end texts and removes the nodes between, then collapses the range where the standard says (so a `MutationObserver` and other live ranges see ordinary removals and data changes). `insertNode` splits a text start at the offset and places the node there (a `DocumentFragment`: its children, in order), wrapping the nodes when the range was collapsed; `HierarchyRequestError` for a start that cannot hold it. |
 | `cloneContents()`, `extractContents()`, `surroundContents(newParent)` | The standard's algorithms, returning a `DocumentFragment` of the window the start container is in. `cloneContents` copies the covered part of the two end texts and the nodes between (`cloneNode`) and leaves the tree alone. `extractContents` moves the nodes between into the fragment, cuts the end texts, leaves the range collapsed where the standard says, and the other live ranges follow it as for ordinary removals. `surroundContents` extracts, empties `newParent`, inserts it at the range and puts the contents in it. `InvalidStateError` when an element lies across a boundary, `InvalidNodeTypeError` for a document or a fragment as `newParent`. |
-| `getBoundingClientRect()`, `getClientRects()` | The box of the element the start container is, or is in: not the box of the selected characters. See [deviations](./fork/deviations.md#dom-building-from-code). |
+| `getClientRects()`, `getBoundingClientRect()` | The CSSOM View rules, read from the painted text: for each Text node the range selects or partly selects, one rect for each line fragment of the selected part (the content area of the font there, as Chrome gives for a text node), and for each element the range selects whole, whose parent it does not select, its border box (`element.getClientRects()`). A collapsed range in a Text node is the caret: one rect with no width and the height of the font; a collapsed range in an element has none. `getBoundingClientRect()` is the union, or `new DOMRect()` with no rects. The read lays out and paints what changed first, so a change made earlier in the same handler is seen. Text that did not paint (`display: none`, `user-select: none`, hidden, or inside an anchored or virtual-list leaf run) has no rects. See [deviations](./fork/deviations.md#dom-selection-and-ranges). |
 
 `createContextualFragment()` and `expand()` are not there. `window.getSelection()` holds a live `Range` of its own once code selects nodes (see `document.getSelection()` under window and document).
 
@@ -5586,6 +5634,17 @@ laid out first, so an element mounted in the same turn is found, and an element 
 `pointer-events: none`, `visibility: hidden` or `display: none` is left out. A coordinate
 that is not finite throws a `TypeError`, and both throw before a root is mounted.
 
+`document.caretPositionFromPoint(x, y)` takes client coordinates and answers with a `CaretPosition`
+(a global; `offsetNode` is a Text node, `offset` a UTF-16 offset in its data, and
+`getClientRect()` the rect of the caret there, or `null` when the text did not paint): the
+character boundary nearest the point, in the painted text under it or the nearest to it.
+`document.caretRangeFromPoint(x, y)` is the same as a collapsed `Range`. Both are `null` when
+no text is painted, lay out and paint what changed first, and throw a `TypeError` for a
+coordinate that is not finite. Only text that is a Text node of a paragraph counts (not text of a
+`<code>`, `<markdown>` or `<diff>`, nor text under `user-select: none`), and a point over no text
+answers with the nearest text in the window instead of `(element, 0)`: see
+[deviations](./fork/deviations.md#dom-selection-and-ranges).
+
 `document.getSelection()` and `window.getSelection()` give the one `Selection` of the app
 (`Selection` is a global, and its constructor throws `Illegal constructor`). It is one of two
 things. After code selects nodes (`setBaseAndExtent`, `collapse`, `selectAllChildren`,
@@ -5605,9 +5664,11 @@ painted text, and a drag that paints text drops the node range.
 | `containsNode(node, allowPartialContainment = false)` | Whether all of the node, or with the flag any of it, is in the node range (with the flag a node whose first point is not after the range's end, or whose last point is not before its start, counts). `false` with no node range. |
 | `deleteFromDocument()` | `deleteContents()` on the node range, leaving a caret. Painted text is not nodes and stays. |
 | `getComposedRanges(...)` | A one-item array of a `StaticRange`, or `[]`. There is no shadow DOM, so no argument changes it. |
-| `modify(alter, direction, granularity)` | `alter` is `"move"` or `"extend"`, `direction` `"forward"`, `"backward"`, `"left"` or `"right"` (the last two read as the first two: there is no bidirectional layout), `granularity` `"character"` (a grapheme cluster) or `"word"` (to the end of the next word going forward, the start of the previous one going back, as on macOS). The text is that of the Text nodes under the editing host the focus is in, or the document, in tree order; a block element or a `<br>` between two Text nodes is one step, an inline element none, and a `contenteditable="false"` element inside the host is one step whole. Moving a range by character collapses it to its edge, as Chrome does. A name the standard does not have does nothing, and so does an empty selection. `"line"`, `"lineboundary"`, `"sentence"`, `"sentenceboundary"`, `"paragraph"`, `"paragraphboundary"` and `"documentboundary"` throw `NotSupportedError`, because they need layout. |
+| `modify(alter, direction, granularity)` | `alter` is `"move"` or `"extend"`, `direction` `"forward"`, `"backward"`, `"left"` or `"right"` (the last two read as the first two: there is no bidirectional layout). `"character"` (a grapheme cluster) and `"word"` (to the end of the next word going forward, the start of the previous one going back, as on macOS) walk the Text nodes under the editing host the focus is in, or the document, in tree order; a block element or a `<br>` between two Text nodes is one step, an inline element none, and a `contenteditable="false"` element inside the host is one step whole. `"line"` moves one painted line down (`forward`) or up (`backward`) in the paragraph or the one after or before it, to the character nearest the x the caret had when the run of moves began: consecutive `modify(..., "line")` calls keep that goal x across a shorter line, and any other change of the selection forgets it. With no line left in the host, the caret goes to the start of its text going up and the end going down, as on macOS. An empty paragraph (a block of nothing but a `<br>`) is one line at its painted box: Down from the line above stops in it with the caret at `(block, 0)`, and a move from it goes to the neighbouring line at the same goal x, whether it is first, last or between ([deviations](./fork/deviations.md#dom-selection-and-ranges)). `"lineboundary"` goes to the start or the end of the painted line (the end of a line that wraps is before the space that hangs off it); `"documentboundary"` to the first or last position of the host's text. Moving a range by character collapses it to its edge, as Chrome does. A name the standard does not have does nothing, and so does an empty selection or a caret with no Text node next to it that is not in an empty paragraph (an empty block with no `<br>`). `"sentence"`, `"sentenceboundary"`, `"paragraph"` and `"paragraphboundary"` throw `NotSupportedError`. |
 
-Focus moving into an editing host puts a collapsed caret at its first position (the start of its first Text, else `(host, 0)`), unless the selection is already inside it: `focus()` does it, and so do Tab, Shift+Tab and a click (which does not yet put it at the point), before `focusin` is delivered. The selection holds no caret or highlight that is painted yet: see [deviations](fork/deviations.md#events-and-input).
+A node selection that is not collapsed is painted: the text between the two points, in every paragraph it reaches, gets a wash in the colour the dragged selection has (the theme's accent at 35%, or the CSS `selectionColor` as for dragged text), under the glyphs, for each line the selection covers; `user-select: none` text takes none. Changing the selection rebuilds the paragraphs it touches and no others (retention skips the rest), but the frame is built whole, not patched ([editing.md](./fork/editing.md#painting-the-node-selection)). A collapsed selection in an editing host is painted as a caret: a 2px quad as tall as the row it is on, in the theme's caret colour (`caret-color` is not read: [deviations](fork/deviations.md#events-and-input)), solid when it moves or comes and then blinking every 500 ms as an `<input>`'s does. It shows while the host has focus and the window is key, and not while a range is selected, the host is blurred or the window is inactive; a caret that is not shown asks for no frame. A caret at an element boundary with no text next to it, as in Lexical's empty `<p><br></p>`, is painted at the start of the line the `<br>` makes. A blink repaints only the paragraph that holds the caret. The wash and the caret are read back in tests with `renderer.getPaintedNodeSelection()`: `{ washes, caret }`, where `washes` has one `{ key, start, end, rects }` per washed paragraph (the washed text as UTF-16 offsets and a box for each line) and `caret` is `{ key, rect, lit }` (window coordinates; `lit` is false in the phase it is painted in no colour; `key` is empty for the caret of an empty line) or absent.
+
+Focus moving into an editing host puts a collapsed caret at its first position (the start of its first Text, else `(host, 0)`), unless the selection is already inside it: `focus()` does it, and so do Tab and Shift+Tab, before `focusin` is delivered. A click does not: it moves the selection to the point after the focus events. The caret is painted ([above](#editing-hosts)).
 
 `document` hears `selectionchange` when the selection changes: a node selection made from code,
 moved by a tree or data change under it, changed through its `Range`, or cleared, which is one event in one task however many
@@ -10604,20 +10665,30 @@ names a `code` (`"KeyA"`, `"NumpadEnter"`) reports exactly that `code`, and for
 a character key the US character on it (`"a"`, `"A"` with Shift), whatever
 layout the machine has; a press that names a key (`"a"`, `"Enter"`) derives
 `code` from it for a US QWERTY layout. The browser (wasm) automation path
-passes the names through to the page without checking them.
+passes the names through to the page without checking them. The live automation
+client (`keystrokes`, `press()`) presses a sequence one key at a time with a turn
+of the event loop after each, as separate key events from the OS arrive; a
+synchronous `simulateKeystrokes` on the test renderer runs every key inside one
+call, where no microtask runs between two keys, and an editor that commits its
+update in a microtask (Lexical) loses all but the first of "m i d" typed that
+way ([deviations.md](fork/deviations.md#events-and-input)): give it one call
+per key and `await` between them. Keys from the keyboard are not affected: the frame loop's pump ends after each key event and the next tick takes the next key, so each has its own microtask checkpoint ([frames-and-wakes.md](fork/frames-and-wakes.md#one-key-event-per-pump)). A sequence whose later press is not a key has
+pressed the ones before it by then, where the test renderer pressed none.
 `nativeSimulateModifiersChanged("shift")` reports the held modifiers changing, the
 way the platform does for a modifier pressed or released on its own (a `Shift`
 press sends a key event instead); Shift on its own counts as a key for
 `:focus-visible`, Ctrl, Alt and Meta do not.
 
-`simulateComposition(id, steps)` focuses an `<input>` or `<textarea>` and runs an
-input method composition in it, one step per key the input method takes. A step
+`simulateComposition(id, steps)` focuses an `<input>`, a `<textarea>` or an editing host and runs an
+input method composition in it, one step per key the input method takes. In a host the selection has to be
+in it first, and the steps go through the platform's text input as AppKit's would. A step
 is `{ key, action: 'mark', text }` (the composition becomes `text`),
 `{ key, action: 'commit', text }` (it ends with `text`) or
 `{ key, action: 'unmark' }` (it ends with the text it has). Each step sends the
 `"Process"` `keydown`, the composition events and the `change` of the edit, then
-the `keyup` of that key, as in [Input method composition](#input-method-composition).
-It throws when `id` is not a focusable text input.
+the `keyup` of that key, as in [Input method composition](#input-method-composition)
+and [Editing hosts](#editing-hosts). It throws when `id` is not a focusable text input or
+editing host.
 
 ```ts
 renderer.simulateComposition(id, [
@@ -10629,10 +10700,13 @@ renderer.simulateComposition(id, [
 
 `simulateEditingInput(inputType, data?)` makes one edit of the focused editing host, without a key: `beforeinput`, the change
 unless a listener canceled it, then `input` (see [Editing hosts](#editing-hosts)). `simulateEditingComposition(steps)` runs a
-composition in it with the same step shapes as `simulateComposition` (`{ action: 'mark', text }`, `{ action: 'commit', text }`,
+composition in it, with no platform text input (so what the platform is told is not exercised), with the same step shapes as `simulateComposition` (`{ action: 'mark', text }`, `{ action: 'commit', text }`,
 `{ action: 'unmark' }`; a `key` is accepted and ignored, and no key events are sent): `mark` replaces the marked text with `text`,
 `commit` does so with the final text if it differs and then fires `compositionend`, and `unmark` is `compositionend` alone. Both
-run synchronously and throw when no editing host holds focus and the selection.
+run synchronously and throw when no editing host holds focus and the selection. `getInputMethodBounds(hostId, start, end)` and
+`getInputMethodIndexAtPoint(hostId, x, y)` read what the platform's input method is told about a focused host: the window rect of the
+characters `start..end` (UTF-16 offsets into the text of the paragraphs the selection reaches, `null` where there is none), and the offset of
+the character at a point.
 
 ```ts
 host.focus()
@@ -10698,6 +10772,28 @@ render(<div style={{ width: '100%', height: '100%' }} onMouseMove={() => moved++
 const loop = startFrameLoop(renderer) // no timer: an idle window is not ticked
 renderer.postNativeEvent('mouseMove', 100, 100) // wakes the loop, which ticks, and runs onMouseMove
 loop.stop()
+```
+
+To test what the live pump does with several keys, the test renderer has three more
+calls (macOS only). `postNativeKeys(text)` queues a `keyDown` and a `keyUp` for each
+character of `text` in AppKit's queue for the test window, all before the next pump;
+it takes lowercase ASCII letters and spaces and throws on anything else.
+`pumpNativeEvents()` is one call of the pump a live window's `tick()` runs
+(`pump_app_nonblocking`), then the handlers' queued events: with
+`setYieldAfterKeyEvent(true)`, the default, it ends around the first key it reaches, so
+queued keys take one call each and the test runs the microtask checkpoint between calls
+(`await` a turn of the event loop), as the frame loop does for a live window.
+`setYieldAfterKeyEvent(false)` makes one call send every queued event, as before.
+`keyEventPending()` is true when the last `pumpNativeEvents()` left a key queued or ended
+after sending one; the live renderer has the same method for its last `tick()`. `tick()`
+itself is not that pump: it hands every queued event to the window at once.
+
+```ts
+renderer.postNativeKeys('abc')
+do {
+  renderer.pumpNativeEvents()
+  await new Promise((resolve) => setImmediate(resolve)) // the app's microtasks run here
+} while (renderer.keyEventPending())
 ```
 
 ### Testing native elements

@@ -4,6 +4,8 @@ import {
   $createParagraphNode,
   $createTextNode,
   $getRoot,
+  $getSelection,
+  $isRangeSelection,
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
   createEditor,
@@ -167,21 +169,21 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     expect(uncaught).toEqual([])
   })
 
-  it('7. a click on the editable is harmless: the selection stays where it was put and typing goes there', async () => {
-    // Put the caret at the start explicitly, so nothing depends on where an earlier step left it.
+  it('7. a click on the editable puts the caret where it landed: the selection moves there and typing goes there', async () => {
     const textNode = element.querySelector('span')?.firstChild
     if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
     const selection = getSelection()
     if (selection === null) throw new Error('getSelection() returned null')
-    selection.setBaseAndExtent(textNode, 0, textNode, 0)
+    // The caret is at the end, so a click that does nothing leaves it there.
+    const length = (textNode as Text).data.length
+    selection.setBaseAndExtent(textNode, length, textNode, length)
     await settle()
     const first = paragraphs()[0]
     const box = element.getBoundingClientRect()
-    root.renderer.nativeSimulateMouseDown(box.x + 10, box.y + 8)
-    root.renderer.nativeSimulateMouseUp(box.x + 10, box.y + 8)
+    root.renderer.nativeSimulateMouseDown(box.x + 1, box.y + 8)
+    root.renderer.nativeSimulateMouseUp(box.x + 1, box.y + 8)
     await settle()
     expect(uncaught).toEqual([])
-    // A click in an editing host does not move the node selection yet (deviations.md), so it still sits at the start.
     expect([selection.anchorNode === textNode, selection.anchorOffset, selection.isCollapsed]).toEqual([true, 0, true])
     expect(document.activeElement === element).toBe(true)
     await press('z')
@@ -200,5 +202,207 @@ describeNative('vanilla Lexical in @ghia/solid on Ghia', () => {
     expect(lexicalText()).toBe('Updated')
     expect(painted()).toContain('Updated')
     expect(updates.length).toBeGreaterThan(updatesBefore)
+  })
+
+  it('10. an input method composes: Lexical gets the committed text once, and the DOM and Lexical agree after every step', async () => {
+    const textNode = element.querySelector('span')?.firstChild
+    if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(textNode, 7, textNode, 7)
+    await nextTask()
+    await settle()
+    const id = root.renderer.getFocusedElementId()
+    if (id === null) throw new Error('the editable root has no focus')
+    const events: string[] = []
+    for (const type of ['compositionstart', 'compositionend']) element.addEventListener(type, () => events.push(type))
+    const step = (key: string, text: string) => ({ key, action: 'mark' as const, text })
+    for (const marked of [step('k', 'k'), step('a', 'か'), step('n', 'かn'), step('a', 'かな')]) {
+      root.renderer.simulateComposition(id, [marked])
+      await nextTask()
+      await settle()
+      // Lexical keeps zero-width spaces around the text of a composition.
+      expect(element.textContent?.replaceAll('\u200b', '')).toBe(`Updated${marked.text}`)
+    }
+    root.renderer.simulateComposition(id, [{ key: 'Enter', action: 'commit', text: 'かな' }])
+    await nextTask()
+    await settle()
+    expect(events).toEqual(['compositionstart', 'compositionend'])
+    expect(paragraphs()).toEqual(['Updatedかな'])
+    expect(element.textContent).toBe('Updatedかな')
+    expect(painted()).toContain('Updatedかな')
+    await press('!')
+    await nextTask()
+    await settle()
+    expect(paragraphs()).toEqual(['Updatedかな!'])
+    expect(uncaught).toEqual([])
+  })
+
+  it('11. Option+Backspace deletes a word and Shift+ArrowLeft extends: Lexical and the DOM agree', async () => {
+    editor.update(() => {
+      const paragraph = $createParagraphNode()
+      paragraph.append($createTextNode('one two three'))
+      $getRoot().clear().append(paragraph)
+    })
+    await nextTask()
+    await settle()
+    const textNode = element.querySelector('span')?.firstChild
+    if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(textNode, 13, textNode, 13)
+    await nextTask()
+    await settle()
+    await press('Alt+Backspace')
+    await nextTask()
+    await settle()
+    expect(paragraphs()).toEqual(['one two '])
+    expect(element.textContent).toBe('one two ')
+    expect(painted()).toContain('one two ')
+    await press('Shift+ArrowLeft Shift+ArrowLeft')
+    await nextTask()
+    await settle()
+    expect(editor.getEditorState().read(() => $getSelection()?.getTextContent())).toBe('o ')
+    expect(selection.toString()).toBe('o ')
+    expect(uncaught).toEqual([])
+  })
+
+  it('12. a click into the middle of a word puts the caret there: Lexical\'s selection is at the offset and typing lands in it', async () => {
+    editor.update(() => {
+      const paragraph = $createParagraphNode()
+      paragraph.append($createTextNode('one two three'))
+      $getRoot().clear().append(paragraph)
+    })
+    await nextTask()
+    await settle()
+    const textNode = element.querySelector('span')?.firstChild
+    if (textNode === null || textNode === undefined) throw new Error('no text node under the editable root')
+    // Where the caret is painted at offset 5, between `t` and `wo`; a click a pixel to its right is nearest to it.
+    const range = document.createRange()
+    range.setStart(textNode, 5)
+    range.collapse(true)
+    const at = range.getBoundingClientRect()
+    root.renderer.nativeSimulateMouseDown(at.x + 1, at.y + at.height / 2)
+    root.renderer.nativeSimulateMouseUp(at.x + 1, at.y + at.height / 2)
+    await settle()
+    expect(editor.getEditorState().read(() => {
+      const selection = $getSelection()
+      return $isRangeSelection(selection) ? [selection.anchor.offset, selection.focus.offset, selection.isCollapsed()] : null
+    })).toEqual([5, 5, true])
+    await press('X')
+    await settle()
+    expect(paragraphs()).toEqual(['one tXwo three'])
+    expect(element.textContent).toBe('one tXwo three')
+    expect(painted()).toContain('one tXwo three')
+    expect(uncaught).toEqual([])
+  })
+
+  it('13. a click on an empty paragraph puts the caret in it: Lexical\'s selection is that paragraph and typing lands in it', async () => {
+    editor.update(() => {
+      const paragraph = (text: string) => {
+        const node = $createParagraphNode()
+        if (text !== '') node.append($createTextNode(text))
+        return node
+      }
+      $getRoot().clear().append(paragraph('one'), paragraph(''), paragraph('three'))
+    })
+    await nextTask()
+    await settle()
+    const empty = element.querySelectorAll('p')[1]
+    if (empty === undefined) throw new Error('no second paragraph')
+    expect(empty.textContent).toBe('')
+    const at = empty.getBoundingClientRect()
+    root.renderer.nativeSimulateMouseDown(at.x + 4, at.y + at.height / 2)
+    root.renderer.nativeSimulateMouseUp(at.x + 4, at.y + at.height / 2)
+    await nextTask()
+    await settle()
+    expect(editor.getEditorState().read(() => {
+      const selection = $getSelection()
+      return $isRangeSelection(selection) ? [selection.anchor.getNode().getKey() === $getRoot().getChildAtIndex(1)?.getKey(), selection.isCollapsed()] : null
+    })).toEqual([true, true])
+    await press('X')
+    await nextTask()
+    await settle()
+    expect(paragraphs()).toEqual(['one', 'X', 'three'])
+    expect(element.querySelectorAll('p')[1]?.textContent).toBe('X')
+    expect(painted()).toContain('X')
+    expect(uncaught).toEqual([])
+  })
+
+  it('14. ArrowDown and ArrowUp stop in empty paragraphs, a trailing one included: Lexical\'s selection is that paragraph and typing lands in it', async () => {
+    editor.update(() => {
+      const paragraph = (text: string) => {
+        const node = $createParagraphNode()
+        if (text !== '') node.append($createTextNode(text))
+        return node
+      }
+      $getRoot().clear().append(paragraph('one two'), paragraph(''), paragraph('three four'), paragraph(''))
+    })
+    await nextTask()
+    await settle()
+    const first = element.querySelector('span')?.firstChild
+    if (first === null || first === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(first, 4, first, 4)
+    await nextTask()
+    await settle()
+    const paragraphIndex = (): number | null =>
+      editor.getEditorState().read(() => {
+        const lexical = $getSelection()
+        if (!$isRangeSelection(lexical) || !lexical.isCollapsed()) return null
+        return $getRoot().getChildren().findIndex((child) => child.getKey() === lexical.anchor.getNode().getTopLevelElementOrThrow().getKey())
+      })
+    const visit = async (keys: string, expected: number): Promise<void> => {
+      await press(keys)
+      await nextTask()
+      await settle()
+      expect(paragraphIndex()).toBe(expected)
+    }
+    await visit('ArrowDown', 1)
+    expect(editor.getEditorState().read(() => ($getSelection() as { anchor: { offset: number } }).anchor.offset)).toBe(0)
+    await visit('ArrowDown', 2)
+    await visit('ArrowDown', 3)
+    await visit('ArrowDown', 3)
+    await visit('ArrowUp', 2)
+    await visit('ArrowUp', 1)
+    await visit('ArrowUp', 0)
+    await visit('ArrowDown', 1)
+    await press('X')
+    await nextTask()
+    await settle()
+    expect(paragraphs()).toEqual(['one two', 'X', 'three four', ''])
+    expect(uncaught).toEqual([])
+  })
+
+  it('15. keys that AppKit queues before one tick each get their own microtask checkpoint: Lexical commits every one', async () => {
+    editor.update(() => {
+      const paragraph = $createParagraphNode()
+      paragraph.append($createTextNode('Hello'))
+      $getRoot().clear().append(paragraph)
+    })
+    await nextTask()
+    await settle()
+    const first = element.querySelector('span')?.firstChild
+    if (first === null || first === undefined) throw new Error('no text node under the editable root')
+    const selection = getSelection()
+    if (selection === null) throw new Error('getSelection() returned null')
+    selection.setBaseAndExtent(first, 5, first, 5)
+    await nextTask()
+    await settle()
+    // Three letters, each a keyDown and a keyUp, are in AppKit's queue before the first pump, as when a slow frame
+    // or key repeat leaves several waiting. A pump sends one key event and the loop turns before the next.
+    root.renderer.postNativeKeys('abc')
+    // A keyDown and a keyUp for each of the three letters, and one pump more.
+    for (let pump = 0; pump < 7; pump++) {
+      root.renderer.pumpNativeEvents()
+      await nextTask()
+    }
+    await settle()
+    expect(lexicalText()).toBe('Helloabc')
+    expect(paragraphs()).toEqual(['Helloabc'])
+    expect(element.textContent).toBe('Helloabc')
+    expect(painted()).toContain('Helloabc')
+    expect(uncaught).toEqual([])
   })
 })
