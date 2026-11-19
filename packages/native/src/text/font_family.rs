@@ -13,7 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use gpui::{font, App, FontFallbacks, FontId, Global, SharedString, TextSystem};
 
@@ -25,8 +25,9 @@ pub(crate) struct Resolved {
 }
 
 /// What a resolution depended on: a text system with other fonts installed resolves a list differently, so anything
-/// kept from a resolution is kept per stamp. It names the families the text system lists, not the App or the number of
-/// times fonts were added, so two Apps with the same fonts share what is kept.
+/// kept from a resolution is kept per stamp. It hashes the fonts the App registered (not the system's, which do not
+/// change within a process and which CoreText takes ~70 ms to list), so two Apps that registered the same fonts share
+/// what is kept.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Stamp(u64);
 
@@ -37,9 +38,8 @@ impl Global for Fonts {}
 
 struct Shared {
     text_system: Arc<TextSystem>,
-    /// The family names the text system lists: the platform's own and the ones fonts were added under.
-    families: Box<dyn Fn() -> Vec<String>>,
-    /// The stamp of a generation, read once: listing the families asks the platform.
+    /// A hash of the bytes of each font registered through [`Fonts::add`].
+    registered: RefCell<Vec<u64>>,
     stamp: Cell<Option<(u64, Stamp)>>,
     state: RefCell<Option<State>>,
 }
@@ -54,38 +54,28 @@ struct State {
     resolved: HashMap<String, Resolved>,
 }
 
-/// The families `text_system` lists. Asking CoreText for them takes ~70 ms, so a text system that no font was added to
-/// (every App's first generation) shares one answer for the process instead of asking again per App: each new App
-/// would otherwise spend that on its first frame, which a test's animation clock counts as elapsed time.
-fn installed_families(text_system: &TextSystem) -> Vec<String> {
-    static PLATFORM: OnceLock<Vec<String>> = OnceLock::new();
-    if text_system.font_generation() == 0 {
-        return PLATFORM.get_or_init(|| text_system.all_font_names()).clone();
-    }
-    text_system.all_font_names()
-}
-
 impl Fonts {
     /// The fonts of `cx`'s App, made on first use.
     pub(crate) fn of(cx: &mut App) -> Fonts {
         if let Some(fonts) = cx.try_global::<Fonts>() {
             return fonts.clone();
         }
-        let text_system = cx.text_system().clone();
-        let listed = text_system.clone();
-        let fonts = Fonts::new(text_system, Box::new(move || installed_families(&listed)));
+        let fonts = Fonts::new(cx.text_system().clone());
         cx.set_global(fonts.clone());
         fonts
     }
 
-    /// Lists the installed families now, at window creation, so the first frame does not: that frame's clock is read
-    /// before it builds a style, and a test's animation would count the listing as elapsed time.
-    pub(crate) fn warm(cx: &mut App) {
-        Fonts::of(cx).stamp();
+    fn new(text_system: Arc<TextSystem>) -> Fonts {
+        Fonts(Rc::new(Shared { text_system, registered: RefCell::new(Vec::new()), stamp: Cell::new(None), state: RefCell::new(None) }))
     }
 
-    fn new(text_system: Arc<TextSystem>, families: Box<dyn Fn() -> Vec<String>>) -> Fonts {
-        Fonts(Rc::new(Shared { text_system, families, stamp: Cell::new(None), state: RefCell::new(None) }))
+    /// Adds the fonts in `bytes` to the text system and remembers them for the [`Stamp`].
+    pub(crate) fn add(&self, bytes: Vec<u8>) -> anyhow::Result<()> {
+        let mut hasher = rustc_hash::FxHasher::default();
+        bytes.hash(&mut hasher);
+        self.0.text_system.add_fonts(vec![std::borrow::Cow::Owned(bytes)])?;
+        self.0.registered.borrow_mut().push(hasher.finish());
+        Ok(())
     }
 
     #[cfg(test)]
@@ -93,13 +83,18 @@ impl Fonts {
         Fonts::for_tests_with(&[])
     }
 
-    /// A text system that lists `families` besides what a bare one does.
+    /// A text system that was given `fonts` to add, as a registering App's is.
     #[cfg(test)]
-    pub(crate) fn for_tests_with(families: &[&str]) -> Fonts {
-        let families: Vec<String> = families.iter().map(|family| family.to_string()).collect();
-        Fonts::new(Arc::new(TextSystem::new(Arc::new(gpui::NoopTextSystem::new()))), Box::new(move || families.clone()))
+    pub(crate) fn for_tests_with(fonts: &[&[u8]]) -> Fonts {
+        let registered = Fonts::new(Arc::new(TextSystem::new(Arc::new(gpui::NoopTextSystem::new()))));
+        for bytes in fonts {
+            registered.add(bytes.to_vec()).expect("the noop text system takes any font");
+        }
+        registered
     }
 
+    /// The font generation counts every addition to the text system, so a font added around [`Fonts::add`] still moves
+    /// the stamp.
     pub(crate) fn stamp(&self) -> Stamp {
         let generation = self.0.text_system.font_generation();
         if let Some((read_at, stamp)) = self.0.stamp.get() {
@@ -107,11 +102,12 @@ impl Fonts {
                 return stamp;
             }
         }
-        let mut families = (self.0.families)();
-        families.sort_unstable();
-        families.dedup();
+        let mut registered = self.0.registered.borrow().clone();
+        registered.sort_unstable();
+        registered.dedup();
         let mut hasher = rustc_hash::FxHasher::default();
-        families.hash(&mut hasher);
+        generation.hash(&mut hasher);
+        registered.hash(&mut hasher);
         let stamp = Stamp(hasher.finish());
         self.0.stamp.set(Some((generation, stamp)));
         stamp
@@ -304,6 +300,16 @@ mod tests {
     fn picked(list: &str, installed: &[&str]) -> (String, Vec<String>) {
         let resolved = pick(list, |name| installed.contains(&name));
         (resolved.family.to_string(), resolved.fallbacks.fallback_list().to_vec())
+    }
+
+    #[test]
+    fn the_stamp_follows_the_registered_fonts_and_not_their_order() {
+        let none = Fonts::for_tests().stamp();
+        assert_eq!(Fonts::for_tests().stamp(), none);
+        let both = Fonts::for_tests_with(&[b"one", b"two"]).stamp();
+        assert_eq!(Fonts::for_tests_with(&[b"two", b"one"]).stamp(), both);
+        assert_ne!(Fonts::for_tests_with(&[b"one"]).stamp(), none);
+        assert_ne!(Fonts::for_tests_with(&[b"one"]).stamp(), Fonts::for_tests_with(&[b"two"]).stamp());
     }
 
     fn texts(list: &str) -> Vec<String> {

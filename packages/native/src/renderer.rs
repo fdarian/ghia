@@ -2239,7 +2239,6 @@ impl GpuixRenderer {
                         view.observe_scroller_style(cx);
                         view.set_frameless(window_options.frameless());
                         crate::events::enable_dom_hit_testing(window);
-                        crate::text::font_family::Fonts::warm(cx);
                         crate::focus_emulation::apply(window, cx);
                         crate::layout::container::allow_redraw_passes(window);
                         view.install_key_interception(window, cx);
@@ -2399,7 +2398,6 @@ impl GpuixRenderer {
                                         view.observe_scroller_style(cx);
                                         view.set_frameless(window_options.frameless());
                                         crate::events::enable_dom_hit_testing(window);
-                                        crate::text::font_family::Fonts::warm(cx);
                                         crate::focus_emulation::apply(window, cx);
                                         crate::layout::container::allow_redraw_passes(window);
                                         view.install_key_interception(window, cx);
@@ -7571,10 +7569,7 @@ impl GpuixView {
         cx: &mut gpui::Context<Self>,
     ) -> std::result::Result<(), String> {
         check_font(&bytes)?;
-        window
-            .text_system()
-            .add_fonts(vec![std::borrow::Cow::Owned(bytes)])
-            .map_err(|error| error.to_string())?;
+        crate::text::font_family::Fonts::of(cx).add(bytes).map_err(|error| error.to_string())?;
         cx.notify();
         window.refresh();
         Ok(())

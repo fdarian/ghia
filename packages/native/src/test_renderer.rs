@@ -831,7 +831,6 @@ impl TestGpuixRenderer {
                         view.set_resync_hover_by_frame(true);
                         view.set_frameless(frameless);
                         crate::events::enable_dom_hit_testing(window);
-                        crate::text::font_family::Fonts::warm(cx);
                         crate::focus_emulation::apply(window, cx);
                         crate::layout::container::allow_redraw_passes(window);
                         view.install_key_interception(window, cx);
