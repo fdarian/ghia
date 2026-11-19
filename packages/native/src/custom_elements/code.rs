@@ -29,6 +29,8 @@ use std::sync::Arc;
 
 use gpui::{px, Font, Hsla, SharedString};
 
+use crate::text::font_family::Fonts;
+
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::css::length::{LengthContext, LinearLength};
 use crate::css::line_height::LineHeight;
@@ -95,6 +97,7 @@ impl CodeElement {
 #[derive(Clone, PartialEq, Debug)]
 struct Typography {
     family: String,
+    fallbacks: gpui::FontFallbacks,
     weight: gpui::FontWeight,
     text_size: f32,
     line_height: f32,
@@ -104,6 +107,7 @@ struct Typography {
 impl Typography {
     fn font(&self) -> Font {
         let mut font = gpui::font(self.family.clone());
+        font.fallbacks = Some(self.fallbacks.clone());
         font.weight = self.weight;
         font
     }
@@ -116,6 +120,7 @@ fn typography(
     lengths: &LengthContext,
     theme: &Theme,
     m: &Metrics,
+    fonts: &Fonts,
 ) -> Typography {
     let text_size = style
         .is_some_and(|style| style.font_size.is_some())
@@ -125,10 +130,12 @@ fn typography(
     // The row is painted at `text_size`, which is the theme's when the style sets
     // none, so a multiplier or `em` means that size and not the inherited one.
     let painted = lengths.descend(Some(&LinearLength::px(f64::from(text_size))), false);
+    let family = style.and_then(|style| style.font_family.as_deref()).map(|list| fonts.resolve(list));
     Typography {
-        family: style
-            .and_then(|style| style.font_family.clone())
-            .unwrap_or_else(|| theme.font_mono.clone()),
+        family: family
+            .as_ref()
+            .map_or_else(|| theme.font_mono.clone(), |resolved| resolved.family.to_string()),
+        fallbacks: family.map_or_else(|| gpui::FontFallbacks::from_fonts(Vec::new()), |resolved| resolved.fallbacks),
         weight: style
             .and_then(|style| style.font_weight.as_ref())
             .map(crate::renderer::parse_font_weight)
@@ -179,7 +186,7 @@ impl CustomElement for CodeElement {
         let theme = self.theme.clone();
         let m = &theme.metrics;
         let highlight = self.resolve_highlight();
-        let type_style = typography(ctx.style, &ctx.lengths, &theme, m);
+        let type_style = typography(ctx.style, &ctx.lengths, &theme, m, &ctx.fonts);
         let font = type_style.font();
         let lines: Vec<&str> = self.code.split('\n').collect();
         let gutter_width = gutter_width(lines.len(), m);
@@ -196,6 +203,7 @@ impl CustomElement for CodeElement {
             .text_size(px(type_style.text_size))
             .line_height(px(type_style.line_height))
             .white_space(WhiteSpace::Pre);
+        content.text_style().font_fallbacks = Some(type_style.fallbacks.clone());
 
         for (line_ix, line) in lines.iter().enumerate() {
             let spans: Vec<(std::ops::Range<usize>, gpui::Hsla)> = highlight
@@ -314,7 +322,7 @@ mod tests {
     #[test]
     fn typography_falls_back_to_the_theme() {
         let theme = Theme::dark();
-        let resolved = typography(None, &lengths_of(None), &theme, &theme.metrics);
+        let resolved = typography(None, &lengths_of(None), &theme, &theme.metrics, &Fonts::for_tests());
         assert_eq!(resolved.family, theme.font_mono);
         assert_eq!(resolved.text_size, theme.metrics.code_text_size);
         assert_eq!(resolved.line_height, theme.metrics.code_line_height);
@@ -331,7 +339,7 @@ mod tests {
             color: Some("#ff0000".to_string()),
             ..Default::default()
         };
-        let resolved = typography(Some(&style), &lengths_of(Some(&style)), &theme, &theme.metrics);
+        let resolved = typography(Some(&style), &lengths_of(Some(&style)), &theme, &theme.metrics, &Fonts::for_tests());
         assert_eq!(resolved.family, "Fira Code");
         assert_eq!(resolved.text_size, 20.0);
         assert_eq!(resolved.line_height, 30.0);
@@ -348,13 +356,13 @@ mod tests {
             font_size: Some(LinearLength::px(0.0)),
             ..Default::default()
         };
-        let resolved = typography(Some(&style), &lengths_of(Some(&style)), &theme, &theme.metrics);
+        let resolved = typography(Some(&style), &lengths_of(Some(&style)), &theme, &theme.metrics, &Fonts::for_tests());
         assert_eq!(resolved.text_size, theme.metrics.code_text_size);
     }
 
     fn line_height_of(style: &StyleDesc) -> f32 {
         let theme = Theme::dark();
-        typography(Some(style), &lengths_of(Some(style)), &theme, &theme.metrics).line_height
+        typography(Some(style), &lengths_of(Some(style)), &theme, &theme.metrics, &Fonts::for_tests()).line_height
     }
 
     #[test]
@@ -395,7 +403,7 @@ mod tests {
             font_size: Some(LinearLength::px((theme.metrics.code_text_size * 2.0) as f64)),
             ..Default::default()
         };
-        let resolved = typography(Some(&style), &lengths_of(Some(&style)), &theme, &theme.metrics);
+        let resolved = typography(Some(&style), &lengths_of(Some(&style)), &theme, &theme.metrics, &Fonts::for_tests());
         // Doubling the glyphs without doubling the row would overlap the lines.
         assert_eq!(resolved.line_height, theme.metrics.code_line_height * 2.0);
     }
@@ -408,7 +416,7 @@ mod tests {
             font_size: Some(LinearLength::px(20.0)),
             ..Default::default()
         };
-        let resolved = typography(Some(&style), &lengths_of(Some(&style)), &Theme::dark(), &metrics);
+        let resolved = typography(Some(&style), &lengths_of(Some(&style)), &Theme::dark(), &metrics, &Fonts::for_tests());
         assert_eq!(resolved.line_height, metrics.code_line_height);
     }
 

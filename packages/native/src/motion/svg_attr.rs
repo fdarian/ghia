@@ -178,8 +178,14 @@ impl SvgAttr {
         attributes: &HashMap<String, Value>,
         colors: &ColorContext,
     ) -> Option<AnimValue> {
-        self.attribute()?;
-        self.parse(attributes.get(self.name())?, colors).ok()
+        self.parse(self.declared(attributes)?, colors).ok()
+    }
+
+    /// The element's own value for the attribute: the camelCase prop React writes, else the attribute
+    /// name Solid and the DOM write (`stroke-width`), as `svg_tree` serializes them.
+    fn declared(self, attributes: &HashMap<String, Value>) -> Option<&Value> {
+        let attribute = self.attribute()?;
+        attributes.get(self.name()).or_else(|| attributes.get(attribute))
     }
 
     /// Whether CSS has a property of this name that `@keyframes` can animate on
@@ -238,8 +244,7 @@ impl SvgAttr {
         attributes: &HashMap<String, Value>,
         colors: &ColorContext,
     ) -> Option<AnimValue> {
-        self.attribute()?;
-        self.parse_css(attributes.get(self.name())?, colors).ok()
+        self.parse_css(self.declared(attributes)?, colors).ok()
     }
 
     /// [`parse`](Self::parse) for a CSS animation, where the keyword a property takes beside its values
@@ -452,6 +457,19 @@ mod tests {
         assert_eq!(SvgAttr::PathLength.read(&attributes, &colors()), None);
         assert_eq!(SvgAttr::PathLength.initial(), Some(AnimValue::Number(1.0)));
         assert_eq!(SvgAttr::R.initial(), None);
+    }
+
+    #[test]
+    fn reads_the_kebab_case_attribute_name_and_the_camel_case_prop_wins() {
+        let solid = HashMap::from([("stroke-width".to_string(), serde_json::json!(4))]);
+        assert_eq!(SvgAttr::StrokeWidth.read(&solid, &colors()), Some(AnimValue::Number(4.0)));
+        assert_eq!(SvgAttr::StrokeWidth.read_css(&solid, &colors()), Some(AnimValue::Number(4.0)));
+        let both = HashMap::from([
+            ("stroke-width".to_string(), serde_json::json!(4)),
+            ("strokeWidth".to_string(), serde_json::json!(6)),
+        ]);
+        assert_eq!(SvgAttr::StrokeWidth.read(&both, &colors()), Some(AnimValue::Number(6.0)));
+        assert_eq!(SvgAttr::StrokeWidth.read_css(&both, &colors()), Some(AnimValue::Number(6.0)));
     }
 
     #[test]

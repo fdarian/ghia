@@ -42,6 +42,7 @@ use crate::events::app_region::AppRegion;
 use crate::element_tree::EventPayload;
 use crate::retained_tree::{Dirty, InternedStyle, RetainedTree, StyleTable};
 use crate::style::StyleDesc;
+use crate::text::font_family::Fonts;
 use crate::text::white_space::StyledWhiteSpace as _;
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection};
 use crate::theme::Theme;
@@ -7568,10 +7569,7 @@ impl GpuixView {
         cx: &mut gpui::Context<Self>,
     ) -> std::result::Result<(), String> {
         check_font(&bytes)?;
-        window
-            .text_system()
-            .add_fonts(vec![std::borrow::Cow::Owned(bytes)])
-            .map_err(|error| error.to_string())?;
+        crate::text::font_family::Fonts::of(cx).add(bytes).map_err(|error| error.to_string())?;
         cx.notify();
         window.refresh();
         Ok(())
@@ -8007,6 +8005,7 @@ impl GpuixView {
             &activation,
             &pointer,
             &mut highlight_events,
+            Fonts::of(cx),
             BuildStart {
                 inherited,
                 doc_path: row_path,
@@ -8142,6 +8141,11 @@ impl GpuixView {
 /// `cx` stay separate parameters: they are `&mut` and gpui reborrows them.
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
+    /// The list item being built whose `inside` marker takes room at the start of its first
+    /// paragraph, and the room it takes once its element is laid out.
+    pub inside_marker: Option<(u64, crate::layout::list_marker_paint::Room)>,
+    /// The fonts of the App the build is for, which `font-family` lists resolve against.
+    pub fonts: Fonts,
     pub event_callback: &'a Option<EventCallback>,
     pub activation: &'a crate::events::activation::Activation,
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
@@ -8467,6 +8471,8 @@ pub(crate) struct Inherited {
     pub table: crate::css::table::TableInherited,
     /// `direction` and `text-align`, which resolves against it.
     pub direction: crate::css::direction::Inherited,
+    /// `list-style-type` and `list-style-position`, which a list item's marker is made from.
+    pub list_style: crate::css::list_style::ListStyleInherited,
     /// The row and cell of a table the element is in, for copied text.
     pub table_row: Option<u64>,
     pub table_cell: Option<crate::text::selection::TableCell>,
@@ -8569,6 +8575,7 @@ impl Inherited {
             interpolate_size: Default::default(),
             table: Default::default(),
             direction: Default::default(),
+            list_style: Default::default(),
             table_row: None,
             table_cell: None,
             container: crate::motion::containing::Container::WINDOW,
@@ -8702,6 +8709,7 @@ impl Inherited {
             self.interpolate_size = interpolate_size;
         }
         self.table = self.table.descend(style, &self.lengths);
+        self.list_style = self.list_style.descend(style);
         self
     }
 }
@@ -9475,10 +9483,13 @@ impl GpuixView {
         activation: &'a crate::events::activation::Activation,
         pointer: &'a crate::events::state::PointerState,
         highlight_events: &'a mut Vec<(u64, usize)>,
+        fonts: Fonts,
         start: BuildStart,
     ) -> BuildCtx<'a> {
         BuildCtx {
             tree,
+            inside_marker: None,
+            fonts,
             event_callback: callback,
             activation,
             focus_handles: &self.focus_handles,
@@ -9538,6 +9549,7 @@ impl GpuixView {
         pseudo: bool,
         boxes: &crate::css::computed_style::Boxes,
         window: &mut gpui::Window,
+        cx: &mut gpui::App,
     ) -> Option<Vec<String>> {
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
@@ -9559,7 +9571,7 @@ impl GpuixView {
             control_styles: Default::default(),
             scroller: None,
         };
-        let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, start);
+        let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), start);
         crate::css::computed_style::read(&mut ctx, window, id, boxes, pseudo)
     }
 
@@ -9588,7 +9600,7 @@ impl GpuixView {
         // The parent that spliced the element out of its wrappers is not there to say what they hand down.
         let splice = crate::layout::contents::splice_parent(&tree, id);
         let element = {
-            let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, env.start);
+            let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), env.start);
             if let Some(parent) = splice {
                 splice_overlay(&mut ctx, window, parent, id);
             }
@@ -9644,7 +9656,7 @@ impl GpuixView {
         let recording = self.retain.suspend();
         let splice = crate::layout::contents::splice_parent(&tree, id);
         let element = {
-            let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, env.start);
+            let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), env.start);
             if let Some(parent) = splice {
                 splice_overlay(&mut ctx, window, parent, id);
             }
@@ -10511,7 +10523,9 @@ impl gpui::Render for GpuixView {
         let destroyed = tree.removals() != self.swept_at;
         if destroyed {
             self.tapes.retain(|id| tree.elements.contains_key(&id));
-            crate::automation::retain_bounds(window.window_handle().window_id(), |id| tree.elements.contains_key(&id));
+            crate::automation::retain_bounds(window.window_handle().window_id(), |id| {
+                tree.elements.contains_key(&crate::layout::list_marker_paint::item_of_box(id))
+            });
         }
         self.paint_statics.prune(|id| tree.elements.contains_key(&id));
         // Pruned by listener, not existence: dropping `onLayout` and adding it
@@ -10686,6 +10700,7 @@ impl gpui::Render for GpuixView {
                     &activation,
                     &pointer,
                     &mut highlight_events,
+                    Fonts::of(cx),
                     BuildStart {
                         inherited: Inherited::root(
                             &theme,
@@ -12292,6 +12307,7 @@ fn build_element_unpumped(
                 .note_clip_origin(id, element.events(), None);
             let inherited = &ctx.inherited;
             let render_ctx = CustomRenderContext {
+                fonts: ctx.fonts.clone(),
                 id,
                 doc_path: ctx.doc_path(),
                 events: element.events(),
@@ -12575,7 +12591,7 @@ fn build_virtual_list(
         .with_sizing_behavior(gpui::ListSizingBehavior::Auto)
         .id(list_element_id);
     if let Some(style) = element.style.as_deref() {
-        list = apply_styles(list, style, &ctx.inherited.colors, &ctx.inherited.lengths).overscroll_behavior(
+        list = apply_styles(list, style, &ctx.inherited.colors, &ctx.inherited.lengths, &ctx.fonts).overscroll_behavior(
             gpui::OverscrollBehavior::Auto,
             crate::scroll::overscroll_y(style),
         );
@@ -12689,7 +12705,7 @@ pub(crate) fn build_host_container(
     };
 
     if let Some(style) = style {
-        el = crate::css::style_cache::apply(el, element.style.as_ref(), style, &ctx.inherited.colors, &ctx.inherited.lengths);
+        el = crate::css::style_cache::apply(el, element.style.as_ref(), style, &ctx.inherited.colors, &ctx.inherited.lengths, &ctx.fonts);
         if places_absolute {
             el = crate::layout::containing_block::place_by_parent(el);
         }
@@ -12824,6 +12840,7 @@ pub(crate) fn build_host_container(
             style,
             &ctx.inherited.colors,
             &ctx.inherited.lengths,
+            &ctx.fonts,
             &ctx.focus_styles,
         );
     } else {
@@ -12833,6 +12850,7 @@ pub(crate) fn build_host_container(
             style,
             &ctx.inherited.colors,
             &ctx.inherited.lengths,
+            &ctx.fonts,
             &ctx.focus_styles,
         );
     }
@@ -12891,6 +12909,11 @@ pub(crate) fn build_host_container(
     // and focus events come from `GpuixView::observe_focus`. The wheel is a window-level
     // input like the pointer's (`events::listeners`).
 
+    let list_marker = if skipped { None } else { crate::layout::list_marker_paint::build(element, style, ctx) };
+    let outer_inside_marker = std::mem::replace(
+        &mut ctx.inside_marker,
+        list_marker.as_ref().and_then(|marker| marker.inside.clone().map(|room| (element.id, room))),
+    );
     #[cfg_attr(target_family = "wasm", allow(unused_mut))]
     let (mut content, mut placements, containing_heights) = if skipped {
         // The trim passed down is meant for what is built below.
@@ -12899,6 +12922,7 @@ pub(crate) fn build_host_container(
     } else {
         build_content(element, planned.as_ref().map_or(&[], |planned| &planned.children), ctx, window, cx)
     };
+    ctx.inside_marker = outer_inside_marker;
     if collapsed_table {
         let key = crate::layout::table_grid::BoxKey::Element(element.id);
         settle_collapsed_borders(ctx, key, used_from, window);
@@ -12950,12 +12974,13 @@ pub(crate) fn build_host_container(
             .map(|(_, placement)| *placement)
             .collect();
         format!(
-            "{:?} {} {:?} {:?} {:?}",
+            "{:?} {} {:?} {:?} {:?} {:?}",
             host.style(),
             content.len() - absent_children.len(),
             present.iter().map(|placement| placement.rank).collect::<Vec<_>>(),
             Placement::document_order(&present),
-            resolved
+            resolved,
+            list_marker.as_ref().map(|marker| &marker.key)
         )
     });
     // After the digest above, which the indices of the absent children are of the content without it.
@@ -12963,6 +12988,10 @@ pub(crate) fn build_host_container(
     #[cfg(not(target_family = "wasm"))]
     if element.element_type == "nativeview" && !skipped {
         content.insert(0, nativeview_layer(element, style, ctx));
+        placements.insert(0, Placement { rank: 0, document: 0 });
+    }
+    if let Some(marker) = list_marker {
+        content.insert(0, marker.element);
         placements.insert(0, Placement { rank: 0, document: 0 });
     }
     if !skipped {
@@ -13421,7 +13450,7 @@ fn build_contents_container(
         el = el.stacking_context();
     }
     if let Some(style) = style {
-        el = apply_styles(el, &style.inheritable_part(), &ctx.inherited.colors, &ctx.inherited.lengths);
+        el = apply_styles(el, &style.inheritable_part(), &ctx.inherited.colors, &ctx.inherited.lengths, &ctx.fonts);
     }
     el = apply_accessibility(el, element.id, element.custom_props(), None);
     ctx.inherited.direction.apply(&mut el);
@@ -13538,6 +13567,7 @@ fn paragraph_content(
             &ctx.inherited.lengths,
             &ctx.inherited.font_state,
             &ctx.inherited.underline_offset,
+            &ctx.fonts,
             &ctx.inline_states(),
             &motion,
         )
@@ -13650,6 +13680,11 @@ fn paragraph_content(
             inline_cursors,
             inline_regions,
             inline_insets: insets.takes_space_along_the_line().then(|| insets.clone()),
+            leading_marker: ctx
+                .inside_marker
+                .as_ref()
+                .filter(|(item, _)| *item == paragraph.container && paragraph.index == 0)
+                .map(|(_, advance)| advance.clone()),
             cull_outset,
             ..crate::text::SelectableText::new(
                 paragraph.container,
@@ -13930,11 +13965,12 @@ pub(crate) fn apply_interactive_styles<E>(
     style: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
 ) -> E
 where
     E: gpui::Styled + gpui::StatefulInteractiveElement,
 {
-    apply_styles(el, style, colors, lengths)
+    apply_styles(el, style, colors, lengths, fonts)
 }
 
 /// A state refinement: the base colours that follow `currentColor` first, so a
@@ -13946,16 +13982,17 @@ pub(crate) fn apply_state_styles<E: gpui::Styled>(
     state: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
 ) -> E {
     if let Some(followers) = base.colors_following_current(state, lengths) {
-        refinement = apply_styles(refinement, &followers, colors, lengths);
+        refinement = apply_styles(refinement, &followers, colors, lengths, fonts);
     }
     let fill = state.resolved_fill(colors, lengths);
     let mut refined = if crate::css::border::declares_widths(state, colors) {
         let merged = crate::events::state_styles::overlay(base, state);
-        apply_styles_taking_borders_from(refinement, state, &merged, colors, lengths, fill)
+        apply_styles_taking_borders_from(refinement, state, &merged, colors, lengths, fonts, fill)
     } else {
-        apply_styles_with_fill(refinement, state, colors, lengths, fill)
+        apply_styles_with_fill(refinement, state, colors, lengths, fonts, fill)
     };
     // An outline needs a style, a width and a colour, and the state may give only some of them
     // (a focus ring that sets `outlineWidth` over a base `outline`), or change the `color` the
@@ -13982,9 +14019,10 @@ pub(crate) fn apply_styles<E: gpui::Styled>(
     style: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
 ) -> E {
     let fill = style.resolved_fill(colors, lengths);
-    apply_styles_with_fill(el, style, colors, lengths, fill)
+    apply_styles_with_fill(el, style, colors, lengths, fonts, fill)
 }
 
 /// `fill` must be `style.resolved_fill(colors, lengths)`.
@@ -13993,9 +14031,10 @@ pub(crate) fn apply_styles_with_fill<E: gpui::Styled>(
     style: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
     fill: crate::style::Fill,
 ) -> E {
-    apply_styles_taking_borders_from(el, style, style, colors, lengths, fill)
+    apply_styles_taking_borders_from(el, style, style, colors, lengths, fonts, fill)
 }
 
 /// [`apply_styles_with_fill`] with the border widths read from `widths_from`. A state
@@ -14007,6 +14046,7 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
     widths_from: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
     fill: crate::style::Fill,
 ) -> E {
     el = crate::layout::style::apply(el, style, colors, lengths);
@@ -14091,7 +14131,9 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
         el = el.text_size(gpui::px(lengths.font_size as f32));
     }
     if let Some(ref family) = style.font_family {
-        el = el.font_family(family.clone());
+        let resolved = fonts.resolve(family);
+        el = el.font_family(resolved.family);
+        el.text_style().font_fallbacks = Some(resolved.fallbacks);
     }
     if let Some(ref weight) = style.font_weight {
         el = el.font_weight(parse_font_weight(weight));
@@ -17839,7 +17881,7 @@ mod dimension_length_tests {
             let state: StyleDesc = serde_json::from_str(state).unwrap();
             let colors = crate::color::ColorContext::root(crate::color::Scheme::Light);
             let lengths = LengthContext::initial(800.0, 600.0);
-            let refinement = apply_state_styles(gpui::StyleRefinement::default(), &base, &state, &colors, &lengths);
+            let refinement = apply_state_styles(gpui::StyleRefinement::default(), &base, &state, &colors, &lengths, &Fonts::for_tests());
             let edges = refinement.border_widths;
             [edges.top, edges.right, edges.bottom, edges.left]
                 .map(|width| width.map(|width| f32::from(width.to_pixels(gpui::px(16.0)))))
@@ -17864,6 +17906,7 @@ mod dimension_length_tests {
             &style,
             &crate::color::ColorContext::root(crate::color::Scheme::Light),
             &lengths,
+            &Fonts::for_tests(),
         );
         let outline = refinement.outline.expect("the outline is applied");
         assert_eq!((outline.width, outline.offset), (gpui::px(2.0), gpui::px(11.0)));
@@ -17879,6 +17922,7 @@ mod dimension_length_tests {
             &style,
             &crate::color::ColorContext::root(crate::color::Scheme::Light),
             &lengths,
+            &Fonts::for_tests(),
         )
     }
 
@@ -18142,7 +18186,7 @@ mod dimension_length_tests {
         let colors = crate::color::ColorContext::root(crate::color::Scheme::Light);
         styles.iter().fold(gpui::StyleRefinement::default(), |refinement, style| {
             let style: StyleDesc = serde_json::from_str(style).unwrap();
-            apply_styles(refinement, &style, &colors, &lengths)
+            apply_styles(refinement, &style, &colors, &lengths, &Fonts::for_tests())
         })
     }
 

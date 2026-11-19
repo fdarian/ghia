@@ -6,16 +6,20 @@ import {
   $getRoot,
   $getSelection,
   $isRangeSelection,
+  $selectAll,
   CAN_USE_BEFORE_INPUT,
   CAN_USE_DOM,
+  INDENT_CONTENT_COMMAND,
   createEditor,
   type ElementNode,
   type LexicalEditor,
   type TextNode,
 } from 'lexical'
 import { registerRichText } from '@lexical/rich-text'
+import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND, ListItemNode, ListNode, registerList } from '@lexical/list'
 import { createEmptyHistoryState, registerHistory } from '@lexical/history'
 import { createTestRoot, hasNativeTestRenderer } from '@ghia/solid/testing'
+import { markerInk, markerPixels, readScreenshot, screenshotFile } from './screenshot'
 
 // Vanilla Lexical (createEditor, registerRichText, registerHistory, setRootElement) inside a @ghia/solid component,
 // running unchanged on Ghia's contenteditable support. The editor lives across the steps, so this file mounts its own root instead of using
@@ -582,6 +586,122 @@ describeNative('vanilla Lexical in @ghia/solid: clipboard between two editors on
     await idle()
     expect(blocks(b)).toEqual(['two '])
     expect(blocks(a)).toEqual(['one three'])
+    expect(uncaught).toEqual([])
+  })
+})
+
+// Lists made through Lexical's own commands paint the marker of each item: Lexical writes the number of an item as the
+// `value` property of its `<li>` (`dom.value = n`, which skips the item that holds a nested list), and the number or bullet
+// is Ghia's, not Lexical's.
+describeNative('vanilla Lexical lists in @ghia/solid on Ghia', () => {
+  let window: ReturnType<typeof createTestRoot>
+  let disposeUi: () => void
+  let target: LexicalEditor
+  let element: HTMLElement
+  const uncaught: unknown[] = []
+  const unregister: Array<() => void> = []
+  const nextTask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+  const settle = async (): Promise<void> => {
+    await nextTask()
+    window.renderer.dispatchNativeEvents()
+    window.renderer.advanceTime(10)
+    window.renderer.drawFrame()
+    window.renderer.flush()
+  }
+  const idle = async (): Promise<void> => {
+    await settle()
+    await settle()
+  }
+
+  beforeAll(async () => {
+    window = createTestRoot({ width: 480, height: 320, onUncaughtError: (error: unknown) => uncaught.push(error) })
+    function Editor() {
+      let el!: HTMLDivElement
+      onMount(() => {
+        element = el
+        target = createEditor({
+          namespace: 'lexical-solid-lists',
+          nodes: [ListNode, ListItemNode],
+          onError: (error) => {
+            throw error
+          },
+        })
+        unregister.push(registerRichText(target))
+        unregister.push(registerList(target))
+        target.setRootElement(el)
+        target.update(() => {
+          $getRoot()
+            .clear()
+            .append(...['first', 'second', 'third'].map((text) => $createParagraphNode().append($createTextNode(text))))
+        })
+      })
+      return <div ref={el} contentEditable style={{ display: 'block', width: 400, 'min-height': 40, 'background-color': '#ffffff', color: '#000000' }} />
+    }
+    window.render(() =>
+      createRoot((dispose) => {
+        disposeUi = dispose
+        return <Editor />
+      }),
+    )
+    await idle()
+  })
+
+  afterAll(() => {
+    target?.setRootElement(null)
+    for (const cleanup of unregister.reverse()) cleanup()
+    disposeUi?.()
+    window?.unmount()
+  })
+
+  const items = (): HTMLElement[] => [...element.querySelectorAll('li')] as HTMLElement[]
+  const markers = (name: string): { ink: number[]; shapes: string[] } => {
+    const file = screenshotFile(`lists-solid-${name}.png`)
+    window.renderer.captureScreenshot(file)
+    const shot = readScreenshot(file)
+    const scale = shot.width / window.renderer.getWindowSize().width
+    const boxes = items().map((item) => item.getBoundingClientRect())
+    return { ink: boxes.map((box) => markerInk(shot, scale, box)), shapes: boxes.map((box) => markerPixels(shot, scale, box)) }
+  }
+
+  it('paints no marker for a paragraph, a bullet for each item of an unordered list and its number for each of an ordered one', async () => {
+    expect(items().length).toBe(0)
+    target.update(() => $selectAll())
+    await idle()
+    target.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)
+    await idle()
+    expect(items().length).toBe(3)
+    const bulleted = markers('bulleted')
+    expect(bulleted.ink.every((ink) => ink > 0), `a bullet in front of every item: ${bulleted.ink}`).toBe(true)
+    expect(new Set(bulleted.shapes).size, 'every bullet is the same').toBe(1)
+
+    target.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)
+    await idle()
+    expect(items().length).toBe(3)
+    const numbered = markers('numbered')
+    expect(numbered.ink.every((ink) => ink > 0), `a number in front of every item: ${numbered.ink}`).toBe(true)
+    expect(new Set(numbered.shapes).size, 'every number is another').toBe(3)
+    expect(numbered.shapes).not.toEqual(bulleted.shapes)
+    expect(uncaught).toEqual([])
+  })
+
+  it('numbers an item by the value Lexical assigns to its li, which skips the item that holds a nested list', async () => {
+    const before = markers('before-indent')
+    expect(items().length).toBe(3)
+    target.update(() => {
+      $getRoot().getFirstChildOrThrow<ListNode>().getChildAtIndex<ListItemNode>(1)!.selectStart()
+    })
+    await idle()
+    target.dispatchCommand(INDENT_CONTENT_COMMAND, undefined)
+    await idle()
+    // The list item of "first", the item that holds the nested list, "second" inside it, and "third".
+    expect(items().length).toBe(4)
+    const third = items()[3]! as HTMLLIElement
+    expect(third.textContent).toBe('third')
+    expect(third.value, 'Lexical assigned li.value').toBe(2)
+    expect(third.getAttribute('value')).toBe('2')
+    const after = markers('after-indent')
+    expect(after.shapes[3], 'third is numbered 2, as second was before it moved in').toEqual(before.shapes[1])
+    expect(after.shapes[3]).not.toEqual(before.shapes[2])
     expect(uncaught).toEqual([])
   })
 })

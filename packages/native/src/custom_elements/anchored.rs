@@ -385,7 +385,7 @@ impl CustomElement for AnchoredElement {
         content = crate::events::app_region::mark(content, ctx.app_region);
         content = crate::automation::track_own_bounds(content, ctx.id);
         if let Some(style) = ctx.style {
-            content = crate::renderer::apply_interactive_styles(content, style, &ctx.colors, &ctx.lengths);
+            content = crate::renderer::apply_interactive_styles(content, style, &ctx.colors, &ctx.lengths, &ctx.fonts);
         }
         content = crate::layout::stacking::absorb_lift(content, ctx.lift_absorbed);
         // A deferred layer is prepainted with no context around it, so z-index inside the

@@ -72,7 +72,7 @@ const INHERITED: &[&str] = &[
     "visibility", "color", "colorScheme", "fontStyle", "fontSize", "fontFamily", "fontWeight",
     "fontVariantNumeric", "fontFeatureSettings", "fontVariationSettings", "WebkitFontSmoothing",
     "textAlign", "direction", "lineHeight", "whiteSpace", "tabSize", "wordBreak", "overflowWrap",
-    "textWrap", "textWrapMode", "textWrapStyle", "textUnderlineOffset", "borderSpacing",
+    "textWrap", "textWrapMode", "textWrapStyle", "listStyle", "listStyleType", "listStylePosition", "textUnderlineOffset", "borderSpacing",
     "borderCollapse", "captionSide", "emptyCells", "cursor", "pointerEvents", "userSelect",
     "scrollbarColor", "interpolateSize", "appRegion", "textBoxEdge", "selectionColor",
 ];

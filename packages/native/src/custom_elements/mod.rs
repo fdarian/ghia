@@ -48,6 +48,8 @@ pub(crate) fn is_focusable_by_default(element_type: &str) -> bool {
 /// Context passed to CustomElement::render() with everything needed
 /// to build GPUI elements with events and focus.
 pub struct CustomRenderContext<'a> {
+    /// The fonts of the App the element is built for, which `font-family` lists resolve against.
+    pub fonts: crate::text::font_family::Fonts,
     /// Numeric element ID (matches React's instance ID).
     pub id: u64,
     /// Where this element sits in the document, which orders its text in selection and find.
@@ -203,9 +205,10 @@ pub(crate) fn custom_surface_with_role(
                 &style.without_pointer_states(),
                 &ctx.colors,
                 &ctx.lengths,
+                &ctx.fonts,
             )
         } else {
-            crate::renderer::apply_interactive_styles(el, style, &ctx.colors, &ctx.lengths)
+            crate::renderer::apply_interactive_styles(el, style, &ctx.colors, &ctx.lengths, &ctx.fonts)
         };
     }
     if let Some(features) = ctx.font_features.clone() {
@@ -240,6 +243,7 @@ pub(crate) fn custom_surface_with_role(
             ctx.style,
             &ctx.colors,
             &ctx.lengths,
+            &ctx.fonts,
             &ctx.focus_styles,
         ),
         None => crate::focus::apply_focus_within(
@@ -248,6 +252,7 @@ pub(crate) fn custom_surface_with_role(
             ctx.style,
             &ctx.colors,
             &ctx.lengths,
+            &ctx.fonts,
             &ctx.focus_styles,
         ),
     };

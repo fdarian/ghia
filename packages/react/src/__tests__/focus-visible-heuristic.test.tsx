@@ -86,6 +86,8 @@ const table: Entry[] = [
   { name: "click text, key, click text, script focus", steps: ["press:t", "key", "press:t", "script:b"], focused: "b", visible: true },
   { name: "click, key, click a child, script focus", steps: ["press:a", "key", "press:wchild", "script:b"], focused: "b", visible: false },
   { name: "click a child, key, click it again, script focus", steps: ["press:wchild", "key", "press:wchild", "script:b"], focused: "b", visible: true },
+  { name: "click a contenteditable host, as a text control", steps: ["press:ce"], focused: "ce", visible: true },
+  { name: "click a contenteditable host, script focus b", steps: ["press:ce", "script:b"], focused: "b", visible: false },
   { name: "click, key, right-click b, script focus a", steps: ["press:a", "key", "rpress:b", "script:a"], focused: "a", visible: false },
 ]
 
@@ -127,6 +129,11 @@ describeNative(":focus-visible follows Chrome's heuristic", () => {
               />
               {box("w")}
               {box("p")}
+              <div
+                testId="ce"
+                contentEditable
+                style={{ width: 100, height: 40, backgroundColor: "#dddddd", ...variant.style, focusVisible: ring }}
+              />
               <div testId="disabled" style={{ width: 100, height: 40 }} />
             </div>
           )

@@ -162,6 +162,25 @@ describeNative("svg children", () => {
     expect(brightness(75, 50)).toBeLessThan(EMPTY)
   })
 
+  it("draws a <use> sprite referenced by xlinkHref, and marker with a longhand beside it", () => {
+    const { render, renderer } = createTestRoot()
+    const brightness = sampler(path.join(SHOTS_DIR, "svg-children-xlink.png"), renderer)
+    render(
+      <div style={FRAME}>
+        <svg viewBox="0 0 100 100" width={100} height={100}>
+          <symbol id="icon" viewBox="0 0 10 10">
+            <rect width={10} height={10} fill="#ffffff" />
+          </symbol>
+          <use xlinkHref="#icon" width={50} height={100} />
+          <path d="M60 50 L90 50" stroke="#ffffff" marker="url(#none)" markerEnd="url(#none)" />
+        </svg>
+      </div>
+    )
+
+    expect(brightness(25, 50)).toBeGreaterThan(DRAWN)
+    expect(brightness(75, 20)).toBeLessThan(EMPTY)
+  })
+
   it("rejects a shape outside an svg", () => {
     // React reports a commit error to its root's uncaught-error handler.
     const errors = vi.spyOn(console, "error").mockImplementation(() => {})

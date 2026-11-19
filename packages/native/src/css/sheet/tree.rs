@@ -530,8 +530,14 @@ impl RetainedTree {
         self.take_dirty()
     }
 
-    /// Matches what the batch marked, and restyles the elements whose rules changed.
+    /// Matches what the batch marked, and restyles the elements whose rules changed, then the
+    /// list markers that changes of the tree and of the styles left to mark.
     pub fn flush_styles(&mut self) {
+        self.flush_sheet_styles();
+        self.flush_list_markers();
+    }
+
+    fn flush_sheet_styles(&mut self) {
         if !self.sheets.has_work() {
             return;
         }

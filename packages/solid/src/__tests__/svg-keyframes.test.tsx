@@ -12,7 +12,32 @@ function attributeOf(markup: string, id: string, name: string): string | undefin
   return new RegExp(`\\s${name}="([^"]*)"`).exec(tag[0])?.[1]
 }
 
+defineKeyframes("solid-svg-to-six", { to: { strokeWidth: 6 } })
+
 describe.skipIf(!hasNativeTestRenderer)("Solid SVG keyframes", () => {
+  it("starts from the kebab-case stroke-width the element or its group declares", () => {
+    const app = createTestRoot()
+    app.renderer.clockPause()
+    app.render(() => (
+      <svg id="svg" testId="svg" width={100} height={100} viewBox="0 0 100 100" style={{ width: 100, height: 100 }}>
+        <path id="own" d="M0 20 L100 20" stroke="#ffffff" stroke-width="2" style={{ animation: "solid-svg-to-six 1s linear" }} />
+        <g stroke-width="2">
+          <path id="inherited" d="M0 60 L100 60" stroke="#ffffff" style={{ animation: "solid-svg-to-six 1s linear" }} />
+        </g>
+      </svg>
+    ))
+    const read = (id: string) => {
+      app.renderer.dispatchNativeEvents()
+      return attributeOf(app.renderer.getSvgMarkup(app.renderer.findByTestId("svg")!.id)!, id, "stroke-width")
+    }
+    expect(read("own")).toBe("2")
+    expect(read("inherited")).toBe("2")
+    app.renderer.clockFastForward(500)
+    expect(read("own")).toBe("4")
+    expect(read("inherited")).toBe("4")
+    app.unmount()
+  })
+
   it("draws a path in with stroke-dashoffset, and the svg's own values reach its shapes", () => {
     const app = createTestRoot()
     app.renderer.clockPause()

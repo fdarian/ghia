@@ -5,7 +5,10 @@
   "type": "module",
   "main": "./index.js",
   "types": "index.d.ts",
-  "browser": "browser.mjs",
+  "browser": {
+    "./index.js": "./browser.mjs",
+    "./dist/dom/html/parse5.js": "./dist/dom/html/parse5.web.js"
+  },
   "exports": {
     ".": {
       "browser": "./browser.mjs",

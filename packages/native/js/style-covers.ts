@@ -47,6 +47,7 @@ export const DIRECT_COVERS = {
   textDecoration: ["textDecorationLine", "textDecorationStyle", "textDecorationColor", "textDecorationThickness"],
   textBox: ["textBoxTrim", "textBoxEdge"],
   textWrap: ["textWrapMode", "textWrapStyle"],
+  listStyle: ["listStyleType", "listStylePosition"],
   mask: ["maskImage", "maskSize", "maskPosition", "maskRepeat", "maskOrigin", "maskClip", "maskMode", "maskComposite", "maskBorder"],
   maskBorder: ["maskBorderSource", "maskBorderSlice", "maskBorderWidth", "maskBorderOutset", "maskBorderRepeat", "maskBorderMode"],
   background: ["backgroundColor", "backgroundImage", "backgroundSize", "backgroundPosition", "backgroundRepeat", "backgroundOrigin", "backgroundClip"],

@@ -4,12 +4,11 @@
  * parse5's own is built and converted.
  */
 
-import { html, type Token, type TreeAdapter, type TreeAdapterTypeMap } from "parse5"
+import type { html, Token, TreeAdapter, TreeAdapterTypeMap } from "parse5"
 import { INVALID_NAME } from "../../dom-members.js"
 import { DOM_BINDING, type CharacterData, type DocumentFragment, type Element, type Node, type Text } from "../nodes.js"
+import { parse5 } from "./parse5.js"
 import { InertComment, InertDocument, InertElement, InertFragment, InertText } from "./inert-nodes.js"
-
-const NS = html.NS
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
@@ -100,9 +99,9 @@ export function createTreeAdapter(document: InertDocument): TreeAdapter<Map> {
       return content
     },
     setDocumentMode(target, mode) {
-      target.quirksMode = mode === html.DOCUMENT_MODE.QUIRKS
+      target.quirksMode = mode === parse5().html.DOCUMENT_MODE.QUIRKS
     },
-    getDocumentMode: (target) => (target.quirksMode ? html.DOCUMENT_MODE.QUIRKS : html.DOCUMENT_MODE.NO_QUIRKS),
+    getDocumentMode: (target) => (target.quirksMode ? parse5().html.DOCUMENT_MODE.QUIRKS : parse5().html.DOCUMENT_MODE.NO_QUIRKS),
     // A parsed document has no doctype node: `document.doctype` is null.
     setDocumentType() {},
     getDocumentTypeNodeName: () => "",

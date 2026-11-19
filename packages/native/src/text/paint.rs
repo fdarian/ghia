@@ -19,6 +19,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -621,6 +622,10 @@ pub struct SelectableText {
     /// The margin, border and padding of the paragraph's inline boxes along the
     /// line, see [`super::inline_insets`].
     pub inline_insets: Option<std::rc::Rc<super::inline_insets::InsetSpec>>,
+    /// The room the `inside` marker of a list item takes before the first glyph, which the marker's
+    /// element sets when it is laid out, ahead of this text. The marker is no inline box of the
+    /// paragraph: it leaves the text, the offsets of a selection and a search as they are.
+    pub leading_marker: Option<crate::layout::list_marker_paint::Room>,
     /// The inline boxes of a paragraph that can take focus, in tree order, see
     /// [`super::inline_focus`].
     pub inline_focus: Vec<super::inline_focus::FocusableBox>,
@@ -676,6 +681,7 @@ impl SelectableText {
             inline_cursors: Vec::new(),
             inline_regions: Vec::new(),
             inline_insets: None,
+            leading_marker: None,
             inline_focus: Vec::new(),
             inline_decorations: Vec::new(),
             opacity_groups: Vec::new(),
@@ -684,6 +690,33 @@ impl SelectableText {
             cull_outset: None,
         }
     }
+}
+
+/// The insets a text is laid out with: its boxes' space, and the room of a list marker before the first glyph, with the key
+/// the layout caches them by. The marker's room is a function of its kind and text, which the key has, and of the font, which
+/// the key of the measure has from the runs.
+fn insets_of(
+    spec: Option<std::rc::Rc<super::inline_insets::InsetSpec>>,
+    marker: Option<crate::layout::list_marker_paint::Room>,
+    text_len: usize,
+) -> Option<(u64, impl Fn(Option<gpui::Pixels>) -> Vec<gpui::TextInset> + 'static)> {
+    if spec.is_none() && marker.is_none() {
+        return None;
+    }
+    let mut hasher = DefaultHasher::new();
+    spec.as_ref().map(|spec| spec.text_key()).hash(&mut hasher);
+    marker.as_ref().map(|room| room.width_key).hash(&mut hasher);
+    let key = hasher.finish();
+    Some((key, move |width: Option<gpui::Pixels>| {
+        let mut insets = Vec::new();
+        if let Some(marker) = &marker {
+            insets.push(gpui::TextInset { range: 0..text_len, leading: marker.advance.get(), trailing: gpui::Pixels::ZERO });
+        }
+        if let Some(spec) = &spec {
+            insets.extend(spec.at(width).text());
+        }
+        insets
+    }))
 }
 
 /// A selectable text element: `StyledText` with a canvas underlay that paints
@@ -714,6 +747,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         inline_cursors,
         inline_regions,
         inline_insets,
+        leading_marker,
         inline_focus,
         inline_decorations,
         opacity_groups,
@@ -729,13 +763,14 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         "a text has either explicit runs or inline run styles"
     );
     let has_atomics = !atomics.is_empty();
+    let first_row = leading_marker.as_ref().map(|room| room.first_row.clone());
     let (layout, glyphs) = if run_styles.is_empty() {
         let styled = match runs {
             Some(runs) => StyledText::new(text.clone()).with_runs(runs),
             None => StyledText::new(text.clone()),
         };
-        let styled = match inline_insets {
-            Some(spec) => styled.with_insets_for_width(spec.text_key(), move |width| spec.at(width).text()),
+        let styled = match insets_of(inline_insets, leading_marker, text.len()) {
+            Some((key, insets)) => styled.with_insets_for_width(key, insets),
             None => styled,
         }
         .with_text_box_trim(text_box_trim);
@@ -743,14 +778,19 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     } else {
         let inline = super::paragraph::InlineText::new(text.clone(), run_styles)
             .with_boxes(aligned_boxes, atomics);
-        let inline = match inline_insets {
-            Some(spec) => inline.with_insets_for_width(spec.text_key(), move |width| spec.at(width).text()),
+        let inline = match insets_of(inline_insets, leading_marker, text.len()) {
+            Some((key, insets)) => inline.with_insets_for_width(key, insets),
             None => inline,
         }
         .with_text_box_trim(text_box_trim);
         (inline.layout().clone(), Glyphs::Paragraph(inline))
     };
     super::atomic::note(element_id, &layout);
+    // The marker that comes before this text paints where its first row starts, which alignment moves.
+    let settled: Option<Box<dyn FnOnce()>> = first_row.map(|first_row| {
+        let layout = layout.clone();
+        Box::new(move || first_row.set(Some(layout.bounds().origin.x + layout.align_offset_at(0)))) as Box<dyn FnOnce()>
+    });
 
     let behind: Vec<_> = inline_decorations
         .iter()
@@ -906,7 +946,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     );
 
     if alone && super::leaf::enabled() {
-        return super::leaf::TextLeaf::new(glyphs, prepaint, paint, cull_outset).into_any_element();
+        return super::leaf::TextLeaf::new(glyphs, prepaint, paint, cull_outset, settled).into_any_element();
     }
     let mut underlay = canvas(move |_, window, _| prepaint(window), move |_, _, window, cx| paint(window, cx))
         .keeps_no_position();
@@ -923,12 +963,18 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     wrapper_in_place
         .child(underlay)
         .child(glyphs.into_any())
+        .children(settled.map(settle_after_glyphs))
         .children(decorations)
         .children(groups)
         .children(cursor_hitboxes)
         .children(region_hitboxes)
         .children(super::inline_focus::anchors(inline_focus));
     wrapper.into_any_element()
+}
+
+/// An element of no size that runs `settled` when it is prepainted, which in a text's wrapper is after the glyphs.
+fn settle_after_glyphs(settled: Box<dyn FnOnce()>) -> impl IntoElement {
+    canvas(move |_, _, _| settled(), |_, _, _, _| {}).keeps_no_position().absolute().unlifted().w(px(0.0)).h(px(0.0))
 }
 
 /// Paints every opacity group of a paragraph, after its glyphs and rings: CSS paints a box with

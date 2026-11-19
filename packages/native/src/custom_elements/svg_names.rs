@@ -239,3 +239,7 @@ pub(super) const MARKER_ATTRIBUTES: [(&str, &str); 3] = [
     ("markerMid", "marker-mid"),
     ("markerEnd", "marker-end"),
 ];
+
+/// React writes `xlinkHref`, Solid `xlink:href`; both are written as the SVG 2 `href`, which needs no
+/// `xmlns:xlink` declaration.
+pub(super) const XLINK_HREF: [&str; 2] = ["xlinkHref", "xlink:href"];
