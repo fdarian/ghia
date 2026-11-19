@@ -42,6 +42,7 @@ use crate::events::app_region::AppRegion;
 use crate::element_tree::EventPayload;
 use crate::retained_tree::{Dirty, InternedStyle, RetainedTree, StyleTable};
 use crate::style::StyleDesc;
+use crate::text::font_family::Fonts;
 use crate::text::white_space::StyledWhiteSpace as _;
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection};
 use crate::theme::Theme;
@@ -119,7 +120,7 @@ pub(crate) fn dimension_u32(value: f64, label: &str) -> Result<u32> {
     raw_dimension_u32(value, label).map_err(Error::from_reason)
 }
 
-fn raw_element_id(id: f64) -> std::result::Result<u64, String> {
+pub(crate) fn raw_element_id(id: f64) -> std::result::Result<u64, String> {
     if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > 9_007_199_254_740_991.0 {
         return Err(format!("Invalid element id: {id}"));
     }
@@ -1890,6 +1891,19 @@ impl GpuixRenderer {
         self.with_initialized_window(|window, cx| window.paint_if_dirty(cx))
     }
 
+    /// Runs a read of the painted text after the window painted what changed. `None` before `init`.
+    #[cfg(target_os = "macos")]
+    fn read_painted_dom<R>(&self, read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<Option<R>> {
+        let Some(window) = self.paint_pending_changes()? else { return Ok(None) };
+        let tree = self.tree.lock().unwrap();
+        read(&crate::editing::Reads { tree: &tree, window }).map(Some).map_err(Error::from_reason)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn read_painted_dom<R>(&self, _read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<Option<R>> {
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     #[cfg(target_os = "macos")]
     fn with_initialized_window(
         &self,
@@ -2178,6 +2192,9 @@ impl GpuixRenderer {
         let displays = crate::screen::all_displays()?;
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
+        // Key handlers run JS, and each key needs its own microtask checkpoint: see
+        // docs/fork/frames-and-wakes.md.
+        platform.set_yield_after_key_event(true);
 
         let tree = self.tree.clone();
         let callback = self.event_callback_for_view();
@@ -2195,6 +2212,7 @@ impl GpuixRenderer {
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             crate::custom_elements::input::init(cx);
             crate::custom_elements::img::init(cx);
+            crate::events::clipboard::init(cx);
             // After the other bindings: `set_menus` reads key equivalents out of
             // the keymap, so every binding must exist before it runs.
             crate::app_menu::init(&app_name, cx);
@@ -2351,6 +2369,7 @@ impl GpuixRenderer {
                         .run(move |cx| {
                             crate::custom_elements::input::init(cx);
                             crate::custom_elements::img::init(cx);
+                            crate::events::clipboard::init(cx);
                             cx.set_window_appearance(appearance);
                             let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
                             // A layer-shell surface is positioned by the compositor from its
@@ -2544,6 +2563,27 @@ impl GpuixRenderer {
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.initialized.lock().unwrap()
+    }
+
+    /// Whether the last `tick()` left a key event queued or ended after sending one, so the
+    /// frame loop has to tick again at once instead of waiting for a wake or its timer. Only a
+    /// macOS window yields per key event; everything else answers false.
+    #[napi]
+    pub fn key_event_pending(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            MAC_PLATFORM.with(|platform| {
+                platform
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|platform| platform.key_event_pending())
+            })
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
     }
 
     /// Registers the function native calls synchronously for events whose
@@ -2927,14 +2967,31 @@ impl GpuixRenderer {
         Ok(promise)
     }
 
-    /// Replace the system clipboard's contents with plain text.
+    /// Replace the system clipboard's contents with `items`. `text/plain`, `text/html` and
+    /// `text/uri-list` take their native pasteboard types, every other type goes into the web
+    /// custom data that Chrome reads (`docs/fork/events-and-input.md#clipboard`). Windows and
+    /// Linux hold `text/plain` only.
     #[napi]
-    pub fn write_clipboard_text(&self, text: String) -> Result<()> {
+    pub fn write_clipboard(&self, items: Vec<crate::clipboard::ClipboardData>) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_app(|cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(text)));
+        return crate::platform::pasteboard_macos::write(
+            &crate::platform::pasteboard_macos::general(),
+            &items,
+        )
+        .map_err(Error::from_reason);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
+            if let Some(other) = items
+                .iter()
+                .find(|item| item.mime_type != crate::clipboard::TEXT_PLAIN)
+            {
+                return Err(Error::from_reason(format!(
+                    "The clipboard holds text/plain only on this platform, not {}",
+                    other.mime_type
+                )));
+            }
+            let text = items.into_iter().next().map(|item| item.data).unwrap_or_default();
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::WriteClipboardText { text, response })?;
             return recv_ui_response(receiver, "the clipboard write");
@@ -2949,17 +3006,27 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    /// The system clipboard's text, or null when it holds none.
+    /// Every type of the system clipboard that `writeClipboard` writes, in `DataTransfer` order:
+    /// `text/plain`, `text/html`, `text/uri-list`, then each custom type.
     #[napi]
-    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
+    pub fn read_clipboard(&self) -> Result<Vec<crate::clipboard::ClipboardData>> {
         #[cfg(target_os = "macos")]
-        return update_app(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
+        return Ok(crate::platform::pasteboard_macos::read(
+            &crate::platform::pasteboard_macos::general(),
+        ));
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::ReadClipboardText { response })?;
-            return recv_ui_response(receiver, "the clipboard read");
+            let text = recv_ui_response(receiver, "the clipboard read")?;
+            return Ok(text
+                .map(|data| crate::clipboard::ClipboardData {
+                    mime_type: crate::clipboard::TEXT_PLAIN.to_string(),
+                    data,
+                })
+                .into_iter()
+                .collect());
         }
 
         #[cfg(not(any(
@@ -4744,6 +4811,40 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// The rects of the text between two DOM positions: the content area of the font for each line
+    /// the range covers, in window coordinates, or none when the text did not paint. Both ends are
+    /// `#text` nodes of one paragraph.
+    #[napi]
+    pub fn get_text_range_rects(
+        &self,
+        start_node_id: f64,
+        start_offset: f64,
+        end_node_id: f64,
+        end_offset: f64,
+    ) -> Result<Vec<crate::editing::geometry::TextRect>> {
+        self.read_painted_dom(|reads| reads.text_range_rects(start_node_id, start_offset, end_node_id, end_offset))
+            .map(Option::unwrap_or_default)
+    }
+
+    /// The DOM position at a window point, in the text under it or nearest to it, or null.
+    #[napi]
+    pub fn caret_position_from_point(&self, x: f64, y: f64) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.caret_position_from_point(x, y)).map(Option::flatten)
+    }
+
+    /// A DOM position moved along the lines of the painted text (`lineUp`, `lineDown`, `lineStart`,
+    /// `lineEnd`), keeping `goalX` for a move up or down; null where there is no line to go to.
+    #[napi]
+    pub fn move_caret_visually(
+        &self,
+        node_id: f64,
+        offset: f64,
+        op: String,
+        goal_x: Option<f64>,
+    ) -> Result<Option<crate::editing::geometry::CaretPoint>> {
+        self.read_painted_dom(|reads| reads.move_caret_visually(node_id, offset, &op, goal_x)).map(Option::flatten)
+    }
+
     /// Press space-separated keys in Playwright's `keyboard.press` grammar
     /// (`"Enter"`, `"Shift+Tab"`, `"Meta+a"`, `"a"`, `"Space"`) through the
     /// focused element's input pipeline, each as a keydown then a keyup.
@@ -6339,6 +6440,10 @@ pub(crate) struct GpuixView {
     pub(crate) retain: crate::retain::Retain,
     /// What the retained roots wrote into the registries the last time they were built.
     pub(crate) tapes: crate::tape::Tapes,
+    /// The caret of the editing host the node selection is in, see `editing::caret`.
+    pub(crate) editing_caret: Rc<crate::editing::caret::EditingCaret>,
+    /// The press in an editing host that is down, see `editing::pointer`.
+    pub(crate) editing_pointer: Rc<crate::editing::pointer::EditingPointerState>,
     /// Where the pointer is and what it is pressing.
     /// Shared with the window's mouse-down listener, which dispatches a press
     /// without reaching the view.
@@ -7361,6 +7466,8 @@ impl GpuixView {
                 retain
             },
             tapes: Default::default(),
+            editing_caret: crate::editing::caret::EditingCaret::new(Theme::dark().caret),
+            editing_pointer: Default::default(),
             pointer: Rc::new(RefCell::new(crate::events::state::PointerState::with_requests(
                 pointer_requests,
             ))),
@@ -7462,10 +7569,7 @@ impl GpuixView {
         cx: &mut gpui::Context<Self>,
     ) -> std::result::Result<(), String> {
         check_font(&bytes)?;
-        window
-            .text_system()
-            .add_fonts(vec![std::borrow::Cow::Owned(bytes)])
-            .map_err(|error| error.to_string())?;
+        crate::text::font_family::Fonts::of(cx).add(bytes).map_err(|error| error.to_string())?;
         cx.notify();
         window.refresh();
         Ok(())
@@ -7484,6 +7588,8 @@ impl GpuixView {
                 return false;
             };
             if crate::custom_elements::input_choice::is_text_editor(element)
+                || (crate::html::editing::is_editable(&tree, focused)
+                    && !crate::scroll::KeyScroll::scrolls_under_editable(key_name, shift))
                 || crate::custom_elements::input_range::takes_key(element, key_name)
             {
                 return false;
@@ -7899,6 +8005,7 @@ impl GpuixView {
             &activation,
             &pointer,
             &mut highlight_events,
+            Fonts::of(cx),
             BuildStart {
                 inherited,
                 doc_path: row_path,
@@ -8034,6 +8141,11 @@ impl GpuixView {
 /// `cx` stay separate parameters: they are `&mut` and gpui reborrows them.
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
+    /// The list item being built whose `inside` marker takes room at the start of its first
+    /// paragraph, and the room it takes once its element is laid out.
+    pub inside_marker: Option<(u64, crate::layout::list_marker_paint::Room)>,
+    /// The fonts of the App the build is for, which `font-family` lists resolve against.
+    pub fonts: Fonts,
     pub event_callback: &'a Option<EventCallback>,
     pub activation: &'a crate::events::activation::Activation,
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
@@ -8127,6 +8239,11 @@ pub(crate) struct BuildCtx<'a> {
     pub retain: &'a mut crate::retain::Retain,
     /// See `GpuixView::tapes`.
     pub tapes: &'a crate::tape::Tapes,
+    /// See `GpuixView::editing_caret`.
+    pub editing_caret: Rc<crate::editing::caret::EditingCaret>,
+    /// The tree `tree` was read from, for the text input of an editing host, which asks it again
+    /// when the platform does.
+    pub shared_tree: Arc<Mutex<RetainedTree>>,
 }
 
 impl BuildCtx<'_> {
@@ -8354,6 +8471,8 @@ pub(crate) struct Inherited {
     pub table: crate::css::table::TableInherited,
     /// `direction` and `text-align`, which resolves against it.
     pub direction: crate::css::direction::Inherited,
+    /// `list-style-type` and `list-style-position`, which a list item's marker is made from.
+    pub list_style: crate::css::list_style::ListStyleInherited,
     /// The row and cell of a table the element is in, for copied text.
     pub table_row: Option<u64>,
     pub table_cell: Option<crate::text::selection::TableCell>,
@@ -8456,6 +8575,7 @@ impl Inherited {
             interpolate_size: Default::default(),
             table: Default::default(),
             direction: Default::default(),
+            list_style: Default::default(),
             table_row: None,
             table_cell: None,
             container: crate::motion::containing::Container::WINDOW,
@@ -8589,6 +8709,7 @@ impl Inherited {
             self.interpolate_size = interpolate_size;
         }
         self.table = self.table.descend(style, &self.lengths);
+        self.list_style = self.list_style.descend(style);
         self
     }
 }
@@ -9025,6 +9146,22 @@ impl GpuixView {
         }
     }
 
+    /// Restarts the blink clock of the editing caret when the selection moved or the caret came into view,
+    /// before anything that paints it is built: by the frame built whole and by the patcher alike, or a
+    /// patch of the paragraph that holds it is built against the anchor of the edit before. Returns
+    /// whether the caret is shown.
+    pub(crate) fn sync_editing_caret(&self, tree: &RetainedTree, window: &gpui::Window, cx: &gpui::App) -> bool {
+        let shown = crate::editing::caret::is_shown(tree, &self.focus_handles, window);
+        self.editing_caret.sync(window.window_handle().window_id(), tree.node_selection.generation(), shown, cx.background_executor().now());
+        shown
+    }
+
+    /// Whether the caret of the node selection is painted: its editing host has focus and the window is key.
+    pub(crate) fn editing_caret_shown(&self, window: &gpui::Window) -> bool {
+        let tree = self.tree.lock().unwrap();
+        crate::editing::caret::is_shown(&tree, &self.focus_handles, window)
+    }
+
     pub(crate) fn focused_element_id(&self, window: &gpui::Window) -> Option<u64> {
         self.focus_handles
             .iter()
@@ -9346,10 +9483,13 @@ impl GpuixView {
         activation: &'a crate::events::activation::Activation,
         pointer: &'a crate::events::state::PointerState,
         highlight_events: &'a mut Vec<(u64, usize)>,
+        fonts: Fonts,
         start: BuildStart,
     ) -> BuildCtx<'a> {
         BuildCtx {
             tree,
+            inside_marker: None,
+            fonts,
             event_callback: callback,
             activation,
             focus_handles: &self.focus_handles,
@@ -9396,6 +9536,8 @@ impl GpuixView {
             scroller: start.scroller,
             retain: &mut self.retain,
             tapes: &self.tapes,
+            editing_caret: self.editing_caret.clone(),
+            shared_tree: self.tree.clone(),
         }
     }
 
@@ -9407,6 +9549,7 @@ impl GpuixView {
         pseudo: bool,
         boxes: &crate::css::computed_style::Boxes,
         window: &mut gpui::Window,
+        cx: &mut gpui::App,
     ) -> Option<Vec<String>> {
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
@@ -9428,7 +9571,7 @@ impl GpuixView {
             control_styles: Default::default(),
             scroller: None,
         };
-        let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, start);
+        let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), start);
         crate::css::computed_style::read(&mut ctx, window, id, boxes, pseudo)
     }
 
@@ -9457,7 +9600,7 @@ impl GpuixView {
         // The parent that spliced the element out of its wrappers is not there to say what they hand down.
         let splice = crate::layout::contents::splice_parent(&tree, id);
         let element = {
-            let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, env.start);
+            let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), env.start);
             if let Some(parent) = splice {
                 splice_overlay(&mut ctx, window, parent, id);
             }
@@ -9513,7 +9656,7 @@ impl GpuixView {
         let recording = self.retain.suspend();
         let splice = crate::layout::contents::splice_parent(&tree, id);
         let element = {
-            let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, env.start);
+            let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), env.start);
             if let Some(parent) = splice {
                 splice_overlay(&mut ctx, window, parent, id);
             }
@@ -9891,6 +10034,7 @@ impl GpuixView {
             .copied()
             .collect();
         let value_bindings = self.bindings_of(self.motion_value_key(&tree, window));
+        let caret_shown = crate::editing::caret::is_shown(&tree, &self.focus_handles, window);
         let sources = crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
@@ -9908,6 +10052,7 @@ impl GpuixView {
             dormant: &|id| dormancy.holds(id),
             clock_due: &|id| {
                 self.custom_registry.clock_due(id)
+                    || self.editing_caret.due(id, caret_shown)
                     || match value_bindings {
                         Some(index) => self.motion_values.element_due(index, id),
                         None => motion_value_due(&self.motion_values, &tree, id),
@@ -10378,7 +10523,9 @@ impl gpui::Render for GpuixView {
         let destroyed = tree.removals() != self.swept_at;
         if destroyed {
             self.tapes.retain(|id| tree.elements.contains_key(&id));
-            crate::automation::retain_bounds(window.window_handle().window_id(), |id| tree.elements.contains_key(&id));
+            crate::automation::retain_bounds(window.window_handle().window_id(), |id| {
+                tree.elements.contains_key(&crate::layout::list_marker_paint::item_of_box(id))
+            });
         }
         self.paint_statics.prune(|id| tree.elements.contains_key(&id));
         // Pruned by listener, not existence: dropping `onLayout` and adding it
@@ -10494,6 +10641,7 @@ impl gpui::Render for GpuixView {
         if !window.is_layout_pass() {
             self.tapes.begin_rows();
         }
+        let caret_shown = self.sync_editing_caret(&tree, window, cx);
         self.retain.begin_frame(crate::retain::Sources {
             tree: &tree,
             hovered: pointer.chains().0,
@@ -10511,6 +10659,7 @@ impl gpui::Render for GpuixView {
             dormant: &|id| dormancy.holds(id),
             clock_due: &|id| {
                 self.custom_registry.clock_due(id)
+                    || self.editing_caret.due(id, caret_shown)
                     || match value_bindings {
                         Some(index) => self.motion_values.element_due(index, id),
                         None => motion_value_due(&self.motion_values, &tree, id),
@@ -10551,6 +10700,7 @@ impl gpui::Render for GpuixView {
                     &activation,
                     &pointer,
                     &mut highlight_events,
+                    Fonts::of(cx),
                     BuildStart {
                         inherited: Inherited::root(
                             &theme,
@@ -10620,6 +10770,7 @@ impl gpui::Render for GpuixView {
             use gpui::prelude::*;
             let drag_move_view = cx.weak_entity();
             let drag_end_view = drag_move_view.clone();
+            let editing_pointer = crate::editing::pointer::EditingPointer::new(self.editing_pointer.clone(), tree_arc.clone(), callback.clone());
             let mut root = gpui::div()
                 .size_full()
                 .on_modifiers_changed(crate::events::keyboard::note_modifiers(self.routing.clone()))
@@ -10628,7 +10779,11 @@ impl gpui::Render for GpuixView {
             crate::css::word_break::set_defaults(root.text_style());
             root.text_style().hang_trailing_spaces =
                 Some(crate::text::white_space::WhiteSpace::default().hangs_trailing_spaces());
-            with_window_menu_actions(root)
+            crate::events::clipboard::with_actions(
+                with_window_menu_actions(root),
+                self.selection.clone(),
+                callback.clone(),
+            )
                 .child(crate::events::listeners::pointer_frame(
                     cx.weak_entity(),
                     crate::events::listeners::PointerDispatch {
@@ -10636,6 +10791,7 @@ impl gpui::Render for GpuixView {
                         activation: activation.clone(),
                         window_actions: self.simulated_window_actions.clone(),
                         resync_by_frame: self.resync_by_frame,
+                        editing: editing_pointer.clone(),
                     },
                     self.pointer.borrow().observed(),
                     self.hover_after_scroll.clone(),
@@ -10648,6 +10804,7 @@ impl gpui::Render for GpuixView {
                 ))
                 .child(selection_frame_reset(
                     self.selection.clone(),
+                    editing_pointer,
                     move |window, position, app| {
                         // This listener can run inside an update of GpuixView (an
                         // accessibility activation does). A nested update panics, so wait.
@@ -12150,6 +12307,7 @@ fn build_element_unpumped(
                 .note_clip_origin(id, element.events(), None);
             let inherited = &ctx.inherited;
             let render_ctx = CustomRenderContext {
+                fonts: ctx.fonts.clone(),
                 id,
                 doc_path: ctx.doc_path(),
                 events: element.events(),
@@ -12433,7 +12591,7 @@ fn build_virtual_list(
         .with_sizing_behavior(gpui::ListSizingBehavior::Auto)
         .id(list_element_id);
     if let Some(style) = element.style.as_deref() {
-        list = apply_styles(list, style, &ctx.inherited.colors, &ctx.inherited.lengths).overscroll_behavior(
+        list = apply_styles(list, style, &ctx.inherited.colors, &ctx.inherited.lengths, &ctx.fonts).overscroll_behavior(
             gpui::OverscrollBehavior::Auto,
             crate::scroll::overscroll_y(style),
         );
@@ -12547,7 +12705,7 @@ pub(crate) fn build_host_container(
     };
 
     if let Some(style) = style {
-        el = crate::css::style_cache::apply(el, element.style.as_ref(), style, &ctx.inherited.colors, &ctx.inherited.lengths);
+        el = crate::css::style_cache::apply(el, element.style.as_ref(), style, &ctx.inherited.colors, &ctx.inherited.lengths, &ctx.fonts);
         if places_absolute {
             el = crate::layout::containing_block::place_by_parent(el);
         }
@@ -12682,6 +12840,7 @@ pub(crate) fn build_host_container(
             style,
             &ctx.inherited.colors,
             &ctx.inherited.lengths,
+            &ctx.fonts,
             &ctx.focus_styles,
         );
     } else {
@@ -12691,6 +12850,7 @@ pub(crate) fn build_host_container(
             style,
             &ctx.inherited.colors,
             &ctx.inherited.lengths,
+            &ctx.fonts,
             &ctx.focus_styles,
         );
     }
@@ -12749,6 +12909,11 @@ pub(crate) fn build_host_container(
     // and focus events come from `GpuixView::observe_focus`. The wheel is a window-level
     // input like the pointer's (`events::listeners`).
 
+    let list_marker = if skipped { None } else { crate::layout::list_marker_paint::build(element, style, ctx) };
+    let outer_inside_marker = std::mem::replace(
+        &mut ctx.inside_marker,
+        list_marker.as_ref().and_then(|marker| marker.inside.clone().map(|room| (element.id, room))),
+    );
     #[cfg_attr(target_family = "wasm", allow(unused_mut))]
     let (mut content, mut placements, containing_heights) = if skipped {
         // The trim passed down is meant for what is built below.
@@ -12757,6 +12922,7 @@ pub(crate) fn build_host_container(
     } else {
         build_content(element, planned.as_ref().map_or(&[], |planned| &planned.children), ctx, window, cx)
     };
+    ctx.inside_marker = outer_inside_marker;
     if collapsed_table {
         let key = crate::layout::table_grid::BoxKey::Element(element.id);
         settle_collapsed_borders(ctx, key, used_from, window);
@@ -12808,12 +12974,13 @@ pub(crate) fn build_host_container(
             .map(|(_, placement)| *placement)
             .collect();
         format!(
-            "{:?} {} {:?} {:?} {:?}",
+            "{:?} {} {:?} {:?} {:?} {:?}",
             host.style(),
             content.len() - absent_children.len(),
             present.iter().map(|placement| placement.rank).collect::<Vec<_>>(),
             Placement::document_order(&present),
-            resolved
+            resolved,
+            list_marker.as_ref().map(|marker| &marker.key)
         )
     });
     // After the digest above, which the indices of the absent children are of the content without it.
@@ -12822,6 +12989,18 @@ pub(crate) fn build_host_container(
     if element.element_type == "nativeview" && !skipped {
         content.insert(0, nativeview_layer(element, style, ctx));
         placements.insert(0, Placement { rank: 0, document: 0 });
+    }
+    if let Some(marker) = list_marker {
+        content.insert(0, marker.element);
+        placements.insert(0, Placement { rank: 0, document: 0 });
+    }
+    if !skipped {
+        if let Some(input) =
+            crate::editing::input_handler::layer(&ctx.shared_tree, ctx.tree, element.id, ctx.focus_handles, ctx.event_callback, window)
+        {
+            content.push(input);
+            placements.push(Placement { rank: 0, document: u32::MAX });
+        }
     }
     host.extend(content);
     if placements.iter().any(|placement| placement.rank != 0) {
@@ -13226,9 +13405,17 @@ fn build_plan(
                     ctx.inherited = outside;
                 }
             }
-            crate::text::inline::Child::EmptyLine => {
+            crate::text::inline::Child::EmptyLine | crate::text::inline::Child::BlankLine => {
                 placements.push(Placement { rank: 0, document: at });
-                content_elements.push(gpui::div().into_any_element());
+                let caret = crate::editing::caret::held_by_empty_line(&ctx.editing_caret, ctx.tree, ctx.focus_handles, element.id, plan, index, window);
+                let line = matches!(child, crate::text::inline::Child::BlankLine).then(crate::editing::caret::blank_line);
+                content_elements.push(match caret {
+                    Some(caret) => {
+                        caret.follow_clock(&mut ctx.retain, window, cx);
+                        crate::editing::caret::empty_line(caret, line)
+                    }
+                    None => line.unwrap_or_else(|| gpui::div().into_any_element()),
+                });
             }
             crate::text::inline::Child::AnonymousCell(_) | crate::text::inline::Child::AnonymousTable(_) => {
                 unreachable!("handled before")
@@ -13263,7 +13450,7 @@ fn build_contents_container(
         el = el.stacking_context();
     }
     if let Some(style) = style {
-        el = apply_styles(el, &style.inheritable_part(), &ctx.inherited.colors, &ctx.inherited.lengths);
+        el = apply_styles(el, &style.inheritable_part(), &ctx.inherited.colors, &ctx.inherited.lengths, &ctx.fonts);
     }
     el = apply_accessibility(el, element.id, element.custom_props(), None);
     ctx.inherited.direction.apply(&mut el);
@@ -13380,11 +13567,17 @@ fn paragraph_content(
             &ctx.inherited.lengths,
             &ctx.inherited.font_state,
             &ctx.inherited.underline_offset,
+            &ctx.fonts,
             &ctx.inline_states(),
             &motion,
         )
     };
-    ctx.retain.digest(|| format!("{} {:?}", paragraph.text, styles.runs));
+    let node_wash: Vec<std::ops::Range<usize>> = ctx.tree.node_selection.wash_range(paragraph).into_iter().collect();
+    let caret = crate::editing::caret::held_by(&ctx.editing_caret, ctx.tree, ctx.focus_handles, paragraph, window);
+    if let Some(caret) = &caret {
+        caret.follow_clock(&mut ctx.retain, window, cx);
+    }
+    ctx.retain.digest(|| format!("{} {:?} {node_wash:?} {:?}", paragraph.text, styles.runs, caret.as_ref().map(|caret| (caret.byte, caret.shown))));
     // A box in the paragraph, or the paragraph being inline content of a box, puts the texts around
     // and inside the boxes on one line for copy.
     let line = ctx
@@ -13466,6 +13659,8 @@ fn paragraph_content(
                 .clone()
                 .map(crate::text::HighlightSource::Resolved),
             run_styles: styles.runs,
+            node_wash,
+            caret,
             opacity_groups: styles.groups,
             aligned_boxes,
             atomics,
@@ -13485,6 +13680,11 @@ fn paragraph_content(
             inline_cursors,
             inline_regions,
             inline_insets: insets.takes_space_along_the_line().then(|| insets.clone()),
+            leading_marker: ctx
+                .inside_marker
+                .as_ref()
+                .filter(|(item, _)| *item == paragraph.container && paragraph.index == 0)
+                .map(|(_, advance)| advance.clone()),
             cull_outset,
             ..crate::text::SelectableText::new(
                 paragraph.container,
@@ -13765,11 +13965,12 @@ pub(crate) fn apply_interactive_styles<E>(
     style: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
 ) -> E
 where
     E: gpui::Styled + gpui::StatefulInteractiveElement,
 {
-    apply_styles(el, style, colors, lengths)
+    apply_styles(el, style, colors, lengths, fonts)
 }
 
 /// A state refinement: the base colours that follow `currentColor` first, so a
@@ -13781,16 +13982,17 @@ pub(crate) fn apply_state_styles<E: gpui::Styled>(
     state: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
 ) -> E {
     if let Some(followers) = base.colors_following_current(state, lengths) {
-        refinement = apply_styles(refinement, &followers, colors, lengths);
+        refinement = apply_styles(refinement, &followers, colors, lengths, fonts);
     }
     let fill = state.resolved_fill(colors, lengths);
     let mut refined = if crate::css::border::declares_widths(state, colors) {
         let merged = crate::events::state_styles::overlay(base, state);
-        apply_styles_taking_borders_from(refinement, state, &merged, colors, lengths, fill)
+        apply_styles_taking_borders_from(refinement, state, &merged, colors, lengths, fonts, fill)
     } else {
-        apply_styles_with_fill(refinement, state, colors, lengths, fill)
+        apply_styles_with_fill(refinement, state, colors, lengths, fonts, fill)
     };
     // An outline needs a style, a width and a colour, and the state may give only some of them
     // (a focus ring that sets `outlineWidth` over a base `outline`), or change the `color` the
@@ -13817,9 +14019,10 @@ pub(crate) fn apply_styles<E: gpui::Styled>(
     style: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
 ) -> E {
     let fill = style.resolved_fill(colors, lengths);
-    apply_styles_with_fill(el, style, colors, lengths, fill)
+    apply_styles_with_fill(el, style, colors, lengths, fonts, fill)
 }
 
 /// `fill` must be `style.resolved_fill(colors, lengths)`.
@@ -13828,9 +14031,10 @@ pub(crate) fn apply_styles_with_fill<E: gpui::Styled>(
     style: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
     fill: crate::style::Fill,
 ) -> E {
-    apply_styles_taking_borders_from(el, style, style, colors, lengths, fill)
+    apply_styles_taking_borders_from(el, style, style, colors, lengths, fonts, fill)
 }
 
 /// [`apply_styles_with_fill`] with the border widths read from `widths_from`. A state
@@ -13842,6 +14046,7 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
     widths_from: &StyleDesc,
     colors: &crate::color::ColorContext,
     lengths: &LengthContext,
+    fonts: &Fonts,
     fill: crate::style::Fill,
 ) -> E {
     el = crate::layout::style::apply(el, style, colors, lengths);
@@ -13926,7 +14131,9 @@ fn apply_styles_taking_borders_from<E: gpui::Styled>(
         el = el.text_size(gpui::px(lengths.font_size as f32));
     }
     if let Some(ref family) = style.font_family {
-        el = el.font_family(family.clone());
+        let resolved = fonts.resolve(family);
+        el = el.font_family(resolved.family);
+        el.text_style().font_fallbacks = Some(resolved.fallbacks);
     }
     if let Some(ref weight) = style.font_weight {
         el = el.font_weight(parse_font_weight(weight));
@@ -14297,7 +14504,17 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 
     // Phase 3: apply. Cannot fail.
     let mut destroyed_ids: Vec<f64> = Vec::new();
+    let mut node_selection = None;
+    let mut reshaped = false;
     for batch_op in parsed {
+        reshaped |= matches!(
+            batch_op,
+            BatchOp::DestroyElement { .. }
+                | BatchOp::DetachChild { .. }
+                | BatchOp::AppendChild { .. }
+                | BatchOp::InsertBefore { .. }
+                | BatchOp::SetText { .. }
+        );
         match batch_op {
             BatchOp::CreateElement { id, element_type } => {
                 tree.create_element(id, element_type);
@@ -14342,6 +14559,9 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
             BatchOp::SetKeyboardFocusDim { enabled } => {
                 tree.set_keyboard_focus_dim(enabled);
             }
+            BatchOp::SetNodeSelection { selection } => {
+                node_selection = Some(selection);
+            }
             BatchOp::SetUniversalStyle { .. } => {
                 let shared = universal_styles
                     .next()
@@ -14365,6 +14585,13 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 
     // Every mutation above only noted what the sheets must match again; this is where they do.
     tree.flush_styles();
+
+    // After the last change to the tree: the paragraphs a selection reaches are the ones that are there now.
+    match node_selection {
+        Some(selection) => crate::editing::node_selection::set(tree, selection, reshaped),
+        None if reshaped => crate::editing::node_selection::refresh(tree),
+        None => {}
+    }
 
     // Release styles nothing references any more. Without this a dragged
     // element, which produces a distinct style every frame, would grow the
@@ -17654,7 +17881,7 @@ mod dimension_length_tests {
             let state: StyleDesc = serde_json::from_str(state).unwrap();
             let colors = crate::color::ColorContext::root(crate::color::Scheme::Light);
             let lengths = LengthContext::initial(800.0, 600.0);
-            let refinement = apply_state_styles(gpui::StyleRefinement::default(), &base, &state, &colors, &lengths);
+            let refinement = apply_state_styles(gpui::StyleRefinement::default(), &base, &state, &colors, &lengths, &Fonts::for_tests());
             let edges = refinement.border_widths;
             [edges.top, edges.right, edges.bottom, edges.left]
                 .map(|width| width.map(|width| f32::from(width.to_pixels(gpui::px(16.0)))))
@@ -17679,6 +17906,7 @@ mod dimension_length_tests {
             &style,
             &crate::color::ColorContext::root(crate::color::Scheme::Light),
             &lengths,
+            &Fonts::for_tests(),
         );
         let outline = refinement.outline.expect("the outline is applied");
         assert_eq!((outline.width, outline.offset), (gpui::px(2.0), gpui::px(11.0)));
@@ -17694,6 +17922,7 @@ mod dimension_length_tests {
             &style,
             &crate::color::ColorContext::root(crate::color::Scheme::Light),
             &lengths,
+            &Fonts::for_tests(),
         )
     }
 
@@ -17957,7 +18186,7 @@ mod dimension_length_tests {
         let colors = crate::color::ColorContext::root(crate::color::Scheme::Light);
         styles.iter().fold(gpui::StyleRefinement::default(), |refinement, style| {
             let style: StyleDesc = serde_json::from_str(style).unwrap();
-            apply_styles(refinement, &style, &colors, &lengths)
+            apply_styles(refinement, &style, &colors, &lengths, &Fonts::for_tests())
         })
     }
 

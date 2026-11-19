@@ -64,6 +64,10 @@ pub enum BatchOp<'a> {
     SetKeyboardFocusDim {
         enabled: bool,
     },
+    /// The selection of nodes JS holds in this root, or `None` when it has none here.
+    SetNodeSelection {
+        selection: Option<crate::editing::node_selection::Selection>,
+    },
     /// Text for the same reasons as `SetStyle`. `None` clears the layer.
     SetUniversalStyle {
         style: Option<&'a str>,

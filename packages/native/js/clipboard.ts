@@ -8,29 +8,28 @@ export interface Clipboard {
   readText(): Promise<string>
 }
 
-export type ClipboardHost = Pick<
-  NativeRenderer,
-  "writeClipboardText" | "readClipboardText"
->
+export type ClipboardHost = Pick<NativeRenderer, "writeClipboard" | "readClipboard">
 
 export function createClipboard(
   host: () => ClipboardHost | undefined
 ): Clipboard {
   const requireHost = () => {
     const current = host()
-    if (!current?.writeClipboardText || !current.readClipboardText) {
+    if (!current?.writeClipboard || !current.readClipboard) {
       throw new Error("No GPUIX renderer with a clipboard is running")
     }
     return current as Required<ClipboardHost>
   }
   return {
     async writeText(text) {
-      requireHost().writeClipboardText(String(text))
+      requireHost().writeClipboard([{ type: "text/plain", data: String(text) }])
     },
     async readText() {
-      const text = requireHost().readClipboardText()
+      const text = requireHost()
+        .readClipboard()
+        .find((entry) => entry.type === "text/plain")
       // The DOM has no "empty" state: readText() of a text-less clipboard is "".
-      return text === null ? "" : text
+      return text === undefined ? "" : text.data
     },
   }
 }

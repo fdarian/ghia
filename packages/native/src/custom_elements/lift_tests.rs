@@ -32,6 +32,7 @@ fn lift_of_surface(style: &str, lift_absorbed: bool) -> Option<i32> {
     };
     let props = HashMap::new();
     let ctx = CustomRenderContext {
+        fonts: crate::text::font_family::Fonts::for_tests(),
         id: ID,
         doc_path: Default::default(),
         events: &events,

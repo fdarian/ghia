@@ -11,7 +11,9 @@ use objc::{class, msg_send, sel, sel_impl, Encode, Encoding};
 
 type Id = *mut Object;
 
+const NS_UTF8_STRING_ENCODING: u64 = 4;
 const KEY_DOWN: u64 = 10;
+const KEY_UP: u64 = 11;
 const LEFT_MOUSE_DOWN: u64 = 1;
 const LEFT_MOUSE_UP: u64 = 2;
 const MOUSE_MOVED: u64 = 5;
@@ -138,6 +140,21 @@ pub(crate) unsafe fn drain_app_events() -> usize {
     })
 }
 
+/// Runs the main run loop's pending sources, the main dispatch queue's blocks among them.
+///
+/// # Safety
+///
+/// This must run on the main thread.
+pub(crate) unsafe fn run_main_queue() {
+    const HANDLED_SOURCE: i32 = 4;
+    for _ in 0..16 {
+        let result = unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.0, 1) };
+        if result != HANDLED_SOURCE {
+            break;
+        }
+    }
+}
+
 /// Posts the events of `kind` for the window that holds `ns_view`. `x` and `y` are in the
 /// window's logical pixels, from its top left, like the `simulate*` methods.
 ///
@@ -175,6 +192,93 @@ pub(crate) unsafe fn post(ns_view: Id, kind: Kind) {
             }
             Kind::Scroll(at) => post_event(scroll(window, window_number, in_window(at))),
         }
+    })
+}
+
+/// Queues a `keyDown` and a `keyUp` for each character of `text` (letters and spaces), for the
+/// window that holds `ns_view`, with `-[NSApp postEvent:atStart:NO]` from the calling thread, so
+/// all of them are in AppKit's queue before the next pump.
+///
+/// # Safety
+///
+/// `ns_view` must be the live content view of an AppKit window, and this must run on the main
+/// thread.
+pub(crate) unsafe fn post_keys(ns_view: Id, text: &str) -> Result<()> {
+    let key_codes = text
+        .chars()
+        .map(|character| {
+            ansi_key_code(character).ok_or_else(|| {
+                Error::from_reason(format!(
+                    "postNativeKeys takes lowercase ASCII letters and spaces, got {character:?}"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    autoreleasepool(|| unsafe {
+        let window: Id = msg_send![ns_view, window];
+        let window_number: i64 = msg_send![window, windowNumber];
+        let process_info: Id = msg_send![class!(NSProcessInfo), processInfo];
+        let timestamp: f64 = msg_send![process_info, systemUptime];
+        let app: Id = msg_send![class!(NSApplication), sharedApplication];
+        for (character, key_code) in text.chars().zip(key_codes) {
+            let mut utf8 = [0u8; 4];
+            let encoded: &str = character.encode_utf8(&mut utf8);
+            let characters: Id = msg_send![class!(NSString), alloc];
+            let characters: Id = msg_send![characters,
+                initWithBytes: encoded.as_ptr()
+                length: encoded.len()
+                encoding: NS_UTF8_STRING_ENCODING];
+            let characters: Id = msg_send![characters, autorelease];
+            for event_type in [KEY_DOWN, KEY_UP] {
+                let event: Id = msg_send![class!(NSEvent),
+                    keyEventWithType: event_type
+                    location: Point { x: 0.0, y: 0.0 }
+                    modifierFlags: 0u64
+                    timestamp: timestamp
+                    windowNumber: window_number
+                    context: std::ptr::null_mut::<Object>()
+                    characters: characters
+                    charactersIgnoringModifiers: characters
+                    isARepeat: NO
+                    keyCode: key_code];
+                let _: () = msg_send![app, postEvent: event atStart: NO];
+            }
+        }
+    });
+    Ok(())
+}
+
+/// The virtual key code of the key that types `character` on an ANSI keyboard.
+fn ansi_key_code(character: char) -> Option<u16> {
+    Some(match character {
+        'a' => 0,
+        's' => 1,
+        'd' => 2,
+        'f' => 3,
+        'h' => 4,
+        'g' => 5,
+        'z' => 6,
+        'x' => 7,
+        'c' => 8,
+        'v' => 9,
+        'b' => 11,
+        'q' => 12,
+        'w' => 13,
+        'e' => 14,
+        'r' => 15,
+        'y' => 16,
+        't' => 17,
+        'o' => 31,
+        'u' => 32,
+        'i' => 34,
+        'p' => 35,
+        'l' => 37,
+        'j' => 38,
+        'k' => 40,
+        'n' => 45,
+        'm' => 46,
+        ' ' => 49,
+        _ => return None,
     })
 }
 

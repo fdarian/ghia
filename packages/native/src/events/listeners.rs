@@ -117,6 +117,8 @@ pub(crate) struct PointerDispatch {
     /// frame. The test renderer has no display link and GPUI draws a dirty window inline there,
     /// so a resync applied at once would flip hover again within the same flush, forever.
     pub resync_by_frame: bool,
+    /// The press in an editing host, which puts the caret where the pointer is.
+    pub editing: crate::editing::pointer::EditingPointer,
 }
 
 impl PointerDispatch {
@@ -185,6 +187,7 @@ impl PointerDispatch {
             .press_path(button)
             .map(<[u64]>::to_vec)
             .unwrap_or_default();
+        let editing_path = target_path.clone();
         crate::focus::defer_mouse_down_default(window, cx, &self.activation.routing, target_path);
         let mut mouse_down_prevented = false;
         let mut press_stopped = false;
@@ -202,12 +205,20 @@ impl PointerDispatch {
             mouse_down_prevented |= is_mouse_down && outcome.default_prevented;
             press_stopped |= (is_pointer_down || is_mouse_down) && outcome.propagation_stopped;
         }
+        let position = gpui::point(gpui::px(sample.position.0 as f32), gpui::px(sample.position.1 as f32));
         if mouse_down_prevented {
             window.prevent_default();
         } else {
             self.activation.routing.modality().note_press();
         }
-        let position = gpui::point(gpui::px(sample.position.0 as f32), gpui::px(sample.position.1 as f32));
+        // The caret is placed after the focus default, which is deferred before this: `pressed` queues its own step behind it.
+        if let (0, PointerAction::Down { click_count, .. }) = (button, &sample.action) {
+            if mouse_down_prevented || sample.modifiers.ctrl {
+                self.editing.cancelled();
+            } else {
+                self.editing.pressed(&editing_path, position, *click_count, sample.modifiers.shift, window, cx);
+            }
+        }
         if withholds_press(press_stopped, window.native_surface_at(position).is_some()) {
             cx.stop_propagation();
         }

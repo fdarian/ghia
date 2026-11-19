@@ -1,3 +1,5 @@
+import { styleDeclarationFor, styleFromCssText, type CSSStyleDeclaration } from "../dom/css-style-declaration.js"
+import type { StyleDesc } from "../host.js"
 import { splitRules, type RuleText } from "./rules.js"
 import { allocateSheetId, sheetChanged, type SyncedSheet } from "./sheet-sync.js"
 
@@ -46,10 +48,27 @@ export class CSSRule {
 /** A rule with a selector list. */
 export class CSSStyleRule extends CSSRule {
   readonly selectorText: string
+  private declared: StyleDesc | undefined
 
   constructor(source: RuleText, sheet: CSSStyleSheet) {
     super(source, sheet)
     this.selectorText = source.prelude
+  }
+
+  /**
+   * The declarations of the rule, read from its text on the first read. A write changes this
+   * declaration only: neither `cssText` nor what a renderer draws follows it.
+   */
+  get style(): CSSStyleDeclaration {
+    const rule = this
+    return styleDeclarationFor(rule, {
+      get style() {
+        return (rule.declared ??= styleFromCssText(rule.cssText.slice(rule.cssText.indexOf("{") + 1, rule.cssText.lastIndexOf("}"))))
+      },
+      setStyle(next) {
+        rule.declared = next
+      },
+    })
   }
 }
 

@@ -357,6 +357,9 @@ impl FocusState {
     }
 
     fn push_change(&mut self, tree: &RetainedTree, change: &FocusChange) {
+        if let Some(from) = change.from {
+            tree.composition.focus_left(from);
+        }
         self.outbox.extend(change_events(tree, change));
     }
 
@@ -390,7 +393,7 @@ impl FocusState {
 
     /// Record where window focus is now, and report the move if there was one.
     ///
-    /// `:focus-visible` follows Chrome. A text control always matches. Any other
+    /// `:focus-visible` follows Chrome. A text control or a `contenteditable` host always matches. Any other
     /// element matches unless the mouse was the last to focus an element
     /// (`FocusModality`), and a key pressed since makes it match again, whatever
     /// element has focus. What moved focus decides those two facts: a mouse press
@@ -455,11 +458,7 @@ impl FocusState {
         let Some(element) = element else {
             return false;
         };
-        let is_text_control = tree
-            .elements
-            .get(&element)
-            .is_some_and(crate::custom_elements::input_choice::is_text_editor);
-        is_text_control || !self.modality.0.mouse_focused.get() || self.modality.0.key_down.get()
+        is_text_field(tree, element) || !self.modality.0.mouse_focused.get() || self.modality.0.key_down.get()
     }
 
     pub fn styles(&self, tree: &RetainedTree, keyboard_focus_dim: bool) -> FocusStyles {
@@ -470,14 +469,11 @@ impl FocusState {
             tree.elements.get(id).and_then(|element| element.parent)
         })
         .collect();
-        let is_text_control = tree
-            .elements
-            .get(&focused)
-            .is_some_and(crate::custom_elements::input_choice::is_text_editor);
+        let is_text_control = is_text_field(tree, focused);
         let visible = self.is_visible(Some(focused), tree);
         FocusStyles {
             // Typing is keyboard input too, and dimming the window while someone
-            // types is noise.
+            // types is noise. A `contenteditable` host is a text field as well.
             dim_path: (visible && keyboard_focus_dim && !is_text_control).then(|| within.clone()),
             visible: visible.then_some(focused),
             within,
@@ -525,6 +521,13 @@ impl FocusEventKind {
 /// Each carries its `target`, the propagation `path` from it to the root, and
 /// the element on the other side of the move as `relatedTarget`. JS decides
 /// which of them bubble.
+/// A text control or a `contenteditable` host: Chrome's `MayTriggerVirtualKeyboard`, which makes a
+/// mouse-focused element match `:focus-visible` and keeps the typing-dim off.
+fn is_text_field(tree: &RetainedTree, element: u64) -> bool {
+    tree.elements.get(&element).is_some_and(crate::custom_elements::input_choice::is_text_editor)
+        || crate::html::editing::is_editing_host(tree, element)
+}
+
 fn change_events(tree: &RetainedTree, change: &FocusChange) -> Vec<EventPayload> {
     let mut events = Vec::new();
     if let Some(from) = change.from {
@@ -803,9 +806,10 @@ pub(crate) fn apply_focus_within<E: gpui::Styled>(
     style: Option<&crate::style::StyleDesc>,
     colors: &crate::color::ColorContext,
     lengths: &crate::css::length::LengthContext,
+    fonts: &crate::text::font_family::Fonts,
     focus: &crate::focus::FocusStyles,
 ) -> E {
-    apply_focus_variants(el, id, false, style, colors, lengths, focus)
+    apply_focus_variants(el, id, false, style, colors, lengths, fonts, focus)
 }
 
 /// The focus variants of `style` that apply to `id`, weakest first: `focus`, `focusWithin`,
@@ -819,6 +823,7 @@ fn apply_focus_variants<E: gpui::Styled>(
     style: Option<&crate::style::StyleDesc>,
     colors: &crate::color::ColorContext,
     lengths: &crate::css::length::LengthContext,
+    fonts: &crate::text::font_family::Fonts,
     focus: &crate::focus::FocusStyles,
 ) -> E {
     let Some(base) = style else { return el };
@@ -830,6 +835,7 @@ fn apply_focus_variants<E: gpui::Styled>(
             declared,
             &colors.for_state(declared),
             &lengths.for_state(declared.font_size.as_ref()),
+            fonts,
         );
         let folded = crate::events::state_styles::overlay(&beneath, declared);
         el = crate::layout::stacking::apply_folded_lift(el, &folded, colors, lengths);
@@ -851,9 +857,10 @@ pub(crate) fn apply_focus_styles<E: gpui::Styled>(
     style: Option<&crate::style::StyleDesc>,
     colors: &crate::color::ColorContext,
     lengths: &crate::css::length::LengthContext,
+    fonts: &crate::text::font_family::Fonts,
     focus: &crate::focus::FocusStyles,
 ) -> E {
-    let el = apply_focus_variants(el, id, true, style, colors, lengths, focus);
+    let el = apply_focus_variants(el, id, true, style, colors, lengths, fonts, focus);
     let opted_out = style.and_then(|style| style.keyboard_focus_dim) == Some(false);
     match focus.dim_path.as_deref() {
         // Opacity applies to the subtree, so the focused element's own
@@ -1201,6 +1208,15 @@ mod tests {
             println!("{name}");
             page.run(steps);
         }
+    }
+
+    #[test]
+    fn a_contenteditable_host_matches_focus_visible_after_a_click_like_a_text_control() {
+        let mut page = Page::new();
+        page.tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::json!(true));
+        page.run(&[Press(Some(1)), Check(1, true), Press(Some(2)), Check(2, false)]);
+        page.tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::json!(false));
+        page.run(&[Press(Some(1)), Check(1, false)]);
     }
 
     #[test]

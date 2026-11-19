@@ -255,6 +255,35 @@ A loop beside a focused or unfocused `input`, a `textarea` or an input out of th
 with every tick patched. At 13k elements 7.4 to 0.34 ms; at 1306, 1.16 to 0.34 ms. The blink is a patched frame that builds the input
 alone.
 
+### An editing host's caret is a tick
+
+The caret of a focused `contenteditable` (a collapsed node selection, [editing.md](editing.md#painting-the-caret)) blinks as an `<input>`'s does, and is the same kind of tick, with no custom element behind it: the paragraph that holds the caret is the unit.
+
+- **The holder notes `Retain::blinks`.** `paragraph_content` (and the empty-line arm of `build_plan`, for `<p><br></p>`) calls it for the container whenever it holds the caret, shown or not, so the container is `Dynamic::Blink` and, with nothing else running on it, `paints_only`: a unit of its own, whose tick builds it and what is in it and nothing around it.
+- **`Sources::clock_due` asks the editing caret.** `EditingCaret::due(id, shown)` is true for the container that painted the caret last when the blink changed phase since (the timer sets it, the paint clears it), or when it painted the caret shown or hidden and the caret is the other now: focus coming or going and the window going key reach a paragraph that no change touched, which `Retain::between_changes` would otherwise leave as it was painted.
+- **The caret is painted in both phases** (in no colour while it is off), so a patch has the operations of the recording; while it is not shown no quad is painted, and the frame that shows it is built whole.
+- **The first change of phase is a frame built whole.** A frame that replays the holder builds nothing, so it is a unit only after a build that finds the record the first note made: the tick of the first phase builds it, whole, and the ticks after it are patches. Test: `editing-caret.test.tsx` warms one phase first.
+- **The blink clock is restarted before the patcher builds too.** `GpuixView::sync_editing_caret` runs at the start of `build_units` as well as before a frame built whole, so typing in the off phase paints the caret lit from the edit and the task is aimed at the phase that starts there.
+- **A caret nobody can see asks for none.** The task that waits for the end of the phase is armed by the build of the holder, only while the caret is shown (the host has focus, the window is key), and dropped whenever the selection changes. A caret scrolled out of view still ticks: a patch of one paragraph, not a frame.
+
+Test: `editing-caret.test.tsx` "blinks in patched frames that build the paragraph that holds the caret and nothing else".
+
+### Typing in an editing host
+
+A character typed into a `contenteditable` is one `setText` and the `setNodeSelection` in one batch, and the frame it asks for is, in an editor a person types into, a frame built whole that retention keeps cheap. Measured by `editing-keystroke.test.tsx` with 50 paragraphs, per character:
+
+- **A host that is a scroller, with the caret in view, is a frame built whole: 1 layout pass laying out 2 nodes (the edited paragraph and its text), 5 elements built, 49 skipped, and no patch tried** (nothing is declined). The paragraph that holds the blinking caret is `Dynamic::Blink` ([above](#an-editing-hosts-caret-is-a-tick)), so what is built under the host runs, and `end_anchor` refuses a host with `own.dynamic`: the host is no anchor, and a frame with no anchor or box root to follow the change has no patch to try. The same host in `<p>text</p>` and `<p><span>text</span></p>`.
+- **An auto-height host with no box root above it** is the same frame, 5 built and 49 skipped, for the reason a frame has no root to patch (`RetainedTree::structure_attributed`). With a box of a definite size above it, the edit is one relayout patch of that box (2 nodes, 52 built).
+- **A `<textarea>`** is a frame built whole that builds 4 and sends nothing to the tree.
+
+The whole frame is the cheaper one, and that is why it is left as it is. A relayout patch at a flat host root (one whose many children are small and box-less, as paragraphs are) builds, lays out and paints every child, where the retained frame builds 5 and replays the rest. Measured on a host of N paragraphs, per key: with the patch off (the retained whole frame) 426 us at 50, 1.6 ms at 500, 2.9 ms at 1000 and 5.8 ms at 2000; with the patch on 835 us at 50, 3.2 ms at 500 and 6.1 ms at 1000, so the patch is 1.7 to 2.1x slower for N up to 1000. Past `ANCHOR_MAX_ELEMENTS` (1024) a host is no anchor whatever it holds and the cost is the retained frame's alone. Letting `end_anchor` accept a host whose only dynamic is a caret was considered and rejected: it would move typing from the faster path onto the slower one. A patch at a root with many small box-less children losing to the retained frame is a question for the patch policy in general, not for typing.
+
+- **The one fixture that patches a scroller host is not what a person does.** A host scrolled before its first frame, so that the caret's paragraph is culled when the frame built whole records the host, has nothing running in it and is an anchor: one relayout patch that lays out 2 nodes and builds 51 elements (the host and its 50 paragraphs, because a patch builds its root flat). The same scroll offset applied after the first frames, as a wheel applies it, is the frame built whole above even with the caret out of view. The test keeps it as its own case, named for what it is.
+- **A patched key into a host that is itself a scroller is a verifier mismatch on its first typed character** ("a patched frame differs from the frame built whole ... did not record the root"), for the keydown and the platform's text input, and not for `simulateEditingInput` or an input method's commit alone, in the same host. A plain re-render of the same scroller is clean. Not diagnosed; the keystroke case above is the one that reaches it, so it is skipped under `GPUIX_RETAIN_VERIFY` and the caret-in-view fixtures, which are not patches, run under it.
+- **`simulateKeystrokes` draws the keydown's patch whole** in the keyup it sends in the same call: any simulated input draws the window as it ends, whatever is pending. A live window draws once per display link, so the keydown, its frame and the keyup are three steps there, as the test sends them.
+
+Test: `editing-keystroke.test.tsx`.
+
 ### A loop under a positioned or translucent ancestor, or on an absolute element (#75)
 
 A colour or stroke loop on a text or an `<svg>` under a `position: relative`, `absolute` or `opacity < 1` wrapper drew every tick
@@ -766,8 +795,8 @@ keeps what builds it again.
     `may_lift` says so, when it forms a context as declared (a `transform-style: preserve-3d`, a Motion transform key or a mask border forms one and
     lifts at `z-index` 0 without `may_lift` naming it) or when something other than a hover that paints only might restyle it (`hover_paint::may_lift_in_any_state`).
     A root is refused too often, never too seldom; the build re-decides with the real flags. `Recording::patch_root` and `Record::patch_root` then ask `Node::hands_lifts_out` (`!forms_context && below.lifts`),
-    the same without the relevance-watch clause of `Node::lifts_out`, which is for the relocation of a replay: a patch prepaints the
-    watch itself. A lifted row that forms no context and holds a lifted child, and an element above a lifted row, are not patch roots;
+    the clause that a relocation does not share (`Node::blocks_move` is the one a relocation asks: the relevance watch, and a hole among what the root hands out; a
+    recording that is moved takes plain boxes along): a patch prepaints the watch itself. A lifted row that forms no context and holds a lifted child, and an element above a lifted row, are not patch roots;
   - nothing in it has a **size an intrinsic keyword gives** (`min-content`, `fit-content`, ...): its box is measured under another
     style and asked for again, and a retained root that holds one is laid out again by every frame unless the box is a root of its own
     (`retained-intrinsic.test.tsx`);

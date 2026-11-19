@@ -3163,6 +3163,41 @@ mod states {
     }
 }
 
+#[test]
+fn list_style_properties_in_a_sheet_reach_the_items_that_inherit_them() {
+    use crate::css::list_style::{ListStylePosition, ListStyleType};
+    let mut doc = Doc::new();
+    let ol = doc.element("ol", ROOT);
+    let items = [doc.element("li", ol), doc.classed("li", ol, "plain"), doc.classed("li", ol, "bogus")];
+    doc.style_element(
+        ROOT,
+        "ol { list-style-type: lower-alpha } .plain { list-style: none inside } .bogus { list-style-type: greek }",
+    );
+    doc.flush();
+    doc.frame();
+    let markers: Vec<_> = items.iter().map(|id| crate::layout::list_marker::marker_in_tree(&doc.tree, *id)).collect();
+    assert_eq!(markers[0].as_ref().map(|marker| marker.text.as_str()), Some("a. "));
+    assert_eq!(markers[1], None, "none");
+    assert_eq!(doc.tree.list_style_position_of(items[1]), ListStylePosition::Inside);
+    assert_eq!(markers[2].as_ref().map(|marker| marker.text.as_str()), Some("c. "), "an unknown type is dropped");
+    assert_eq!(doc.tree.list_style_type_of(items[1]), ListStyleType::None);
+}
+
+#[test]
+fn a_sheet_that_changes_an_item_to_a_block_renumbers_the_items_after_it() {
+    let mut doc = Doc::new();
+    let ol = doc.element("ol", ROOT);
+    let items: Vec<u64> = (0..3).map(|_| doc.element("li", ol)).collect();
+    doc.style_element(ROOT, ".off { display: block }");
+    doc.flush();
+    doc.frame();
+    let before: Vec<u64> = items.iter().map(|id| doc.tree.elements[id].subtree_revision).collect();
+    doc.tree.set_attribute(items[0], "class", Some("off".into()));
+    doc.flush();
+    let after: Vec<u64> = items.iter().map(|id| doc.tree.elements[id].subtree_revision).collect();
+    assert_eq!(before.iter().zip(&after).map(|(before, after)| before != after).collect::<Vec<_>>(), vec![true, true, true]);
+}
+
 mod reload;
 
 mod positions;

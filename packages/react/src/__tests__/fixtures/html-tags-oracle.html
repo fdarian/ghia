@@ -38,6 +38,9 @@ const cases = {
     '<ul id="ul"><li id="li1">AA</li><li id="li2">AA</li></ul><ol id="ol"><li id="oli1">AA</li></ol><p id="after">AA</p>',
   'nested lists':
     '<ul id="ul"><li id="li1">AA<ul id="inner"><li id="li2">AA</li></ul></li><li id="li3">AA</li></ul><p id="after">AA</p>',
+  'a dl in a list and a list in a dl':
+    '<ul id="ul"><li id="li1">AA<dl id="dl"><dt id="dt">AA</dt><dd id="dd">AA</dd></dl></li></ul>' +
+    '<dl id="dl2"><dt id="dt2">AA</dt><dd id="dd2">AA<ol id="ol"><li id="li2">AA</li></ol></dd></dl><p id="after">AA</p>',
   'blockquote, figure, address and dl':
     '<blockquote id="bq"><p id="bqp">AA</p></blockquote><figure id="fig"><figcaption id="cap">AA</figcaption></figure>' +
     '<address id="ad">AA</address><dl id="dl"><dt id="dt">AA</dt><dd id="dd">AA</dd></dl>',

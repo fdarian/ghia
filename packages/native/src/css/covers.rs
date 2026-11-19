@@ -110,6 +110,7 @@ covers! {
     ],
     text_box => [text_box_trim, text_box_edge],
     text_wrap => [text_wrap_mode, text_wrap_style],
+    list_style => [list_style_type, list_style_position],
     mask => [
         mask_image, mask_size, mask_position, mask_repeat, mask_origin, mask_clip, mask_mode,
         mask_composite, mask_border,
@@ -758,6 +759,8 @@ mod tests {
         ("textBox", r#""trim-both cap alphabetic""#, "textBoxTrim", r#""trim-start""#),
         ("textWrap", r#""balance""#, "textWrapMode", r#""nowrap""#),
         ("textWrap", r#""balance""#, "textWrapStyle", r#""pretty""#),
+        ("listStyle", r#""inside square""#, "listStyleType", r#""decimal""#),
+        ("listStyle", r#""inside square""#, "listStylePosition", r#""outside""#),
         ("mask", r#""linear-gradient(red, blue)""#, "maskImage", r#""none""#),
         ("mask", r#""linear-gradient(red, blue)""#, "maskBorder", r#""linear-gradient(red, blue) 10""#),
         ("mask", r#""linear-gradient(red, blue)""#, "maskBorderSource", r#""none""#),

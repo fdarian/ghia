@@ -5,6 +5,7 @@
 
 import {
   attributesWritten,
+  DocumentFragment,
   bumpTreeVersion,
   crossRootError,
   forwardsCustomProp,
@@ -20,13 +21,16 @@ import { adopt, assertPlacement, markUnmounted, materialize, nextId, sendLiveSty
 import {
   containerFor,
   createHostElement,
+  createHostFragment,
   createHostText,
   isInTree,
   linkChild,
   propOf,
   stateFor,
   unlinkChild,
+  type HostFragment,
   type HostNode,
+  type HostParent,
 } from "./host-nodes.js"
 
 /**
@@ -48,6 +52,7 @@ export function createDomFactory(container: Container): DomNodeFactory {
   return {
     createElement: (type) => createDomElement(container, type),
     createTextNode: (data) => createDomText(container, data) as unknown as Text,
+    createDocumentFragment: () => createDomFragment(container),
   }
 }
 
@@ -55,11 +60,15 @@ export function createDomElement(container: Container, type: string): Instance {
   return createHostElement(nextId(container), type as ElementType, {}, container)
 }
 
+export function createDomFragment(container: Container): HostFragment {
+  return createHostFragment(nextId(container), container)
+}
+
 export function createDomText(container: Container, data: string): TextInstance {
   return createHostText(nextId(container), data, container)
 }
 
-export function assertSameWindow(parent: Instance, child: HostNode): void {
+export function assertSameWindow(parent: HostParent, child: HostNode): void {
   if (containerFor(child).nativeRenderer !== stateFor(parent).container.nativeRenderer) throw crossRootError()
 }
 
@@ -67,12 +76,14 @@ export function assertSameWindow(parent: Instance, child: HostNode): void {
  * Places `child` in `parent` before `before`, or last, as `insertBefore` does. A node that is in
  * the document is moved natively, not made again.
  */
-export function insertDomNode(parent: Instance, child: HostNode, before: HostNode | null): void {
+export function insertDomNode(parent: HostParent, child: HostNode, before: HostNode | null): void {
   assertSameWindow(parent, child)
   const parentState = stateFor(parent)
   const container = parentState.container
-  assertPlacement(parent, child)
-  adopt(parent, child)
+  // A fragment takes anything: the placement is checked where its children end up.
+  const element = parent instanceof DocumentFragment ? undefined : parent
+  if (element !== undefined) assertPlacement(element, child)
+  adopt(element, child)
   linkChild(parent, child, before ?? undefined)
   if (!parentState.mounted) {
     // The parent has no native element (code made it, or native released it), so what is moved
@@ -90,7 +101,7 @@ export function insertDomNode(parent: Instance, child: HostNode, before: HostNod
  * Takes `child` out of `parent`. Native lets the element go, with what is in it, at the next
  * flush, unless the node is in the document again by then: code keeps what it removes.
  */
-export function removeDomNode(parent: Instance, child: HostNode): void {
+export function removeDomNode(parent: HostParent, child: HostNode): void {
   unlinkChild(child)
   adopt(undefined, child)
   retire(child)

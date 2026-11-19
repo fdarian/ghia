@@ -19,6 +19,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -48,11 +49,11 @@ pub type SharedSelection = Arc<Mutex<SelectionState>>;
 
 /// One painted text element, registered per frame in paint order.
 #[derive(Clone)]
-struct RegEntry {
-    key: Arc<str>,
-    doc: selection::DocPos,
-    text: SharedString,
-    layout: TextLayout,
+pub(crate) struct RegEntry {
+    pub(crate) key: Arc<str>,
+    pub(crate) doc: selection::DocPos,
+    pub(crate) text: SharedString,
+    pub(crate) layout: TextLayout,
     /// See [`selection::RegisteredText::group`].
     group: Option<u64>,
     /// See [`selection::RegisteredText::line`].
@@ -60,7 +61,11 @@ struct RegEntry {
     /// See [`selection::RegisteredText::cell`].
     cell: Option<selection::TableCell>,
     /// From the space `layout` is in to the window: a press hits the text where it is drawn.
-    to_window: TransformationMatrix,
+    pub(crate) to_window: TransformationMatrix,
+    /// The bytes the node selection washed, which a replay of the text puts back with it.
+    pub(crate) node_wash: Vec<Range<usize>>,
+    /// The caret of the editing host that this paragraph painted, in the space of `layout`.
+    pub(crate) caret: Option<Bounds<gpui::Pixels>>,
 }
 
 impl RegEntry {
@@ -259,11 +264,12 @@ fn frame_reset(window: WindowId) {
 }
 
 /// A zero-size canvas that clears the per-frame registries and installs the
-/// frame's copy and mouse-down listeners. Paint it FIRST in the root, before
+/// frame's mouse listeners. Paint it FIRST in the root, before
 /// any text, so each frame holds exactly that frame's visible text elements
 /// in paint order.
 pub fn selection_frame_reset(
     selection: SharedSelection,
+    editing: crate::editing::pointer::EditingPointer,
     on_drag_move: impl Fn(WindowId, gpui::Point<gpui::Pixels>, &mut gpui::App) + 'static,
     on_drag_end: impl Fn(&mut gpui::App) + 'static,
 ) -> impl IntoElement {
@@ -275,9 +281,8 @@ pub fn selection_frame_reset(
             let id = window.window_handle().window_id();
             frame_reset(id);
             super::inline_hit::frame_reset(id);
-            register_copy_listener(window, &selection);
             register_down_listener(window, &selection);
-            register_drag_listeners(window, &selection, on_drag_move, on_drag_end);
+            register_drag_listeners(window, &selection, editing.clone(), on_drag_move, on_drag_end);
         },
     )
     .absolute()
@@ -381,6 +386,8 @@ pub(crate) fn same_text_apart_from_transform(
         && left.group == right.group
         && left.line == right.line
         && left.cell == right.cell
+        && left.node_wash == right.node_wash
+        && left.caret == right.caret
 }
 
 /// Whether two [`log_painted_text`] writes log the same text.
@@ -444,8 +451,10 @@ fn describe_text(entry: &RegEntry, doc: &selection::DocPos, with_matrix: bool, m
     let bounds = entry.layout.bounds();
     let bounds = Bounds::new(bounds.origin + moved, bounds.size);
     let matrix = if with_matrix { format!(" {:?}", entry.to_window) } else { String::new() };
+    let node_wash = if entry.node_wash.is_empty() { String::new() } else { format!(" node wash {:?}", entry.node_wash) };
+    let caret = entry.caret.map_or_else(String::new, |caret| format!(" caret {caret:?}"));
     format!(
-        "text {} {:?} {:?} {:?} {:?} {:?} {:?}{matrix}",
+        "text {} {:?} {:?} {:?} {:?} {:?} {:?}{node_wash}{caret}{matrix}",
         entry.key,
         doc,
         entry.text,
@@ -480,6 +489,14 @@ pub fn painted_text(window: WindowId) -> Vec<String> {
 /// Every highlight wash `window` painted in its last frame, in paint order. Test-facing.
 pub fn painted_highlights(window: WindowId) -> Vec<PaintedHighlight> {
     with_frame(window, |frame| frame.highlights.clone())
+}
+
+/// The paragraphs of `window`'s last frame that the node selection washed or put its caret in, with the
+/// bytes of each. Test-facing.
+pub(crate) fn node_washed(window: WindowId) -> Vec<RegEntry> {
+    with_frame(window, |frame| {
+        frame.registry().iter().filter(|entry| !entry.node_wash.is_empty() || entry.caret.is_some()).cloned().collect()
+    })
 }
 
 /// Byte offset to UTF-16 code-unit offset, so the log speaks JS's units.
@@ -563,6 +580,12 @@ pub struct SelectableText {
     pub run_styles: Vec<super::paragraph::RunStyle>,
     pub selection: SharedSelection,
     pub wash_color: Hsla,
+    /// The bytes washed for the node selection ([`crate::editing::node_selection`]), in `wash_color`
+    /// like the painted selection. It lives in the tree and not in `selection`, so a change to it
+    /// invalidates the paragraph and not the frame.
+    pub node_wash: Vec<Range<usize>>,
+    /// The caret of an editing host that is in this paragraph, painted over the wash.
+    pub caret: Option<crate::editing::caret::CaretPaint>,
     /// Paints additional quads under the glyphs before the selection wash:
     /// inline-code pills, word-diff highlights. Receives the laid-out text so
     /// it can turn byte ranges into rects with [`range_rects`].
@@ -599,6 +622,10 @@ pub struct SelectableText {
     /// The margin, border and padding of the paragraph's inline boxes along the
     /// line, see [`super::inline_insets`].
     pub inline_insets: Option<std::rc::Rc<super::inline_insets::InsetSpec>>,
+    /// The room the `inside` marker of a list item takes before the first glyph, which the marker's
+    /// element sets when it is laid out, ahead of this text. The marker is no inline box of the
+    /// paragraph: it leaves the text, the offsets of a selection and a search as they are.
+    pub leading_marker: Option<crate::layout::list_marker_paint::Room>,
     /// The inline boxes of a paragraph that can take focus, in tree order, see
     /// [`super::inline_focus`].
     pub inline_focus: Vec<super::inline_focus::FocusableBox>,
@@ -638,6 +665,8 @@ impl SelectableText {
             run_styles: Vec::new(),
             selection,
             wash_color,
+            node_wash: Vec::new(),
+            caret: None,
             extra_wash: None,
             links: Vec::new(),
             on_link: None,
@@ -652,6 +681,7 @@ impl SelectableText {
             inline_cursors: Vec::new(),
             inline_regions: Vec::new(),
             inline_insets: None,
+            leading_marker: None,
             inline_focus: Vec::new(),
             inline_decorations: Vec::new(),
             opacity_groups: Vec::new(),
@@ -660,6 +690,33 @@ impl SelectableText {
             cull_outset: None,
         }
     }
+}
+
+/// The insets a text is laid out with: its boxes' space, and the room of a list marker before the first glyph, with the key
+/// the layout caches them by. The marker's room is a function of its kind and text, which the key has, and of the font, which
+/// the key of the measure has from the runs.
+fn insets_of(
+    spec: Option<std::rc::Rc<super::inline_insets::InsetSpec>>,
+    marker: Option<crate::layout::list_marker_paint::Room>,
+    text_len: usize,
+) -> Option<(u64, impl Fn(Option<gpui::Pixels>) -> Vec<gpui::TextInset> + 'static)> {
+    if spec.is_none() && marker.is_none() {
+        return None;
+    }
+    let mut hasher = DefaultHasher::new();
+    spec.as_ref().map(|spec| spec.text_key()).hash(&mut hasher);
+    marker.as_ref().map(|room| room.width_key).hash(&mut hasher);
+    let key = hasher.finish();
+    Some((key, move |width: Option<gpui::Pixels>| {
+        let mut insets = Vec::new();
+        if let Some(marker) = &marker {
+            insets.push(gpui::TextInset { range: 0..text_len, leading: marker.advance.get(), trailing: gpui::Pixels::ZERO });
+        }
+        if let Some(spec) = &spec {
+            insets.extend(spec.at(width).text());
+        }
+        insets
+    }))
 }
 
 /// A selectable text element: `StyledText` with a canvas underlay that paints
@@ -674,6 +731,8 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         run_styles,
         selection,
         wash_color,
+        node_wash,
+        caret,
         extra_wash,
         links,
         on_link,
@@ -688,6 +747,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         inline_cursors,
         inline_regions,
         inline_insets,
+        leading_marker,
         inline_focus,
         inline_decorations,
         opacity_groups,
@@ -703,13 +763,14 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         "a text has either explicit runs or inline run styles"
     );
     let has_atomics = !atomics.is_empty();
+    let first_row = leading_marker.as_ref().map(|room| room.first_row.clone());
     let (layout, glyphs) = if run_styles.is_empty() {
         let styled = match runs {
             Some(runs) => StyledText::new(text.clone()).with_runs(runs),
             None => StyledText::new(text.clone()),
         };
-        let styled = match inline_insets {
-            Some(spec) => styled.with_insets_for_width(spec.text_key(), move |width| spec.at(width).text()),
+        let styled = match insets_of(inline_insets, leading_marker, text.len()) {
+            Some((key, insets)) => styled.with_insets_for_width(key, insets),
             None => styled,
         }
         .with_text_box_trim(text_box_trim);
@@ -717,14 +778,19 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     } else {
         let inline = super::paragraph::InlineText::new(text.clone(), run_styles)
             .with_boxes(aligned_boxes, atomics);
-        let inline = match inline_insets {
-            Some(spec) => inline.with_insets_for_width(spec.text_key(), move |width| spec.at(width).text()),
+        let inline = match insets_of(inline_insets, leading_marker, text.len()) {
+            Some((key, insets)) => inline.with_insets_for_width(key, insets),
             None => inline,
         }
         .with_text_box_trim(text_box_trim);
         (inline.layout().clone(), Glyphs::Paragraph(inline))
     };
     super::atomic::note(element_id, &layout);
+    // The marker that comes before this text paints where its first row starts, which alignment moves.
+    let settled: Option<Box<dyn FnOnce()>> = first_row.map(|first_row| {
+        let layout = layout.clone();
+        Box::new(move || first_row.set(Some(layout.bounds().origin.x + layout.align_offset_at(0)))) as Box<dyn FnOnce()>
+    });
 
     let behind: Vec<_> = inline_decorations
         .iter()
@@ -814,8 +880,11 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                 None => Vec::new(),
             };
             paint_highlight_washes(&layout, element_id, sub, &text, &washes, window);
+            let node_wash = if selectable { node_wash.clone() } else { Vec::new() };
             let ranges = if selectable {
-                selection.lock().wash_ranges(&key)
+                let mut ranges = selection.lock().wash_ranges(&key);
+                ranges.extend(node_wash.iter().cloned());
+                ranges
             } else {
                 Vec::new()
             };
@@ -833,6 +902,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     ));
                 }
             }
+            let painted_caret = caret.as_ref().and_then(|caret| caret.paint(&layout, window, cx.background_executor().now()));
             if selectable {
                 let entry = RegEntry {
                     key: key.clone(),
@@ -843,6 +913,8 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     line: line.clone(),
                     cell,
                     to_window: window.transform(),
+                    node_wash,
+                    caret: painted_caret,
                 };
                 crate::tape::write_placed(
                     Kind::Text,
@@ -874,7 +946,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     );
 
     if alone && super::leaf::enabled() {
-        return super::leaf::TextLeaf::new(glyphs, prepaint, paint, cull_outset).into_any_element();
+        return super::leaf::TextLeaf::new(glyphs, prepaint, paint, cull_outset, settled).into_any_element();
     }
     let mut underlay = canvas(move |_, window, _| prepaint(window), move |_, _, window, cx| paint(window, cx))
         .keeps_no_position();
@@ -891,12 +963,18 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
     wrapper_in_place
         .child(underlay)
         .child(glyphs.into_any())
+        .children(settled.map(settle_after_glyphs))
         .children(decorations)
         .children(groups)
         .children(cursor_hitboxes)
         .children(region_hitboxes)
         .children(super::inline_focus::anchors(inline_focus));
     wrapper.into_any_element()
+}
+
+/// An element of no size that runs `settled` when it is prepainted, which in a text's wrapper is after the glyphs.
+fn settle_after_glyphs(settled: Box<dyn FnOnce()>) -> impl IntoElement {
+    canvas(move |_, _, _| settled(), |_, _, _, _| {}).keeps_no_position().absolute().unlifted().w(px(0.0)).h(px(0.0))
 }
 
 /// Paints every opacity group of a paragraph, after its glyphs and rings: CSS paints a box with
@@ -1056,6 +1134,9 @@ struct RegistryHit {
     index: usize,
     /// The position in the space of the entry's layout.
     local: gpui::Point<gpui::Pixels>,
+    /// How far the position is from the text in the window's pixels, vertical then horizontal: `(0.0, 0.0)`
+    /// where a text contains it.
+    distance: (f32, f32),
 }
 
 /// The text a window position lands in, and the byte offset in it.
@@ -1081,12 +1162,25 @@ fn registry_point(
     window: WindowId,
     position: gpui::Point<gpui::Pixels>,
 ) -> Option<RegistryHit> {
+    registry_point_among(window, position, &|_| true)
+}
+
+/// [`registry_point`] over the texts `allow` lets through. `allow` runs while the frame is borrowed,
+/// so it must not read the painted frame.
+fn registry_point_among(
+    window: WindowId,
+    position: gpui::Point<gpui::Pixels>,
+    allow: &dyn Fn(&RegEntry) -> bool,
+) -> Option<RegistryHit> {
     with_frame(window, |frame| {
         let reg = frame.registry();
         let mut contained: Option<(usize, gpui::Point<gpui::Pixels>)> = None;
         let mut nearest: Option<(usize, gpui::Point<gpui::Pixels>, (f32, f32))> = None;
 
         for (ei, entry) in reg.iter().enumerate() {
+            if !allow(entry) {
+                continue;
+            }
             let Some(local) = entry.local(position) else {
                 continue;
             };
@@ -1120,12 +1214,41 @@ fn registry_point(
             }
         }
 
-        let (ei, local) = contained.or(nearest.map(|(ei, local, _)| (ei, local)))?;
+        let ((ei, local), distance) = match contained {
+            Some(hit) => (hit, (0.0, 0.0)),
+            None => nearest.map(|(ei, local, distance)| ((ei, local), distance))?,
+        };
         let index = match reg[ei].layout.index_for_position(local) {
             Ok(ix) | Err(ix) => ix,
         };
-        Some(RegistryHit { entry: ei, index, local })
+        Some(RegistryHit { entry: ei, index, local, distance })
     })
+}
+
+/// The text of the last painted frame that `key` names (`selection_key`), if it painted.
+pub(crate) fn painted_text_by_key(window: WindowId, key: &str) -> Option<RegEntry> {
+    with_frame(window, |frame| frame.registry().iter().find(|entry| &*entry.key == key).cloned())
+}
+
+/// Every text of the last painted frame, in document order.
+pub(crate) fn painted_texts_in_document_order(window: WindowId) -> Vec<RegEntry> {
+    with_frame(window, |frame| {
+        let entries = frame.registry();
+        let docs: Vec<&selection::DocPos> = entries.iter().map(|entry| &entry.doc).collect();
+        selection::document_order(&docs).into_iter().map(|ix| entries[ix].clone()).collect()
+    })
+}
+
+/// The text a window position lands in, as [`registry_point`] finds it among the texts `allow` lets
+/// through (which must not read the painted frame), with the position in the space of its layout and how
+/// far from the text it is (vertical, then horizontal, in the window's pixels).
+pub(crate) fn painted_text_at_among(
+    window: WindowId,
+    position: gpui::Point<gpui::Pixels>,
+    allow: &dyn Fn(&RegEntry) -> bool,
+) -> Option<(RegEntry, gpui::Point<gpui::Pixels>, (f32, f32))> {
+    let hit = registry_point_among(window, position, allow)?;
+    with_frame(window, |frame| frame.registry().get(hit.entry).cloned()).map(|entry| (entry, hit.local, hit.distance))
 }
 
 /// Like [`registry_point`], but only when the pointer shares a text's vertical
@@ -1251,13 +1374,19 @@ fn register_down_listener(window: &mut Window, selection: &SharedSelection) {
 fn register_drag_listeners(
     window: &mut Window,
     selection: &SharedSelection,
+    editing: crate::editing::pointer::EditingPointer,
     on_drag_move: impl Fn(WindowId, gpui::Point<gpui::Pixels>, &mut gpui::App) + 'static,
     on_drag_end: impl Fn(&mut gpui::App) + 'static,
 ) {
     use gpui::{DispatchPhase, MouseButton, MouseMoveEvent, MouseUpEvent};
 
     let move_selection = selection.clone();
+    let move_editing = editing.clone();
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+        // A drag that began in an editing host is the host's: it never reaches the painted selection.
+        if phase == DispatchPhase::Bubble && move_editing.moved(event, window, cx) {
+            return;
+        }
         if phase != DispatchPhase::Bubble || !event.dragging() {
             return;
         }
@@ -1274,8 +1403,11 @@ fn register_drag_listeners(
     });
 
     let up_selection = selection.clone();
-    window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+    window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
         if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+            return;
+        }
+        if editing.released(window, cx) {
             return;
         }
         let mut selection = up_selection.lock();
@@ -1287,27 +1419,6 @@ fn register_drag_listeners(
         // GpuixView while GPUI still holds the root lease for this mouse-up.
         if was_dragging {
             on_drag_end(cx);
-        }
-    });
-}
-
-fn register_copy_listener(window: &mut Window, selection: &SharedSelection) {
-    use gpui::{ClipboardItem, DispatchPhase, KeyDownEvent};
-
-    let selection = selection.clone();
-    window.on_root_key_event(move |e: &KeyDownEvent, phase, _window, cx| {
-        if phase != DispatchPhase::Bubble {
-            return;
-        }
-        let modifiers = &e.keystroke.modifiers;
-        if e.keystroke.key != "c" || !(modifiers.platform || modifiers.control) {
-            return;
-        }
-        // Release the selection lock before entering the platform clipboard.
-        let text = selection.lock().selected_text();
-        if let Some(text) = text {
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
-            cx.stop_propagation();
         }
     });
 }
@@ -1622,6 +1733,8 @@ mod tests {
                 line: None,
                 cell: None,
                 to_window: TransformationMatrix::unit(),
+                node_wash: Vec::new(),
+                caret: None,
             });
             frame.highlights.push(PaintedHighlight {
                 element_id: 1,

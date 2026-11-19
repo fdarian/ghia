@@ -188,6 +188,23 @@ impl RetainedTree {
         }
     }
 
+    /// A state that every element below `id` inherits changed on `id` (`contenteditable`): the
+    /// elements below can tell too.
+    pub(crate) fn sheets_tree_state_changed_below(&mut self, id: u64, changed: TreeStates) {
+        if !self.sheets.atoms_fresh
+            || (self.sheets.index.invalidation.tree_states.of(changed).is_empty() && self.sheets.has_tree_state_read(changed).is_empty())
+        {
+            return;
+        }
+        let mut pending: Vec<u64> = self.elements.get(&id).map(|element| element.children.clone()).unwrap_or_default();
+        while let Some(below) = pending.pop() {
+            self.sheets_tree_state_changed(below, changed);
+            if let Some(element) = self.elements.get(&below) {
+                pending.extend(element.children.iter().copied());
+            }
+        }
+    }
+
     /// The own style of an element changed: only a `[style]` selector can tell.
     pub(crate) fn sheets_style_changed(&mut self, id: u64) {
         if self.sheets.atoms_fresh {
@@ -513,8 +530,14 @@ impl RetainedTree {
         self.take_dirty()
     }
 
-    /// Matches what the batch marked, and restyles the elements whose rules changed.
+    /// Matches what the batch marked, and restyles the elements whose rules changed, then the
+    /// list markers that changes of the tree and of the styles left to mark.
     pub fn flush_styles(&mut self) {
+        self.flush_sheet_styles();
+        self.flush_list_markers();
+    }
+
+    fn flush_sheet_styles(&mut self) {
         if !self.sheets.has_work() {
             return;
         }

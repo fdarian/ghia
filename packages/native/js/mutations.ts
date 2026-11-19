@@ -18,6 +18,7 @@ import { HTML_TAGS, HTML_TAG_PROPS, isHtmlTag } from "./html-tags.js"
 import { WIRE_OPCODE, WireWriter } from "./wire.js"
 import { cancelAnimationsOfElements } from "./web-animations.js"
 import { noteBatchApplied } from "./batch-count.js"
+import { takeNodeSelectionWrite } from "./editing/node-selection.js"
 
 export type MutationValue = number | string | boolean | object | null
 
@@ -190,6 +191,9 @@ export function createMutationQueue(
         sheetsPending = false
         flushDirtySheets(renderer, mutations)
       }
+      // The last op of the batch: native reads it after the tree has the changes written before it.
+      const nodeSelection = takeNodeSelectionWrite(renderer)
+      if (nodeSelection !== undefined) writer.setNodeSelection(nodeSelection)
       if (writer.opCount === 0) return
       noteBatchApplied()
       // Taken before the call: applying a batch can run JS (the focus events of
@@ -330,6 +334,9 @@ const UNIVERSAL_PROPS: ReadonlySet<string> = new Set([
   "draggable",
   "inert",
   "hidden",
+  // Native reads either spelling: React writes `contentEditable`, Solid and `setAttribute` write `contenteditable`.
+  "contentEditable",
+  "contenteditable",
   "colSpan",
   "rowSpan",
   "span",

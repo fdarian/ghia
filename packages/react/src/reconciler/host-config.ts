@@ -20,7 +20,9 @@ import {
   attributesOfProps,
   bumpTreeVersion,
   forwardsCustomProp,
+  hasLiveRanges,
   hasMutationObservers,
+  liveRangesReplaceData,
   queueCharacterDataMutation,
   readTextControlSelection,
   recordAttributeChanges,
@@ -688,6 +690,7 @@ export const hostConfig = {
     if (stateFor(textInstance).mounted) rendererFor(textInstance).setText(textInstance.nativeId, newText)
     const oldValue = textInstance.text
     textInstance.text = newText
+    if (hasLiveRanges()) liveRangesReplaceData(textInstance, 0, oldValue.length, newText.length)
     queueCharacterDataMutation(textInstance, oldValue)
   },
 

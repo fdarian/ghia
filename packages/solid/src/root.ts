@@ -21,7 +21,7 @@ import type {
   RootEvent,
   RootEventHandlers,
 } from "@ghia/native/host"
-import { createHostElement, createHostText, HostRoot, removeHostNode } from "./host.js"
+import { createHostElement, createHostText, HostFragment, HostRoot, removeHostNode } from "./host.js"
 import { universalRender } from "./universal.js"
 import { reportUncaughtError } from "./uncaught-error.js"
 
@@ -134,6 +134,14 @@ export function createRoot(
       // The flush stands in for the microtask checkpoint a browser runs before it renders.
       schedule: (run) => runThenAlways(run, flush, "Running scheduled work failed"),
     })
+    // After `state.attach`, which refuses a second root: `<html>` queued before that would sit in a registered queue,
+    // and `flushPendingMutations` would send it over the live root's tree.
+    try {
+      container.ensureDocumentElements()
+    } catch (error) {
+      detach()
+      throw error
+    }
     renderer.setWindowKeyEvents?.(
       // Always on: the Tab and Escape defaults run on the key event, and
       // `window` listeners can be added at any time.
@@ -146,7 +154,7 @@ export function createRoot(
       renderer,
       (id) => container.elements.get(id),
       () => ({ html: container.html, head: container.head, body: container.body }),
-      { createElement: createHostElement, createTextNode: createHostText }
+      { createElement: createHostElement, createTextNode: createHostText, createDocumentFragment: () => new HostFragment() }
     )
     // Sent on every attach, so a remount without the option restores the default.
     mutations.setKeyboardFocusDim(rootHandlers.keyboardFocusDim !== false)

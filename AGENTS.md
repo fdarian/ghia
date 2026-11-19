@@ -71,6 +71,7 @@ A change reaches the screen like this: the adapter queues host mutations as one 
 | Paint and style | `style.rs`, `css/`, `color.rs`, `text/inline.rs`, `custom_elements/svg_*.rs` | `svg.ts` | `effects.rs`, `scene.rs`, `style.rs`, `crates/gpui_apple` |
 | Native views | `custom_elements/webview/`, `platform/webview_macos.rs` | `webview.ts` | `composition.rs`, `composition/`, `crates/gpui_macos/src/window/composition.rs` |
 | Motion | `motion/` | `motion-*.ts`, `keyframes.ts`, `layout-animation.ts`, `match-media.ts` | |
+| Editing, ranges, node selection | `html/editing.rs`, `retained_tree.rs` (`takes_focus`) | `editing/` (`host`, `input`), `dom/range.ts`, `dom/live-ranges.ts`, `dom/selection.ts`, `focus.ts` | |
 | Text, selection, search | `text/`, `syntax/`, `markdown/`, `diff/` | `text-selection.ts` | `elements/atomic_inline.rs`, `text_system/inline.rs` |
 | Bounds, observers, automation | `automation.rs`, `observers.rs`, `resolved_style.rs` | `bounds.ts`, `observers.ts`, `automation/` | `window.rs` (`draw_if_dirty`, `publish_layout`) |
 | Skipped subtrees, culling | `retain.rs`, `tape.rs`, `layout/cull.rs`, `perf_counters.rs` | `testing.ts` (counters and switches) | `elements/retained.rs`, `window/retained.rs` |
@@ -83,7 +84,7 @@ Adapters: `packages/react/src` (`reconciler/`, `components/`, `hooks/`) and `pac
 - **Retained subtrees replay what did not change.** A new build input, color read or style field has to reach the invalidation rules, or a replay shows a stale frame: [retention.md](./docs/fork/retention.md), and the retention verifier in [testing.md](./docs/fork/testing.md#the-retention-verifier).
 - **The desktop pump** (`@ghia/native/runtime`) wakes on main-run-loop work and display-link demand, so an idle window costs nothing. `tick()` must stay non-blocking so Node and Bun I/O run: [frames-and-wakes.md](./docs/fork/frames-and-wakes.md).
 - **Every element needs a host-derived GPUI id,** or hover, scroll offset and the accessibility node silently vanish: [events-and-input.md](./docs/fork/events-and-input.md#the-dispatcher).
-- **A macOS menu item owns its shortcut.** Never add an Edit menu carrying `⌘C/V/X/A`: [window.md](./docs/fork/window.md#the-macos-menu-bar).
+- **The key window sees a key equivalent before the menu.** The Edit menu (`⌘C/X/V/A`) shares its actions with the keys, so a page's `keydown` `preventDefault` still cancels the command; the menu fires only for a key the window did not handle: [window.md](./docs/fork/window.md#the-macos-menu-bar).
 - **Layout numbers** live in `Theme::metrics`, not in Rust constants: [working-on-the-fork.md](./docs/fork/working-on-the-fork.md#where-new-code-goes).
 - **`<virtual-list>`** builds rows on `cx.processor` re-entry; never capture the root render's guard: [scroll.md](./docs/fork/scroll.md#virtual-lists).
 - **Hot reload.** `ghia dev` applies a Solid component edit as an HMR update (local signals reset), a React component edit as a Fast Refresh update (`useState` kept), and re-runs the entry for anything else. React's refresh runtime is installed by `react()`'s injected first import: [web-renderer.md](./docs/fork/web-renderer.md#react-fast-refresh). `scripts/web.ts` has its own Fast Refresh in the browser. Never run `bun run clean` in `packages/react` while that server is up.

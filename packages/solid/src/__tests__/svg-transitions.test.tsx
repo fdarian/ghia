@@ -55,6 +55,25 @@ describe.skipIf(!hasNativeTestRenderer)("Solid SVG transitions", () => {
     app.unmount()
   })
 
+  it("transitions the kebab-case attribute Solid writes", () => {
+    const [width, setWidth] = createSignal(2)
+    const app = createTestRoot()
+    app.renderer.clockPause()
+    app.render(() => (
+      <svg id="svg" testId="svg" width={100} height={100} viewBox="0 0 100 100" style={{ width: 100, height: 100 }}>
+        <path id="p" d="M0 50 L100 50" stroke="#ffffff" stroke-width={width()} style={{ transition: "stroke-width 1s linear" }} />
+      </svg>
+    ))
+    app.renderer.clockFastForward(0)
+    expect(read(app, "stroke-width", "p")).toBe("2")
+    app.flushSync(() => setWidth(6))
+    app.renderer.clockFastForward(500)
+    expect(Number(read(app, "stroke-width", "p"))).toBeCloseTo(4, 1)
+    app.renderer.clockFastForward(1000)
+    expect(read(app, "stroke-width", "p")).toBe("6")
+    app.unmount()
+  })
+
   it("transitions an attribute of the svg, which its shapes inherit", () => {
     const [fill, setFill] = createSignal("#ff0000")
     const app = createTestRoot()

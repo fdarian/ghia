@@ -549,6 +549,7 @@ is atomic: native decodes it whole and resolves every style before it touches an
 | 13 | `setAttribute` | id, string name, bool present, then (when present) string value |
 | 14 | `setStyleSheet` | sheet id, bool present, then (when present) string text |
 | 15 | `setAdoptedStyleSheets` | varint count, then that many sheet ids |
+| 16 | `setNodeSelection` | bool present, then (when present) anchor id, anchor offset, focus id, focus offset, host id |
 
 A string child is an element of type `"#text"` (a DOM text node): the adapters send `createElement id "#text"` and then `setText`. It takes no style, listener, prop or child, and `setText` is for it only.
 
@@ -563,6 +564,8 @@ empty value is a present attribute, not a removal.
 ids. A sheet applies only while `setAdoptedStyleSheets` lists it (the list replaces the previous one; the order is the order of
 the cascade, after the sheets of the document's `<style>` elements). `CSSStyleSheet` and `document.adoptedStyleSheets` send both
 ([Stylesheets](#stylesheets)).
+
+**A `setNodeSelection` carries the selection of nodes** (`getSelection()` over a `Range`, see [Selection](#selection)) of the root the batch is for: two boundary points, each a node id and a varint offset (UTF-16 code units in a `#text` node, a child index in an element, as in a DOM boundary point), and the id of the editing host that a collapsed selection is the caret of, 0 for none. 0 in the bool clears it. The writer puts it last in the batch, from the selection as it is when the queue flushes, and only when it differs from what the root was sent; a selection that moves to another root clears the one it left. Native paints it (the wash): see [editing.md](./fork/editing.md#painting-the-node-selection).
 
 **A `setCustomProp` value** is a tag byte and its payload:
 
@@ -924,12 +927,12 @@ paints an empty menu bar, and those shortcuts do not exist at all: AppKit only
 provides them through menu items.
 
 ```
-Apple    <executable>             Window
-         ├ Services               ├ (AppKit window tiling)
-         ├ Hide <appName>   ⌘H    ├ Minimize          ⌘M
-         ├ Hide Others     ⌥⌘H    ├ Zoom
-         ├ Show All               ├ Close Window      ⌘W
-         └ Quit <appName>   ⌘Q    └ (open windows)
+Apple    <executable>             Edit                  Window
+         ├ Services               ├ Cut        ⌘X       ├ (AppKit window tiling)
+         ├ Hide <appName>   ⌘H    ├ Copy       ⌘C       ├ Minimize          ⌘M
+         ├ Hide Others     ⌥⌘H    ├ Paste      ⌘V       ├ Zoom
+         ├ Show All               └ Select All ⌘A       ├ Close Window      ⌘W
+         └ Quit <appName>   ⌘Q                          └ (open windows)
 ```
 
 **`appName` does not set the title of the application menu.** macOS takes that
@@ -937,9 +940,7 @@ from the executable, so `bun app.tsx` shows `bun` during development and a
 `bun build --compile` binary shows its own file name. Only a real `.app` bundle
 changes it. `appName` reaches the items inside the menu, and nothing else.
 
-There is **no Edit menu**, on purpose. A menu key equivalent is consumed by
-AppKit before the window sees the key event, so an Edit menu carrying `⌘C`
-would take the keystroke away from text selection and from `<input>`.
+The **Edit menu** runs the same commands as the keys, and its four items are always enabled: see [Clipboard events](#clipboard-events).
 
 Use **`render()`**, not `createRenderer()`, in the app entry. A full reload
 under `ghia dev` re-runs the whole entry on save. `createRenderer()` plus `init()` would then
@@ -1313,32 +1314,6 @@ macOS and Linux apply the filter. Windows ignores `accept` for now, because
 its GPUI backend has no filter support and a MIME type needs an extension
 table there; filter the returned paths yourself.
 
-### Clipboard
-
-`clipboard` is the text subset of `navigator.clipboard`. Both methods return
-promises, as in the DOM.
-
-```tsx
-import { clipboard } from '@ghia/react' // or '@ghia/solid'
-
-await clipboard.writeText('copied')
-const text = await clipboard.readText() // '' when the clipboard has no text
-```
-
-When a renderer is created and the runtime has no `navigator.clipboard`,
-Ghia installs `clipboard` there so code written for the web runs unchanged. An existing
-`navigator.clipboard` is never replaced. It always talks to the renderer
-created last. Only text is supported, not images or `ClipboardItem`s; the
-browser build leaves the browser's own `navigator.clipboard` alone.
-
-`@ghia/native` also declares `Navigator.clipboard` globally, so a project whose
-`tsconfig` has no DOM lib (`lib: ["ESNext"]`) type-checks `navigator.clipboard`
-too. With the DOM lib the declaration is identical to its own and merges.
-
-`TestRenderer` has its own in-memory clipboard, so a test can
-`writeText()` then paste into an `<input>`, or copy out of one and
-`readText()`, without touching the system pasteboard.
-
 ### EyeDropper
 
 On macOS, `EyeDropper` is defined globally and works as in the browser:
@@ -1476,7 +1451,7 @@ The window behaves as active for focus:
 - `onFocus`, `onBlur`, `focusin` and `focusout` fire on a click, on `focusElement`,
   `focus()`, `autoFocus` and Tab, and `:focus`, `:focus-visible` and the
   `focus`, `focusVisible` and `focusWithin` styles apply;
-- an `<input>` and a `<textarea>` draw and blink their caret;
+- an `<input>` and a `<textarea>` draw and blink their caret, and so does the caret of a focused editing host;
 - text from `fill()` and `press()` arrives together with the focus events, in a
   window that is not key as in one that is.
 
@@ -1648,6 +1623,14 @@ arms no timer. Each tick drains only ready AppKit events and Core Foundation
 sources, then returns without blocking JavaScript I/O. Wakes coalesce while
 JavaScript is busy, and work that arrived meanwhile wakes the next tick. Input
 wakes JavaScript as it arrives, once per batch of events, not at the next vsync.
+A key event (`keydown`, `keyup`, a modifier change) is the exception: it gets a
+tick of its own, with the events or the frame step before it ending their tick
+first, so each key has a microtask checkpoint on both sides, as a browser gives
+each key task ([frames-and-wakes.md](fork/frames-and-wakes.md#one-key-event-per-pump)).
+The tick that ended for a key wakes the loop again at once, and `renderer.keyEventPending()`
+reports it; with `frameMs` set, the timer path ticks again on the next turn of the
+event loop in that case instead of waiting out `frameMs`. Mouse events queued
+together are still handled in one tick.
 
 A visible window that is not the key window animates at the display rate. A
 window that is occluded or minimised gets no frames; animations keep time and
@@ -5185,44 +5168,13 @@ How far `preventDefault()` reaches depends on the platform:
 On macOS, a key sent to an active input method reaches it before GPUI, so
 `preventDefault()` cannot cancel composed text.
 
-### Input method composition
-
-On macOS an input method (Japanese, Chinese, Korean, dead keys) composes text in
-an `<input>` or `<textarea>`, and the events follow Chrome's:
-
-- A key the input method takes is a `keydown` with `key` `"Process"` (its
-  `code` is the physical key, `keyChar` is absent), sent before the input
-  method sees it. `isComposing` is false for the key that starts a composition
-  and true for the keys after it. `preventDefault()` has no effect on it: the
-  input method gets the key anyway. A key the input method hands back (an arrow
-  with no candidate window) follows as an ordinary `keydown`, with
-  `isComposing` true while text is still marked.
-- `compositionstart` (`data` is the text the composition takes over, usually
-  `""`), then `compositionupdate` (`data` is the composition's current text) for
-  every change, then `compositionend` (`data` is the final text, `""` when the
-  composition was cancelled) on commit. `compositionstart` and `compositionupdate`
-  come before the `input` of their edit, `compositionend` after the `input` of
-  the final one, as in Chrome. They are aimed at the input, bubble, and cannot be
-  cancelled. `onCompositionStart`, `onCompositionUpdate` and `onCompositionEnd`
-  have `…Capture` twins.
-- A `keyup` while text is marked has `isComposing` true. It keeps its real
-  `key`.
-
-Windows and Linux report `isComposing` false and fire no composition events.
-A value an app sets while a composition is open ends it without a
-`compositionend`. The `input` of a composition's edits has `inputType`
-`insertCompositionText` and `isComposing` true, see
-[The input and change events](#the-input-and-change-events).
-In the test renderer, [`simulateComposition`](#simulating-keys) runs the
-sequence.
-
 ### The input and change events
 
 Text controls fire the DOM's two events, at the DOM's times.
 
 `input` fires once per edit of the text of an `<input>` or `<textarea>`: a typed character, a paste, a cut, a deletion,
 an input method's commit, an undo or redo and a number input's arrow step. It is an `InputEvent`, bubbles and cannot be
-canceled, and is delivered after the edit (there is no `beforeinput`). Besides `value` it carries the fields of a DOM
+canceled, and is delivered after the edit (a text control has no `beforeinput`: see [Input events](#input-events)). Besides `value` it carries the fields of a DOM
 `InputEvent`, filled as Chrome fills them:
 
 | Edit | `inputType` | `data` |
@@ -5337,7 +5289,7 @@ A popover that leaves the document while open closes with no event, when native 
 
 ### DOM classes and the tree
 
-Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `Element` and `Node` hold for every host element, `SVGElement` replaces `HTMLElement` for an `<svg>` and the shapes in it, and a text child is a `Text` (a `CharacterData`). `Node`, `Element`, `HTMLElement`, `SVGElement`, `Text`, `CharacterData`, `Document`, `DocumentFragment` and `ShadowRoot` are exported by `@ghia/native/host` and installed as globals where the runtime has none (not on the browser build). Two copies of `@ghia/native` share one set of classes. `new HTMLElement()` and the other public classes throw `TypeError: Illegal constructor`. `document` is a `Document`. `DocumentFragment` and `ShadowRoot` are never instantiated, so an `instanceof` check against them is `false`. `HTMLInputElement`, `HTMLTextAreaElement` and `HTMLButtonElement` are globals too (and exported), where a library reads `win.HTMLInputElement` to tell a text control or `el instanceof HTMLButtonElement` to tell a button: an element is one by its tag (`el instanceof HTMLInputElement` holds for an `<input>` and no other), and they cannot be constructed. `DOMRect` and `DOMRectReadOnly` are globals as well, with `fromRect`, the edges `left`, `right`, `top` and `bottom` (the lesser and the greater of the two edges for a negative size) and `toJSON()`; `DOMRect`'s `x`, `y`, `width` and `height` can be set. The other `HTML*Element` classes are not there.
+Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `Element` and `Node` hold for every host element, `SVGElement` replaces `HTMLElement` for an `<svg>` and the shapes in it, and a text child is a `Text` (a `CharacterData`). `Node`, `Element`, `HTMLElement`, `SVGElement`, `Text`, `Comment`, `CharacterData`, `Document`, `DocumentFragment`, `ShadowRoot`, `Range`, `StaticRange` and `AbstractRange` are exported by `@ghia/native/host` and installed as globals where the runtime has none (not on the browser build). Two copies of `@ghia/native` share one set of classes. `new HTMLElement()` and the other public classes throw `TypeError: Illegal constructor`. `document` is a `Document`. `ShadowRoot` is never instantiated, so an `instanceof` check against it is `false`; a `DocumentFragment` comes from `document.createDocumentFragment()` and `Range.cloneContents()` / `extractContents()`. `HTMLInputElement`, `HTMLTextAreaElement` and `HTMLButtonElement` are globals too (and exported), where a library reads `win.HTMLInputElement` to tell a text control or `el instanceof HTMLButtonElement` to tell a button: an element is one by its tag (`el instanceof HTMLInputElement` holds for an `<input>` and no other), and they cannot be constructed. `DOMRect` and `DOMRectReadOnly` are globals as well, with `fromRect`, the edges `left`, `right`, `top` and `bottom` (the lesser and the greater of the two edges for a negative size) and `toJSON()`; `DOMRect`'s `x`, `y`, `width` and `height` can be set. The other `HTML*Element` classes are not there.
 
 | Member | |
 |---|---|
@@ -5352,7 +5304,7 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `getElementsByTagName(name)`, `getElementsByClassName(names)`, `document.getElementsByName(name)` | On an element and on `document` (`getElementsByName` on `document` only). The elements below the node, in document order, as a **live** list: it searches the tree again when the tree or an attribute has changed since its last access (one counter for the whole document, moved by every insert, remove, root mount and unmount, and prop write) and otherwise answers from what it found (the next change to the tree drops that, so a list nobody reads again does not keep its elements alive), so a loop over `length` and `list[index]` walks the tree once and `length`, `item(index)`, `list[index]`, `namedItem(id or name)` (an `HTMLCollection` also answers `list.someId`) and iteration follow later changes to the tree, as in a browser. `getElementsByTagName` compares the lowercased name with an HTML element's tag and the name as written with an SVG element's, and `"*"` is every element; `getElementsByClassName` takes the whitespace-separated classes an element must all carry (an empty list is no element); `getElementsByName` is the HTML elements whose `name` attribute is the text, as a `NodeList` (no `namedItem`). `HTMLCollection` and `NodeList` are globals, `instanceof` works on them (and holds for `querySelectorAll`'s result, not for `children` and `childNodes`, which are arrays: [deviations](fork/deviations.md#dom-selectors)), and they cannot be constructed. They work on `document.head`, `document.body` and `document.documentElement` before a root mounts as well as after. Base UI's ScrollArea calls `document.head.getElementsByTagName("style")`. |
 | `document.createTreeWalker(root, whatToShow = NodeFilter.SHOW_ALL, filter = null)`, `TreeWalker`, `NodeFilter` | The DOM's tree walker, as focus scopes, `ariaHideOutside` and menus use it. `NodeFilter` is a global with `SHOW_ALL`, `SHOW_ELEMENT`, `SHOW_TEXT` and the other `SHOW_*` masks and `FILTER_ACCEPT`, `FILTER_REJECT` and `FILTER_SKIP`. The walker has `root`, `whatToShow`, `filter` (a function or an object with `acceptNode`, called on the object), `currentNode` (settable to any node, even outside `root`), `parentNode()`, `firstChild()`, `lastChild()`, `previousSibling()`, `nextSibling()`, `previousNode()` and `nextNode()`, with the standard's algorithms: `FILTER_SKIP` drops a node and still walks its children, `FILTER_REJECT` drops its subtree (for `parentNode()` it is the same as skip), and `previousNode()` can end at `root` itself. It walks the nodes Ghia has, elements and text (there are no comments, so `SHOW_COMMENT` matches nothing). A filter that uses the walker it is running in throws `InvalidStateError`. `createNodeIterator` does not exist. |
 | `className`, `classList`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does) and assigning it is `setAttribute("class", value)`, an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG, except `tabindex` and `autofocus`, which are lowercase there as in Chrome). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a live `DOMStringMap` of the `data-*` attributes with the names in camel case (`data-row-id` is `rowId`): a read goes through `getAttribute`, and an assignment or a `delete` through `setAttribute` and `removeAttribute`, so Base UI's `element.dataset.tabindex = ...` works. `classList` is a live `DOMTokenList` (global `DOMTokenList`) of the `class` attribute, the same object every time: `add`, `remove`, `toggle(token, force?)`, `replace`, `contains`, `item`, `length`, `value` (assignable, as is `element.classList = text`), `toString()`, `forEach`, `keys`, `values`, `entries`, iteration and `list[0]`. A write goes through `setAttribute('class', ...)`, so a stylesheet's `.name` rules, a `MutationObserver` and the framework's `class` handling see it, and it works on elements made by `document.createElement` and on the stand-in `<html>` before the first `render()`. A bad token throws `SyntaxError` (empty) or `InvalidCharacterError` (white space), `supports()` throws `TypeError` as for `classList`, and removing the last token leaves `class=""` while removing from an element with no `class` attribute leaves none. |
-| `hidden`, `tabIndex`, `disabled`, `htmlFor`, `isContentEditable`, `shadowRoot`, `assignedSlot` | `hidden` is the `hidden` attribute: `false` without it, `true` with it, and `"until-found"` when the attribute says that; assigning `true` or a non-empty string sets it, `false` removes it. An element that has it is `display: none` by its user agent style, as in Chrome (`[hidden]:not([hidden=until-found i])`), whatever its tag, so the author's own `display` is over it, and `until-found` keeps its box. `tabIndex` is the `tabindex` attribute as an integer (text that does not start with one reads the default), and without it the default of the tag, as in the HTML standard: 0 for `a`, `area`, `button`, `frame`, `iframe`, `input`, `object`, `select`, `textarea` and the first `summary` of a `details`, -1 for the rest; assigning writes the attribute. `disabled` is the `disabled` attribute as a boolean on `button`, `input`, `select`, `textarea`, `fieldset`, `optgroup` and `option` (assigning `true` sets it empty, `false` removes it), and `htmlFor` is the `for` attribute of a `label`, `""` without one; on any other element neither is there. `isContentEditable` is `false`: Ghia has no `contenteditable`, so nothing in it is an editing host (an element given the attribute is not editable, and Base UI's tabbable walk reads it as not focusable by it). `shadowRoot` and `assignedSlot` are `null`: there is no shadow DOM. |
+| `hidden`, `tabIndex`, `disabled`, `htmlFor`, `contentEditable`, `isContentEditable`, `shadowRoot`, `assignedSlot` | `hidden` is the `hidden` attribute: `false` without it, `true` with it, and `"until-found"` when the attribute says that; assigning `true` or a non-empty string sets it, `false` removes it. An element that has it is `display: none` by its user agent style, as in Chrome (`[hidden]:not([hidden=until-found i])`), whatever its tag, so the author's own `display` is over it, and `until-found` keeps its box. `tabIndex` is the `tabindex` attribute as an integer (text that does not start with one reads the default), and without it the default of the tag, as in the HTML standard: 0 for `a`, `area`, `button`, `frame`, `iframe`, `input`, `object`, `select`, `textarea`, the first `summary` of a `details` and an editing host (see `contentEditable`), -1 for the rest; assigning writes the attribute. `disabled` is the `disabled` attribute as a boolean on `button`, `input`, `select`, `textarea`, `fieldset`, `optgroup` and `option` (assigning `true` sets it empty, `false` removes it), and `htmlFor` is the `for` attribute of a `label`, `""` without one; on any other element neither is there. `contentEditable` and `isContentEditable` are under [Editing hosts](#editing-hosts). `shadowRoot` and `assignedSlot` are `null`: there is no shadow DOM. |
 | `setAttribute(name, value)`, `removeAttribute(name)`, `toggleAttribute(name, force?)` | Write the prop the attribute stands for through the framework's own prop path, so native applies it as if the app had rendered that prop, at once (the mutations are flushed before the call returns; `setAttribute('style', text)` is the exception, which waits for the next flush as every write of `element.style` does), and `getAttribute` gives it back. This is what `@floating-ui`'s `markOthers` and Base UI's focus manager do: `setAttribute('aria-hidden', 'true')` leaves the element out of the accessibility tree, `setAttribute('inert', '')` makes the subtree inert, `setAttribute('tabindex', '-1')` makes the element focusable and `'0'` a tab stop (`removeAttribute('tabindex')` undoes it), and `setAttribute(name, '')` reads back `""` with `hasAttribute(name)` true. `popover` goes through the same path as the `popover` property and a framework's prop: a showing popover whose kind the write changes, or that loses the attribute, is hidden with its events. Names are lowercased on HTML elements, as in the DOM, and an empty name or one with a space, `/`, `>`, `=` or NUL throws `InvalidCharacterError`. The value is text: `tabindex`, `colspan`, `rowspan`, `span` and `maxlength` hold the integer the text is (text that is no integer is kept as it is, and native ignores it); `inert`, `disabled`, `hidden` (except `until-found`, which is kept as that text), `required`, `readonly`, `autofocus`, `multiple`, `selected` and `open` are on whatever the text is (`""` too), and `draggable` is on for `"true"`. `class` is `className` (or `class`, where the element was given that), `for` is `htmlFor`, and any other name is the prop of that name (`aria-*`, `data-*`). On an `<input>` the `checked` attribute is `defaultChecked` (on whatever its text is) and the `value` attribute is `defaultValue`, as in the DOM: the control's `checked` and `value` follow them only while it is clean (no user toggle or edit, no script write of the property), and `getAttribute` gives the attribute back; a checkbox, radio, hidden, submit, button, reset or image `value` attribute is the control's value itself and writes `value`. A `<textarea>` has no `value` attribute, so it is kept as text only. One rule says which prop answers an `<input>`'s `checked` and `value` attributes, for `getAttribute` and for the attribute a stylesheet's `[checked]` and `[value="…"]` match alike: the default prop (`defaultChecked`, `defaultValue`) when the element has one, else the `checked` or `value` prop, as React DOM puts a controlled value in the attribute too (a checkbox's `value` is the attribute itself, so `value` comes first there). So `setAttribute('checked', '')` on an input a framework renders `checked={false}` stays matched after the framework commits `checked` again, and `setAttribute('value', 'y')` on a controlled text input reads back `"y"` while its text stays the controlled value; `removeAttribute` then falls back to the prop. An element keeps the key its framework used for an attribute. The write goes the way a rendered prop's does to the attribute store native's [stylesheet](#stylesheets) selectors read, so `[data-state="open"]`, `[hidden]` and `.foo` match what `setAttribute`, `toggleAttribute` and `dataset` write, and stop matching when it is removed. Like the DOM, a later commit of the same prop by React or Solid overwrites the attribute, a commit that leaves the prop as it was does not, and an attribute the framework never set stays. `setAttribute('style', text)` sets `style.cssText` (below), and `on*` is kept as text for `getAttribute` and does nothing else: see [deviations](./fork/deviations.md#dom-attributes). `toggleAttribute` follows the DOM and returns whether the attribute is there afterwards. A `MutationObserver` with `attributes` gets a record, with `oldValue` where it asked, for each write that changes what `getAttribute` reads. |
 | `style` | The element's inline style as a `CSSStyleDeclaration`; what it reads and writes, and how a framework's `style` merges with code's, is under [Style and id from code](#style-and-id-from-code). `setAttribute('style', text)` is `style.cssText = text`, and `getAttribute('style')` is the `cssText`. |
 
@@ -5374,9 +5326,12 @@ Code that is not the framework (a library such as `@dnd-kit/dom`) changes the tr
 | `append(...)`, `prepend(...)`, `replaceChildren(...)` | On elements. These and `before`, `after` and `replaceWith` with several nodes first take every node out of its parent, as a browser does when it gathers them in a fragment, so a node that cannot go (`HierarchyRequestError`: for `before`, `after` and `replaceWith` it contains the target's parent, for `append`, `prepend` and `replaceChildren` it contains the target itself) leaves the others detached; with one node a throw changes nothing. A node of another window throws before any node is taken out. |
 | `insertAdjacentElement(where, element)`, `insertAdjacentText(where, data)` | `beforebegin`, `afterbegin`, `beforeend`, `afterend` in any letter case; `null` (or nothing) for `beforebegin` and `afterend` on a node with no parent, `SyntaxError` for another position. |
 | `textContent`, `nodeValue`, `data` | Setters, as above. A text node's `data` and `nodeValue` change what is drawn. |
-| `cloneNode(deep = false)` | On elements and text. An element is made again as the same type by the window that owns the original (an SVG element stays an `SVGElement`), with every attribute prop (`id`, `className`, `role`, `tabIndex`, `data-*`, `aria-*`, a `false` one too) and a copy of the live style, code-written properties such as `--x` included; with `deep`, the same for every descendant, in order, and a text node is a copy of its data. The clone is in no tree (`isConnected` is `false`, `parentNode` is `null`) and has no native element until it is inserted; no framework owns it, so the framework's next update of the original never reaches it. It has **no event handlers**: the `on*` props and listeners from `addEventListener` are not copied, as in the DOM; refs, keys, children props and the `motion` and `layout` props are not copied either ([deviations](fork/deviations.md#dom-building-from-code)). `NotSupportedError` for `document`. |
+| `substringData(offset, count)`, `appendData(data)`, `insertData(offset, data)`, `deleteData(offset, count)`, `replaceData(offset, count, data)`, `length` | On `Text`, with the standard's "replace data": an `offset` past the end throws `IndexSizeError` and a `count` that runs past it is cut to the end. Every write, `data`, `nodeValue` and `textContent` included, is one `replaceData`, so a `MutationObserver` gets one `characterData` record and the live [`Range`s](#range-and-staticrange) are adjusted. |
+| `splitText(offset)`, `wholeText` | `splitText` keeps the text before `offset`, makes the rest a new `Text` that follows it in the same parent (a `childList` record, then a `characterData` one) and returns it; `IndexSizeError` past the end. A node with no parent gets no sibling: the new node is in no tree. `wholeText` is the data of the text nodes next to this one, joined. |
+| `document.createRange()`, `document.hasFocus()` | `createRange()` is a new `Range` collapsed at `(document, 0)`. `hasFocus()` is `true` while a window is open: see [deviations](./fork/deviations.md#dom-building-from-code). |
+| `cloneNode(deep = false)` | On elements and text, and on the comments of a [parsed document](#html-parsing-and-serialization), where a clone is a comment of the same document. A window's tree has no comment nodes (`innerHTML` leaves them out), so a clone of a window's element has none. An element is made again as the same type by the window that owns the original (an SVG element stays an `SVGElement`), with every attribute prop (`id`, `className`, `role`, `tabIndex`, `data-*`, `aria-*`, a `false` one too) and a copy of the live style, code-written properties such as `--x` included; with `deep`, the same for every descendant, in order, and a text node is a copy of its data. A parsed `<template>`'s `content` is copied with `deep` and empty without it. The clone is in no tree (`isConnected` is `false`, `parentNode` is `null`) and has no native element until it is inserted; no framework owns it, so the framework's next update of the original never reaches it. It has **no event handlers**: the `on*` props and listeners from `addEventListener` are not copied, as in the DOM; refs, keys, children props and the `motion` and `layout` props are not copied either ([deviations](fork/deviations.md#dom-building-from-code)). `NotSupportedError` for `document`. |
 
-A node that code takes out of the document is kept: it stays an object with its children, props, text, style and listeners, `isConnected` is `false`, and it can be inserted again. Native drops the element at the next flush if the node is still out of the document by then, and makes it again, with all of it, when it is inserted; a node put back in the same turn is never dropped (it keeps its focus and scroll offset, [deviations](fork/deviations.md#dom-building-from-code)). A node a framework removes by itself (a `<Show>` that hides it, an unmounted React child) is destroyed as before. A node cannot move between windows: inserting a node of one window's tree under another's throws `HierarchyRequestError`. As in React DOM, a node React places a sibling before has to still be a child of the same parent: code that takes it out makes React's next placement before it throw. `DocumentFragment` is never instantiated, so `createDocumentFragment` does not exist and a fragment cannot be appended; pass the nodes to `append()`.
+A node that code takes out of the document is kept: it stays an object with its children, props, text, style and listeners, `isConnected` is `false`, and it can be inserted again. Native drops the element at the next flush if the node is still out of the document by then, and makes it again, with all of it, when it is inserted; a node put back in the same turn is never dropped (it keeps its focus and scroll offset, [deviations](fork/deviations.md#dom-building-from-code)). A node a framework removes by itself (a `<Show>` that hides it, an unmounted React child) is destroyed as before. A node cannot move between windows: inserting a node of one window's tree under another's throws `HierarchyRequestError`. As in React DOM, a node React places a sibling before has to still be a child of the same parent: code that takes it out makes React's next placement before it throw. `document.createDocumentFragment()` makes a `DocumentFragment` of the window that mounted last (it needs a mounted root, like `createElement`): a node that holds children and is never mounted, so native never hears of it. It has `childNodes`, `firstChild`, `children`, `append`, `prepend`, `replaceChildren`, `textContent`, `querySelector(All)` and `cloneNode`, and can be built from created elements and text. Inserting one (`appendChild`, `insertBefore`, `replaceChild`, `append`, `before`, `after`, `replaceWith`, `Range.insertNode`, ...) moves its children into the target in order and leaves it empty, so a fragment can be filled and inserted again; live ranges and `MutationObserver` hear ordinary moves out of the fragment and into the target (one `childList` record per child, [deviations](fork/deviations.md#dom-building-from-code)). `new DocumentFragment()` still throws `TypeError: Illegal constructor`.
 
 #### Style and id from code
 
@@ -5532,22 +5487,7 @@ laid out first, so an element mounted in the same turn is found, and an element 
 `pointer-events: none`, `visibility: hidden` or `display: none` is left out. A coordinate
 that is not finite throws a `TypeError`, and both throw before a root is mounted.
 
-`document.getSelection()` and `window.getSelection()` give the one `Selection` of the app
-(`Selection` is a global, and its constructor throws `Illegal constructor`). It is
-the [text selection](#text-selection) of the window that mounted last: `rangeCount` is 1
-while text is selected and 0 otherwise, `isCollapsed` is the opposite of that, `type` is
-`"Range"` or `"None"` (never `"Caret"`), `toString()` is the selected text (`""` for none),
-and `removeAllRanges()` and `empty()` clear it. Every member needs a mounted root. The rest
-of the DOM `Selection` (`getRangeAt`, `addRange`, `anchorNode`, ...) does not exist, because
-a selection here is a set of spans over painted text and not a range of nodes
-([deviations](fork/deviations.md#events-and-input)).
-
-`document` hears `selectionchange` when the selected text changes, by a drag, a
-clear, `removeAllRanges()` or `renderer.clearSelection()`. Like the event of `onSelectionChange`
-(`event.value` is the selected text, absent after a clear) it comes from the frame that
-changed the selection, and it is the one native signal: a `selectionchange` listener on
-`document` or `window` turns it on, as a root's `onSelectionChange` does. It does not bubble, so
-`window` hears it in the capture phase only, and `target` is `document`.
+`document.caretPositionFromPoint(x, y)`, `document.caretRangeFromPoint(x, y)`, `document.getSelection()` and `window.getSelection()`, and the `selectionchange` event they fire are described under [Editable content](#editable-content): [Selection](#selection) and [Range and StaticRange](#range-and-staticrange).
 
 ### `getComputedStyle(element, pseudoElt?)`
 
@@ -6438,6 +6378,8 @@ It fires once when the selected ranges change, including a clear to empty
 
 The event is a `RootEvent`, an event with no propagation. `value` is the joined selected text.
 
+This is the selection of painted text. Code that selects nodes (`getSelection()`, a click in a `contenteditable`) makes a [selection of nodes](#selection) instead, and the two replace each other.
+
 Selection works because each painted text element registers itself into a
 per-frame registry. A drag anchored in one element resolves against that
 registry into per-element spans: partial in the anchor and head, whole for
@@ -6457,6 +6399,259 @@ element over one text model. Ghia renders a *tree* of text elements, so it
 rebuilds that continuity at paint time instead. The mechanism is ported from
 [Comet](https://github.com/zeronsh/comet) (MIT), which faced the same problem.
 </details>
+
+## Editable content
+
+A `contenteditable` element is an editing surface as on the web, so an editor written for the DOM (Lexical is the one tested) runs unchanged: it hears `beforeinput`, edits the DOM, reads a live `Selection` and `Range`, and handles `copy` and `paste` itself. Ghia follows Chrome on macOS, and each part below ends with what differs from it, listed in [deviations](./fork/deviations.md#editing). `<input>` and `<textarea>` are not editing hosts: they edit themselves ([Text input](#text-input)). The mechanisms are in [editing.md](./fork/editing.md).
+
+### Editing hosts
+
+An element is **editable** when its own `contenteditable` is `true` (an empty attribute too), `false` or `plaintext-only`, in any letter case, or when it has none (or a value that is no keyword) and its parent is editable. An **editing host** is an editable element whose parent is not editable. React writes `contentEditable` and Solid (or `setAttribute`) writes `contenteditable`; both work, and `contentEditable={true}` is the text `"true"`, as in React DOM.
+
+| Member | |
+|---|---|
+| `contentEditable` | `"true"` for `true` and an empty attribute, `"false"`, `"plaintext-only"`, and `"inherit"` without the attribute or with any other text. Assigning `"true"`, `"false"` or `"plaintext-only"` (any case) sets the attribute in lower case, `"inherit"` removes it, and any other text throws a `SyntaxError` `DOMException`. |
+| `isContentEditable` | `true` when the nearest element at or above this one that has a valid `contenteditable` says `true` or `plaintext-only`. |
+| `:read-write`, `:read-only` | `:read-write` matches an editable element as well as a text control that is not read only or disabled, and `:read-only` everything else, in `matches()`, `querySelector` and [stylesheets](#stylesheets) (the list is under [What matches](#what-matches)). |
+
+- **Focus.** A host is focusable like an element with `tabIndex` 0: Tab reaches it, `focus()` makes it `document.activeElement`, and `tabIndex` reads 0 without a `tabindex`. What is editable inside it takes no focus of its own, so `<div contenteditable><p contenteditable></p></div>` has one tab stop. Moving an editable subtree into or out of a host, or writing `contenteditable` on any ancestor, updates what takes focus. An element with `display: contents` has no box and is not a host.
+- **Islands.** A `contenteditable="false"` element inside a host is not editable: the caret steps over it as one stop, and a Backspace or Delete next to it removes it whole. An editable element inside the island is a host of its own, and a focusable control inside it (a button, an `<input>`) keeps its own press and focus.
+- **Keys.** While a host, or an element inside one, has focus the arrow keys and Space do not scroll, as with a focused `<input>`. Home, End, Page Up and Page Down scroll the nearest scroller, as in Chrome on macOS. A host dims no other focusable element ([Focus styles](#focus-styles)).
+
+### Selection
+
+`document.getSelection()` and `window.getSelection()` give the one `Selection` of the app (`Selection` is a global, and its constructor throws `Illegal constructor`). Once code selects nodes (`setBaseAndExtent`, `collapse`, `selectAllChildren`, `addRange`, `modify`, or `focus()` on an editing host) or the user clicks into a host, it holds a live `Range` over the DOM and answers everything from it, with no mounted root needed; a React or Solid insertion, removal or text update under it moves its boundary points. Otherwise it is the [text selection](#text-selection) of the window that mounted last: the spans of painted text a drag selects, which are not nodes. The two never exist together: selecting nodes clears the painted text, and a drag that paints text drops the node range.
+
+| Member | |
+|---|---|
+| `anchorNode`, `anchorOffset`, `focusNode`, `focusOffset`, `isCollapsed`, `rangeCount`, `type`, `direction`, `toString()` | From the node range: the anchor is the start of a `forwards` selection and the end of a `backwards` one, `type` is `"Caret"` when collapsed and `"Range"` otherwise, `direction` is `"none"` when collapsed, `rangeCount` is 1, and `toString()` is the range's text. With painted text and no node range: `rangeCount` is 1 while text is selected and 0 otherwise, `isCollapsed` is the opposite of that, `type` is `"Range"` or `"None"` (never `"Caret"`), `toString()` is the selected text (`""` for none), the nodes are `null`, the offsets 0 and `direction` `"none"`; these need a mounted root. |
+| `getRangeAt(0)` | The selection's own live `Range`, as in the standard and Chrome: the same object until the selection is set anew (`collapse`, `setBaseAndExtent`, ...); changing it (`setStart`, `collapse`, `deleteContents`, ...) changes the selection and queues `selectionchange`, and tree changes move it without replacing it. A `Range` that was handed out and then replaced stops being the selection's. `IndexSizeError` for no range or an index but 0; `NotSupportedError` for painted text, which is not a range of nodes. |
+| `addRange(range)`, `removeRange(range)` | `addRange` does nothing while a node range exists, or for a range outside the document; the range itself becomes the selection's (a painted selection gives way). `removeRange` takes the selection's range, else `NotFoundError`. |
+| `removeAllRanges()`, `empty()` | Clear the node range and the painted text. |
+| `collapse(node, offset = 0)`, `setPosition`, `collapseToStart()`, `collapseToEnd()`, `extend(node, offset = 0)`, `setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset)`, `selectAllChildren(node)` | The standard's steps (a Text, which has no children, ends at 0). `collapse(null)` clears the selection. `IndexSizeError` for an offset past the node's length, `InvalidNodeTypeError` for a `DocumentType`, `InvalidStateError` from `collapseToStart`, `collapseToEnd` and `extend` with no node range (painted text counts as none), `TypeError` for a value that is not a `Node`. A node that is not in the document (a detached one, or one of a [parsed document](#html-parsing-and-serialization)) leaves the selection as it was. |
+| `containsNode(node, allowPartialContainment = false)` | Whether all of the node, or with the flag any of it, is in the node range (with the flag a node whose first point is not after the range's end, or whose last point is not before its start, counts). `false` with no node range. |
+| `deleteFromDocument()` | `deleteContents()` on the node range, leaving a caret. Painted text is not nodes and stays. |
+| `getComposedRanges(...)` | A one-item array of a `StaticRange`, or `[]`. There is no shadow DOM, so no argument changes it. |
+| `modify(alter, direction, granularity)` | `alter` is `"move"` or `"extend"`, `direction` `"forward"`, `"backward"`, `"left"` or `"right"` (the last two read as the first two: there is no bidirectional layout). Granularities are listed below. Moving a range by character collapses it to its edge, as Chrome does. A name the standard does not have does nothing, and so does an empty selection or a caret with no Text node next to it that is not in an empty paragraph (an empty block with no `<br>`). |
+
+`modify` granularities:
+
+| `granularity` | Moves |
+|---|---|
+| `"character"` | One grapheme cluster, over the Text nodes under the editing host the focus is in (or the document), in tree order. A block element or a `<br>` between two Text nodes is one step, an inline element none, and a `contenteditable="false"` element in the host is one step whole. |
+| `"word"` | To the end of the next word going forward and the start of the previous one going back, as on macOS. |
+| `"line"` | One painted line down (`forward`) or up (`backward`) in the paragraph or the one after or before it, to the character nearest the x the caret had when the run of moves began: consecutive `modify(..., "line")` calls keep that goal x across a shorter line, and any other change of the selection forgets it. With no line left in the host the caret goes to the start of its text going up and the end going down, as on macOS. An empty paragraph (a block of nothing but a `<br>`) is one line at its painted box: Down from the line above stops in it with the caret at `(block, 0)`, and a move from it goes to the neighbouring line at the same goal x. |
+| `"lineboundary"` | The start or the end of the painted line (the end of a line that wraps is before the space that hangs off it). |
+| `"documentboundary"` | The first or last position of the host's text. |
+| `"sentence"`, `"sentenceboundary"`, `"paragraph"`, `"paragraphboundary"` | Throw `NotSupportedError`. |
+
+**`selectionchange`.** `document` hears it when the selection changes: a node selection made from code, moved by a tree or data change under it, changed through its `Range`, or cleared, which is one event in one task however many changes came before it, queued whether or not a listener exists yet, so one added in the same turn hears it; and painted text selected by a drag, a clear, `removeAllRanges()` or `renderer.clearSelection()`. A node selection's change does not reach a root's `onSelectionChange`. Like the event of `onSelectionChange` (`event.value` is the selected text, absent after a clear) it comes from the frame that changed the selection, and it is the one native signal: a `selectionchange` listener on `document` or `window` turns it on, as a root's `onSelectionChange` does. It does not bubble, so `window` hears it in the capture phase only, and `target` is `document`.
+
+**Focus follows the selection.** A selection that code sets with its focus inside an editing host that does not hold focus focuses the host, as in Chrome (`editor.focus()` in Lexical is a selection update and no `focus()` call), whether or not the selection was already in that host: one set again after a toolbar button took focus takes it back. A host that already holds focus is left alone, and the focus is not scrolled to.
+
+**A caret goes in at focus.** Focus moving into an editing host puts a collapsed caret at its first position (the start of its first Text, else `(host, 0)`), unless the selection is already inside it: `focus()` does it, and so do Tab and Shift+Tab, before `focusin` is delivered. A click does not: it moves the selection to the point after the focus events.
+
+#### The pointer in an editing host
+
+A press of the primary button on an editing host, or on text in it, focuses the host and then puts the caret at the character under the pointer (the nearer edge of it), as Chrome does: `focus` and `focusin` listeners see the selection as it was before the press, and the focus puts no caret at the start of the host first. A drag extends the selection from there, the focus following the pointer even outside the host, where it is the nearest position in the host. Shift+click extends the focus and keeps the anchor (a plain click when the selection is not in the host). A double click selects the word under the pointer, a triple click the contents of its block (the nearest `p`, `div`, `li`, heading and the like below the host; the host's own contents when there is none), and a drag that follows either extends by words or blocks, from the word or block the press began in, in the direction the pointer went.
+
+- A press on an empty paragraph (`<p><br></p>`) puts the caret in it, as `(paragraph, 0)`. A host that paints no text has its caret at `(host, 0)`.
+- A point on a `contenteditable="false"` element goes to the nearest editable position outside it (next to an island that sits in a paragraph, on the side the point is nearer), and a press on a focusable control inside an island is the control's.
+- It is the default of `mousedown`: `preventDefault()` on it keeps the caret and the focus where they were, and `pointerdown`'s does not (it holds back the `mousedown` that follows, not the selection).
+- The selection is a node selection, so it is painted as the caret or the wash ([below](#the-caret-and-the-selection-wash)), `selectionchange` fires and a framework editor reads it. A press outside every editing host keeps making painted text selection.
+
+Differs from Chrome: [painted text is not nodes, `toString()` has no line breaks, `modify` has no paragraph or sentence and no caret affinity](./fork/deviations.md#selection-and-ranges); [no auto-scroll at the edge while dragging, and no `selectstart`](./fork/deviations.md#editing-input).
+
+### Range and StaticRange
+
+`Range`, `StaticRange` and `AbstractRange` are globals (and exported by `@ghia/native/host`), written from the DOM standard's ranges chapter over the elements, text and `document` Ghia has. `new Range()` and `document.createRange()` start collapsed at `(document, 0)`; `AbstractRange` cannot be constructed; `new StaticRange({ startContainer, startOffset, endContainer, endOffset })` checks only that the members are there and keeps them, and a `StaticRange` never moves.
+
+A `Range` is **live**. Taking a node out of its parent moves the boundary points inside it to the parent at the node's index and lowers the ones after it; placing a node raises the ones after the place; a data change (`replaceData` and the writes built on it, `splitText`) moves the points in that text as the standard's "replace data" and "split a Text node" say. This holds for what the framework does too: a React or Solid insert, removal, move or text update moves the live ranges, because the adapters tell them where they change a node's children or text. A range nothing refers to is collected and stops being adjusted; with no range anywhere a tree change pays one counter check.
+
+| Member | |
+|---|---|
+| `startContainer`, `startOffset`, `endContainer`, `endOffset`, `collapsed`, `commonAncestorContainer` | The boundary points. A range over two trees that are not one document (a node in no tree and the document's) has no common ancestor to find: `setStart` and `setEnd` keep the two ends in one tree by moving the other end, as the standard says. |
+| `setStart`, `setEnd`, `setStartBefore`, `setStartAfter`, `setEndBefore`, `setEndAfter`, `collapse(toStart = false)`, `selectNode`, `selectNodeContents`, `cloneRange()`, `detach()` | `IndexSizeError` for an offset past the node's length, `InvalidNodeTypeError` for `setStartBefore` and the others on a node with no parent. A start set after the end, or in another tree, moves the end to it, and an end set before the start moves the start. `detach()` does nothing. |
+| `compareBoundaryPoints(how, other)`, `Range.START_TO_START`, `START_TO_END`, `END_TO_END`, `END_TO_START`, `comparePoint(node, offset)`, `isPointInRange(node, offset)`, `intersectsNode(node)` | The standard's comparisons, in tree order, with `-1`, `0` and `1`. `WrongDocumentError` for a range or a node in another tree (`isPointInRange` and `intersectsNode` answer `false`), `NotSupportedError` for a `how` that is not 0 to 3. |
+| `toString()` | The text the range covers: the end texts cut at the offsets, and the text of the nodes between. |
+| `deleteContents()`, `insertNode(node)` | `deleteContents` cuts the data of the two end texts and removes the nodes between, then collapses the range where the standard says (so a `MutationObserver` and other live ranges see ordinary removals and data changes). `insertNode` splits a text start at the offset and places the node there (a `DocumentFragment`: its children, in order), wrapping the nodes when the range was collapsed; `HierarchyRequestError` for a start that cannot hold it. |
+| `cloneContents()`, `extractContents()`, `surroundContents(newParent)` | The standard's algorithms, returning a `DocumentFragment` of the window the start container is in. `cloneContents` copies the covered part of the two end texts and the nodes between (`cloneNode`) and leaves the tree alone. `extractContents` moves the nodes between into the fragment, cuts the end texts, leaves the range collapsed where the standard says, and the other live ranges follow it as for ordinary removals. `surroundContents` extracts, empties `newParent`, inserts it at the range and puts the contents in it. `InvalidStateError` when an element lies across a boundary, `InvalidNodeTypeError` for a document or a fragment as `newParent`. |
+| `getClientRects()`, `getBoundingClientRect()` | The CSSOM View rules, read from the painted text: for each Text node the range selects or partly selects, one rect for each line fragment of the selected part (the content area of the font there, as Chrome gives for a text node), and for each element the range selects whole, whose parent it does not select, its border box (`element.getClientRects()`). A collapsed range in a Text node is the caret: one rect with no width and the height of the font; a collapsed range in an element has none. `getBoundingClientRect()` is the union, or `new DOMRect()` with no rects. The read lays out and paints what changed first, so a change made earlier in the same handler is seen. Text that did not paint (`display: none`, `user-select: none`, hidden, or inside an anchored or virtual-list leaf run) has no rects. |
+
+`document.caretPositionFromPoint(x, y)` takes client coordinates and answers with a `CaretPosition` (a global; `offsetNode` is a Text node, `offset` a UTF-16 offset in its data, and `getClientRect()` the rect of the caret there, or `null` when the text did not paint): the character boundary nearest the point, in the painted text under it or the nearest to it. `document.caretRangeFromPoint(x, y)` is the same as a collapsed `Range`. Both are `null` when no text is painted, lay out and paint what changed first, and throw a `TypeError` for a coordinate that is not finite. Only text that is a Text node of a paragraph counts (not text of a `<code>`, `<markdown>` or `<diff>`, nor text under `user-select: none`).
+
+Differs from Chrome: [rects only for painted text, `caretPositionFromPoint` answers the nearest text and never an element, and `createContextualFragment` and `expand()` are missing](./fork/deviations.md#selection-and-ranges).
+
+### Input events
+
+Typing into an editing host follows the DOM's Input Events sequence, in Chrome's order. The target is the editing host that holds the node selection's focus, and only while it is `document.activeElement`.
+
+| Step | Event |
+|---|---|
+| 1 | `keydown` (the key's default action runs only if no handler called `preventDefault()`; an editing host hears it whether or not a listener is on its path) |
+| 2 | `beforeinput`: an `InputEvent` that bubbles, is cancelable (except for `insertCompositionText`) and is composed, aimed at the host |
+| 3 | the change to the DOM: text goes through `insertData`, `deleteContents` and `insertNode`, so a `MutationObserver` records `characterData`, and live ranges and the selection move |
+| 4 | `input`: an `InputEvent` that bubbles, is not cancelable, with the same `inputType`, `data` and `isComposing` |
+| 5 | `keyup` |
+
+`preventDefault()` on `beforeinput` cancels the change, and `input` does not fire. `InputEvent` takes `targetRanges` (an array of `StaticRange`) in its init, and `getTargetRanges()` returns a fresh copy of it, an empty array for an event that has none. `beforeinput` carries the one range the edit will affect: the caret or the selection for `insertText`, the marked text for `insertCompositionText`, and the characters a deletion removes (worked out from the caret without moving the selection). `input` has none. A text control (`<input>`, `<textarea>`) fires `input` after the edit and no `beforeinput` ([The input and change events](#the-input-and-change-events)).
+
+What makes an edit, and the event it fires:
+
+| `inputType` | Made by | `data` |
+|---|---|---|
+| `insertText` | A typed character, a dead key's result, an emoji from the picker, dictation: whatever the platform's text input gives the host | the text |
+| `insertReplacementText` | The same, when the platform names a non-empty range to replace | the text |
+| `insertCompositionText` | Each change of an input method's composition, and its commit; not cancelable, `isComposing` true | the composition's text |
+| `insertParagraph`, `insertLineBreak` | Enter, Shift+Enter (no Ctrl, Alt or Cmd) | `null` |
+| `deleteContentBackward`, `deleteContentForward` | Backspace, Delete; Ctrl+H, Ctrl+D | `null` |
+| `deleteWordBackward`, `deleteWordForward` | Alt+Backspace, Alt+Delete | `null` |
+| `deleteSoftLineBackward` | Cmd+Backspace (from the caret to the start of the painted row) | `null` |
+| `deleteByCut` | Cmd+X, Edit > Cut, `execCommand('cut')` (the last fires no `beforeinput`) | `null`, and `dataTransfer` `null` |
+| `insertFromPaste` | Cmd+V, Edit > Paste; `dataTransfer` is a read-only store of the clipboard, the same object on `input` | `null` |
+
+Typing over a selection is `insertText` and deleting a selection is the delete type of its key. A selection is replaced or deleted whole; a caret deletes one grapheme (or word, or row), into the neighbouring Text of the host when it sits at the edge of its own, or the whole `contenteditable="false"` element it is next to. The caret ends after the inserted text, or at the deletion. The platform does not type Enter, Backspace or Delete as text as well: Enter makes no line feed. Tab and Escape keep their usual actions. Undo and redo are not made by the host: an editor handles them itself.
+
+**Text comes from the platform's text input, not from `keydown`.** A focused editing host registers the window's input handler, so what the keyboard types arrives once, after the `keydown`, and a `keydown` that was prevented gives no text. Nothing the page does on `keydown` has to repeat it. An input method's `keydown`s are `"Process"` ([Input method composition](#input-method-composition)). The test renderer makes an edit without a key with `simulateEditingInput` ([Simulating keys](#simulating-keys)).
+
+**One microtask checkpoint for each key.** Keys from the keyboard that are waiting together are handled one at a time, with a checkpoint before and after each, so an editor that commits in a microtask (Lexical) has applied one key before it sees the next one's `keydown` ([frames-and-wakes.md](./fork/frames-and-wakes.md#one-key-event-per-pump)). There is none between a key's `keydown` and its `beforeinput` and `input`, and none between the keys of one synchronous `simulateKeystrokes` call ([Simulating keys](#simulating-keys), [deviations](./fork/deviations.md#events-and-input)).
+
+#### Keys that move the caret and delete
+
+The same keys, with Ctrl, Alt or Cmd, on a focused editing host whose node selection is inside it, move the caret and delete by a unit of text. The table is Chrome's on macOS (the AppKit key bindings that Chrome runs). Each is a `keydown` default: a handler that calls `preventDefault()` stops it, and one that performs it tells the platform so, so nothing else is typed or scrolled for the key. A key that is not in the table is left to the platform.
+
+| Keys | Does |
+|---|---|
+| Left, Right | `selection.modify("move", ..., "character")`; a range collapses to its start (Left) or end (Right) |
+| Alt+Left, Alt+Right | by word |
+| Cmd+Left, Cmd+Right | to the start or end of the painted row (`lineboundary`) |
+| Up, Down | by painted row, keeping the column across rows (a range collapses to its start or end first); on the first or last row, to the start or end of the host's text |
+| Cmd+Up, Cmd+Down | to the start or end of the host (`documentboundary`) |
+| Shift with any of the above | `modify("extend", ...)` with the same granularity |
+| Shift+Home, Shift+End | extend to the start or end of the host |
+| Cmd+A | `selectAllChildren(host)`: the host's contents, not the document's |
+| Alt+Backspace, Alt+Delete | `deleteWordBackward`, `deleteWordForward` |
+| Cmd+Backspace | `deleteSoftLineBackward` |
+| Ctrl+B, Ctrl+F; Ctrl+P, Ctrl+N (Shift extends) | the same as Left, Right; Up, Down |
+| Ctrl+H, Ctrl+D | the same as Backspace, Delete |
+
+A deletion fires `beforeinput` (cancelable) with `targetRanges` of the text it will remove, then changes the DOM and fires `input`. Home and End alone do not move the caret: on macOS Chrome scrolls the nearest scroller for them (and for Page Up and Page Down), and so does a focused editing host here.
+
+#### Input method composition
+
+On macOS an input method (Japanese, Chinese, Korean, dead keys) composes text in an `<input>`, a `<textarea>` or an editing host, and the events follow Chrome's:
+
+- A key the input method takes is a `keydown` with `key` `"Process"` (its `code` is the physical key, `keyChar` is absent), sent before the input method sees it. `isComposing` is false for the key that starts a composition and true for the keys after it. `preventDefault()` has no effect on it: the input method gets the key anyway. A key the input method hands back (an arrow with no candidate window) follows as an ordinary `keydown`, with `isComposing` true while text is still marked; in a host a plain `keydown` that arrives while composing does not run the Enter and Backspace defaults.
+- `compositionstart` (`data` is the text the composition takes over, usually `""`), then `compositionupdate` (`data` is the composition's current text) for every change, then `compositionend` (`data` is the final text, `""` when the composition was cancelled) on commit. They are aimed at the control or host, bubble, and cannot be cancelled. `onCompositionStart`, `onCompositionUpdate` and `onCompositionEnd` have `…Capture` twins.
+- The `input` of a composition's edits has `inputType` `insertCompositionText` and `isComposing` true, the commit's included. In a text control `compositionstart` and `compositionupdate` come before the `input` of their edit and `compositionend` after the `input` of the final one. In a host the order of one change is `compositionstart` (the first time), `beforeinput` (`insertCompositionText`, not cancelable), `compositionupdate`, the change, `input`; a commit that differs from the marked text runs the same four events with the final text and then `compositionend`.
+- A `keyup` while text is marked has `isComposing` true. It keeps its real `key`.
+
+A dead key (Option+E, then E) is a composition of one character, `´` then `é`. In a host, `unmark` ends the composition with `compositionend` and keeps the text, and marking no text cancels it: the text goes and `compositionend` has no data. A composition belongs to the host it started in, and it ends with `compositionend` when the host loses focus (before `blur`) and when the next edit finds that the selection has left the marked text. The platform is told where the marked text is on screen, for its candidate window, and which character a point is on.
+
+Windows and Linux report `isComposing` false and fire no composition events. A value an app sets on a text control while a composition is open ends it without a `compositionend`. In the test renderer, [`simulateComposition`](#simulating-keys) runs the sequence.
+
+Differs from Chrome: [Enter and any edit that would join or split blocks fire `beforeinput` and change nothing, some keys are not done, the platform is asked about the paragraphs the selection reaches, and a composition ends on the next edit](./fork/deviations.md#editing-input).
+
+### The caret and the selection wash
+
+A node selection that is not collapsed is painted: the text between the two points, in every paragraph it reaches, gets a wash in the colour the dragged selection has (the theme's accent at 35%, or the CSS `selectionColor` as for dragged text), under the glyphs, for each line the selection covers; `user-select: none` text takes none.
+
+A collapsed selection in an editing host is painted as a caret: a 2px quad as tall as the row it is on, in the theme's caret colour, solid when it moves or comes and then blinking every 500 ms as an `<input>`'s does. It shows while the host has focus and the window is key, and not while a range is selected, the host is blurred or the window is inactive; a caret that is not shown asks for no frame. A caret at an element boundary with no text next to it, as in Lexical's empty `<p><br></p>`, is painted at the start of the line the `<br>` makes.
+
+A blink repaints only the paragraph that holds the caret. Changing the selection rebuilds the paragraphs it touches and no others (retention skips the rest), but the frame is built whole, not patched ([editing.md](./fork/editing.md#painting-the-node-selection)). The wash and the caret are read back in tests with `renderer.getPaintedNodeSelection()`: `{ washes, caret }`, where `washes` has one `{ key, start, end, rects }` per washed paragraph (the washed text as UTF-16 offsets and a box for each line) and `caret` is `{ key, rect, lit }` (window coordinates; `lit` is false in the phase it is painted in no colour; `key` is empty for the caret of an empty line) or absent.
+
+Differs from Chrome: [`caret-color` is not read, and a caret in a block with no inline content is not painted](./fork/deviations.md#the-caret-and-the-selection-wash).
+
+### Clipboard
+
+Cmd+C, X, V and A and the Edit menu's Cut, Copy, Paste and Select All run one set of commands that fire the DOM clipboard events. An app reads and writes the clipboard from those events, through `clipboardData`, or directly with `clipboard` and the renderer's typed calls.
+
+#### Clipboard events
+
+`copy`, `cut` and `paste` are `ClipboardEvent`s: `new ClipboardEvent(type, { clipboardData, bubbles, cancelable, composed })` builds one, `clipboardData` is a [`DataTransfer`](#datatransfer) or `null`, and `constructor.name` is `"ClipboardEvent"`, which is what a library such as Lexical checks. They are heard by `addEventListener('copy', …)` and by the `onCopy`, `onCut` and `onPaste` props (React and Solid, each with an `on…Capture` twin), and they bubble and can be cancelled. A script can dispatch one itself with `element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }))`.
+
+**When they fire.** Cmd+C, Cmd+X and Cmd+V and the Edit menu's Cut, Copy and Paste fire `copy`, `cut` and `paste`, after the `keydown` (which can cancel the command) and unless a `<textarea>`, or an `<input>` that edits text, has focus (a checkbox, radio, range or hidden `<input>` is an ordinary element to them). They fire in every context: `copy` fires in a read-only editing host and in text that is not editable, with or without a selection. The target is the element that holds the start of the selection (Chrome's `FindEventTargetFrom`: the paragraph a forward selection begins in, and the element a script selected, as Lexical does for a node selection, even while an editing host has focus); with no selection, the focused element, which is `body` when nothing has focus. They bubble and are `composed`.
+
+**The Edit menu** runs the same commands as the keys: the key window handles a key equivalent before the menu does, so `⌘C` still reaches the page's `keydown` first (a `preventDefault` there cancels the command, as in Chrome), then the focused `<input>`, then the page's event. The menu fires for a click, and for a key nothing handled. The four items are always enabled, with a selection or not and with focus anywhere: a command with nothing to do (a copy of nothing, a paste into a page with no editing host) fires its event and then does nothing, as the key does. The menu bar itself is under [The macOS menu bar](#the-macos-menu-bar).
+
+**`clipboardData`.** For `copy` and `cut` it is a `DataTransfer` in read/write mode: a handler that calls `preventDefault()` makes the clipboard hold exactly what it put in (`setData`, `items.add`; the string items, in order), and a handler that cleared the data (`clearData()` or `items.clear()`, with no write after) and put nothing in empties the clipboard, or removes only the types it named. One that put nothing in and cleared nothing leaves the clipboard as it was. For `paste` it is read-only and holds the clipboard's types (`text/plain`, `text/html`, `text/uri-list`, and the rest, as [`readClipboard`](#typed-clipboard) returns them). After the event it is protected, so a handler that kept it reads nothing from it later.
+
+**The default of `copy`.** Not cancelled, with a node selection that is not collapsed: `text/plain` is the range's rendered text as Chrome copies it (the [`innerText`](#html-parsing-and-serialization) algorithm over the range: a line break between blocks, two between paragraphs, one at a `<br>`; `getSelection().toString()` has none) and `text/html` is `<meta charset='utf-8'>` and the markup of `range.cloneContents()`. With no node selection, text a drag selected in the page is copied as plain text.
+
+**The default of `cut`.** Not cancelled, in an editing host with a range selected: the range is copied as for `copy`, then `beforeinput` (`deleteByCut`, cancelable, `getTargetRanges()` the selection), the range is deleted, and `input`. A handler that cancels the `beforeinput` keeps the text, and the clipboard still has the copy. With a caret, or outside an editing host, nothing happens after the event.
+
+**The default of `paste`.** Not cancelled, in an editing host that holds the selection: `beforeinput` (`insertFromPaste`, cancelable, `getTargetRanges()` the selection), then the range is replaced by the `text/plain` string (or the text of `text/html` when there is none), with a `<br>` for each line break, then `input`. Outside an editing host nothing is inserted, and a clipboard with neither `text/plain` nor `text/html` changes nothing after the `paste` event: no `beforeinput`, no deletion of the selection, no `input`. A page that wants the markup reads `clipboardData` in `paste` and cancels it.
+
+**Select All** (Cmd+A, and the Edit menu's) selects the contents of the focused editing host (a `keydown` default there, as before) and, with focus elsewhere, the contents of `body`.
+
+**`document.execCommand(name)`.** `'copy'`, `'cut'` and `'selectAll'` run the command at once, as the keys do, so the `copy` or `cut` event fires before the call returns (the way Lexical copies a node selection: a temporary `copy` listener, then `execCommand('copy')`). They return true when done, and false when an `<input>` or `<textarea>` has focus or a `copy` has nothing to copy, and any call made while another runs (from the `copy` event it fired) returns false and does nothing, as Chrome's does. A cut made this way fires no `beforeinput` (Input Events does not fire it for `execCommand`) and the same `input`. `'paste'` returns false and does nothing, as in Chrome without the clipboard-read permission; every other command returns false. `queryCommandSupported` is true for those four and `queryCommandEnabled` is true for `copy` with a range selected, `cut` with a range selected in an editing host, and `selectAll`. In tests, `simulateMenuAction(name)` chooses an Edit menu item ([Simulating keys](#simulating-keys)).
+
+#### DataTransfer
+
+`DataTransfer`, `DataTransferItemList` and `DataTransferItem` are globals (HTML, "The DataTransfer interface"), installed where the runtime has none; the browser build keeps the browser's. A `DragEvent`'s `dataTransfer` and a `ClipboardEvent`'s `clipboardData` are instances of it, and `new DataTransfer()` is an empty store in read/write mode that an app fills itself (a library builds one to dispatch a `paste` or `drop`).
+
+- `getData(format)`, `setData(format, data)` and `clearData(format?)`: the format is lower-cased, `"text"` is `text/plain` and `"url"` is `text/uri-list`; `getData("url")` returns the first URL of the list (a line that is not a comment). `setData` replaces the data of a type and moves it to the end. `clearData()` removes every string and keeps the files.
+- `types`: a frozen array of the types of the strings in order, then `"Files"` when there is a file. It is the same array until the data changes.
+- `files`: a frozen `FileList`-like (`length`, index access, `item(i)`).
+- `items`: a `DataTransferItemList` with `length`, index access, iteration, `add(data, type)`, `add(file)`, `remove(index)` and `clear()`; each `DataTransferItem` has `kind` (`"string"` or `"file"`), `type`, `getAsString(callback)` (the callback runs in a microtask) and `getAsFile()`. `add` of a type already present throws `NotSupportedError`, and `items` and the methods above always agree.
+- `dropEffect`, `effectAllowed` (`"none"` for a constructed one) and `setDragImage`, which does nothing: there is no drag image.
+
+A `DataTransfer` has a mode, as the DOM's drag data store does. In read/write mode everything above works. In read-only mode (`paste`, and `drop`) `getData` and `types` work and every write does nothing: `setData`, `clearData`, `effectAllowed` and `items.add` do nothing (`add` returns `null`), `items.clear()` does nothing and `items.remove()` throws `InvalidStateError`. In protected mode (every other drag event) `getData` returns `""`, `getAsString` never calls back and `types` and `items` are still listed. A script cannot change the mode of the one a handler gets, and a `DataTransfer` it builds is read/write. A drag of files from the OS lists its `files` in every mode, which the DOM does not in protected mode.
+
+#### Typed clipboard
+
+The renderer's `writeClipboard(items)` and `readClipboard()` take and return the entries of a `DataTransfer`, `{ type: string, data: string }[]` (`data` is a `DOMString`). A write replaces the whole clipboard. On macOS these types round-trip through the system pasteboard:
+
+| MIME type | Pasteboard |
+|---|---|
+| `text/plain` | `public.utf8-plain-text` |
+| `text/html` | `public.html` |
+| `text/uri-list` | `public.url` (the first URL, for native apps) and the web custom data (the whole list) |
+| any other type, such as `application/x-lexical-editor` | the `org.chromium.web-custom-data` entry |
+
+The custom-data entry is the pickle Chrome writes and reads, so what a page in Chrome puts there is what a page in Ghia reads, and the reverse. A custom entry that Chrome wrote is read in full whatever its size; a corrupt one is skipped with a warning and the types beside it are still read. The system pasteboard lower-cases a type on write, as a `DataTransfer` does. `readClipboard` returns `text/plain`, `text/html`, `text/uri-list`, then the custom types, which is the pasteboard's order and not always the order of the write. Files and images are not read or written. Windows and Linux hold `text/plain` only, and a write of another type throws there. How the clipboard is laid out, and why it is Ghia's and not GPUI's, is in [events-and-input.md](fork/events-and-input.md#clipboard). `TestRenderer` has its own in-memory clipboard behind the same two calls, so a test can write several types and read them back, `writeText()` then paste into an `<input>`, or copy out of one and `readText()`, without touching the system pasteboard.
+
+#### `clipboard`
+
+`clipboard` is the text subset of `navigator.clipboard`. Both methods return promises, as in the DOM.
+
+```tsx
+import { clipboard } from '@ghia/react' // or '@ghia/solid'
+
+await clipboard.writeText('copied')
+const text = await clipboard.readText() // '' when the clipboard has no text
+```
+
+When a renderer is created and the runtime has no `navigator.clipboard`, Ghia installs `clipboard` there so code written for the web runs unchanged. An existing `navigator.clipboard` is never replaced. It always talks to the renderer created last. Only text is supported through it, not images or `ClipboardItem`s; the browser build leaves the browser's own `navigator.clipboard` alone. `writeText` replaces the whole clipboard, as in Chrome.
+
+`@ghia/native` also declares `Navigator.clipboard` globally, so a project whose `tsconfig` has no DOM lib (`lib: ["ESNext"]`) type-checks `navigator.clipboard` too. With the DOM lib the declaration is identical to its own and merges.
+
+Differs from Chrome: [`<input>` and `<textarea>` fire no clipboard events, paste inserts text and not markup, the copied markup has no inline styles, and `execCommand` is a subset](./fork/deviations.md#clipboard).
+
+### HTML parsing and serialization
+
+HTML is parsed and written by [parse5](https://github.com/inikulin/parse5), the spec-compliant parser Node tools use, over Ghia's own DOM nodes: there is no second tree. The parser is loaded on the first use of one of these members (or of an HTML paste), so an app that never parses markup does not pay for it at startup. The members are installed with the other DOM globals (not on the browser build, which keeps the browser's).
+
+| Member | |
+|---|---|
+| `new DOMParser().parseFromString(markup, "text/html")` | The `Document` a browser makes of the markup: an `<html>` with `<head>` and `<body>` (implied ones included), tables and lists fixed up by the HTML parser, entities decoded, comments kept. Scripting is off, so `<noscript>` has its elements. The nodes are `Element`, `HTMLElement`, `SVGElement`, `Text`, `Comment` and `DocumentFragment` like a window's, with attributes, `style` (a `CSSStyleDeclaration` of the `style` attribute), `classList`, `dataset`, the tree members, `querySelector(All)`, `getElementsBy*`, `closest`, `matches`, `cloneNode` and `MutationObserver`, and a `<template>`'s `content` is a `DocumentFragment`. The document answers `documentElement`, `head`, `body`, `title`, `getElementById`, `createElement`, `createElementNS`, `createTextNode`, `createComment`, `createDocumentFragment`, `contentType`, `compatMode`, `defaultView` (`null`) and `styleSheets`. Any other type than `text/html` throws: the XML types (`text/xml`, `application/xml`, `application/xhtml+xml`, `image/svg+xml`) a `NotSupportedError`, an unknown one a `TypeError`. |
+| `parsedDocument.styleSheets` | A `StyleSheetList` with one `CSSStyleSheet` for each `<style>` element, in order, made with the [stylesheet](#cssstylesheet) CSSOM (`cssRules`, `selectorText`, `style`). It is for reading: nothing applies it to what is drawn. It follows the `<style>` elements and their text. |
+| `el.innerHTML`, `el.outerHTML` | Getters: the markup of the children, or of the element and what is in it, as the HTML fragment serialization writes it (attributes quoted and escaped, void elements without an end tag, `<template>` content, raw text in `<style>`). They work on a window's element and a parsed one alike; the `style` attribute is the element's current inline style. |
+| `el.innerHTML = markup` | Parses the markup in the context of the element (`<tr>` stays in a `<tbody>` and is dropped in a `<div>`) and replaces the children with new nodes of the element's own document, so they are drawn when it is in a window. `null` is `""`. The whole markup is made before any child changes: markup with an element Ghia does not draw throws `NotSupportedError` and the element is left as it was. Comments are left out. |
+| `el.outerHTML = markup` | The same for the element itself, in the context of its parent (a `<body>` for a parent that is a fragment): it replaces the element. Nothing happens for an element with no parent; a parent that is the document throws `NoModificationAllowedError`. |
+| `el.insertAdjacentHTML(where, markup)` | `beforebegin`, `afterbegin`, `beforeend`, `afterend` in any letter case (`SyntaxError` for another position, `NoModificationAllowedError` for `beforebegin` and `afterend` on an element with no parent). |
+| `el.innerText` | The text as a browser renders it (CSSOM View's rendered text collection): a block (`div`, `p`, `li`, headings, `pre`, `table` and the like) is a line break on each side and a `<p>` two, a `<br>` a line feed, the white space of text collapses (kept in `<pre>`, `<textarea>` and an inline `white-space: pre`), the cells of a row are tab separated and the rows line separated, and the breaks at either end are dropped. Elements that are `script`, `style`, `template`, `head`, `title`, `noscript`, `hidden` or have an inline `display: none` give nothing, and an element that is itself one of those gives its `textContent`. Assigning it replaces the children with text and a `<br>` for each line break. |
+
+A parsed document is **inert**: it is never rendered, reaches no native renderer and is not found by `document`. Its nodes have `isConnected` `false`, `getRootNode()` gives the parsed document and `ownerDocument` is it, and nothing in them is a batch to a renderer. A node moves inside its own parsed document only: inserting one into a window's tree or another parsed document throws `WrongDocumentError`. To bring markup into a window, set `innerHTML` or call `insertAdjacentHTML` with its text (`el.innerHTML = parsed.body.innerHTML`). 
+
+```ts
+const doc = new DOMParser().parseFromString(clipboardData.getData("text/html"), "text/html")
+const color = doc.querySelector("span")?.style.color
+const rules = doc.styleSheets[0]?.cssRules // CSSStyleRule: selectorText, style
+host.innerHTML = '<p class="note">saved</p>'  // drawn
+```
+
+Differs from Chrome: [`DOMParser` takes `text/html` only and makes an inert document, markup set on an element may contain only elements Ghia draws, and `innerText` reads tags and not CSS](./fork/deviations.md#html-parsing-and-serialization).
 
 ## Text highlighting and search
 
@@ -6805,9 +7000,10 @@ Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`,
 
 | Tags | Default display | What they get |
 |---|---|---|
-| `p`, `section`, `nav`, `header`, `footer`, `main`, `article`, `aside`, `figcaption`, `details`, `summary`, `dt`, `li`, `legend` | `block` | `p` has `1em` margin above and below; `legend` has `2px` inline padding |
+| `p`, `section`, `nav`, `header`, `footer`, `main`, `article`, `aside`, `figcaption`, `details`, `summary`, `dt`, `legend` | `block` | `p` has `1em` margin above and below; `legend` has `2px` inline padding |
 | `h1` to `h6` | `block` | Chrome's sizes (`2em` to `0.67em`), bold, and the margins that go with them; role `heading` with `aria-level` 1 to 6 |
-| `ul`, `ol` | `block` | `1em` block margins and `40px` of start padding; role `list` (`li` is `listitem`) |
+| `ul`, `ol` | `block` | `1em` block margins (none inside another list) and `40px` of start padding; `list-style-type` `disc` (`circle` in a list, `square` in two) and `decimal`; role `list` |
+| `li` | `list-item` | role `listitem`; see [Lists](#lists) |
 | `dl`, `dd` | `block` | `dl` has `1em` block margins; `dd` has a `40px` start margin; `dl`, `dt` and `dd` are a description list, a term and a definition |
 | `figure`, `blockquote` | `block` | `1em` block margins and `40px` inline margins; roles `figure` and `blockquote` |
 | `pre` | `block` | `white-space: pre`, `1em` block margins, `Menlo` at the inherited size |
@@ -6858,13 +7054,21 @@ A `<button>` paints Chrome's default button look: a `2px` outset border, `#efefe
 
 An `<a>` with an `href` has the `link` role and is a tab stop; Enter clicks it once per press (a held key does not repeat the click), and with Shift, Ctrl, Alt or Cmd held the click carries them in `event.modifiers`, as in Chrome. An `<a>` without one is neither. Ghia has no navigation, so an `<a href>` fires `click` and stops: it is not underlined or blue, and it opens nothing. Handle the click, and style the link yourself. An inline `<a>` has no accessibility node (no inline box has one), and only an `<a>` with `display: block` or `inline-block` is a `link` in the accessibility tree.
 
+### Lists
+
+`display: "list-item"` is a `block` box that also has a marker (`li` is one). `listStyleType` (`"disc"` (default), `"circle"`, `"square"`, `"decimal"`, `"lower-alpha"`, `"upper-alpha"`, `"lower-latin"`, `"upper-latin"`, `"lower-roman"`, `"upper-roman"`, `"none"`) and `listStylePosition` (`"outside"` (default), `"inside"`) are inherited, and `listStyle` is the inherited shorthand of the two: a type, a position, or both in either order (`"none"`, `"inside"`, `"square inside"`); what it leaves out is the longhand's initial value, and the one written later wins on the same element. A value CSS does not have drops the declaration. An image in `listStyle` (`url(...)`) is ignored and `listStyleImage`, a string or `symbols()` for the type are not supported.
+
+The marker is the counter and `. ` (`"1. "`, `"a. "`, `"iv. "`) for the counting types, in the item's font, size and colour with tabular digits (Chrome's `::marker` has `font-variant-numeric: tabular-nums`, so in a font with proportional digits the numbers keep one width), and a shape for `disc`, `circle` and `square`, which Chrome draws and does not set in type (their size is the ascent of the font, rounded in device pixels). `lower-alpha` counts `a` to `z`, then `aa`; the roman types stop at 3999 and a number a type cannot show (roman above 3999, alphabetic below 1) is shown as `decimal`. The counter is the list-item counter of the item's parent element: the first item has `start` of an `<ol>` (default 1), each next one counts on (down with `reversed`, which starts at the number of items), and a `value` on an `<li>` sets the count there, the items after it continuing from it. An element that is not `display: list-item` has no marker and does not count. A `<ul>` inside one list is a `circle` and inside two or more a `square`, at any depth, and a `<ul>`, `<ol>` or `<dl>` inside any of them has no block margin (a `<dl>` takes the margin but not the marker type), as in Chrome's user agent style; what you set on the list is over them. `li.value`, `ol.start` and `ol.reversed` are reflecting properties as in the DOM (`li.value` is a `long`, `0` without a valid attribute; `ol.start` a `long`, `1` without one; `ol.reversed` a boolean), so a library that assigns `li.value = n`, as Lexical does, numbers the marker as the attribute would.
+
+An `outside` marker takes no part in layout: it ends where the item's border box starts and is on the item's first line, baseline to baseline, so adding or removing a marker moves nothing. It is clipped by an `overflow` of the item as any ink outside the box is. An `outside` marker is part of the item for the pointer, as in Chrome: over the bullet or the number `elementFromPoint` returns the `li`, a click is the `li`'s, and its `:hover` and `hover` styles apply (`pointer-events: none` and `visibility: hidden` on the item turn that off; the item's `cursor` is not shown there, see [deviations.md](./fork/deviations.md#html-tags)). An `inside` marker is at the start of the first line of the item's text and takes room there: the text starts after it, aligned with it as one line (`text-align` moves the marker and the text together), and a line that wraps goes back under the marker. `listStyleType`, `listStylePosition` and `listStyle` work in state styles, `hover: { listStyleType: "square" }` or `li:hover { list-style-type: square }`, and a hover on the list reaches the items that inherit them. The marker is not text of the item: a selection, a search and `textContent` never see it. A number follows its list: inserting, removing or moving an item, or changing `start`, `reversed`, a `value` or the type, renumbers the items after the change. `list-style-type: none` (or `list-style: none`) draws nothing. What is not drawn is in [deviations.md](./fork/deviations.md#html-tags).
+
 ### HTML tag deviations
 
 What differs from Chrome is listed once in [deviations.md](./fork/deviations.md#html-tags) and not repeated here. A tag is the user agent style of one tag, and a rule that needs the element's place or its attributes cannot be one, so:
 
-- `a` has no link colour or underline (`a:any-link` needs the `href` attribute), and `ul ul` is not a smaller-margin list. Write the style you want.
+- `a` has no link colour or underline (`a:any-link` needs the `href` attribute). Write the style you want.
 - `dialog` is always `display: none`: `open` is not forwarded. Set `display: "block"` yourself to show one.
-- `li` has no marker, `q` has no quotes, `legend` does not sit on the fieldset's border, `details` has no open state, `abbr[title]` has no dotted underline and a nested `h1` is not smaller.
+- `q` has no quotes, `legend` does not sit on the fieldset's border, `details` has no open state, `abbr[title]` has no dotted underline and a nested `h1` is not smaller.
 - `pre`, `kbd` and `samp` use `Menlo` at the inherited size, not the generic `monospace` at `13px`.
 - `<fieldset disabled>` does not disable its controls (see [Form control state](#form-control-state-disabled-enabled)).
 - `th` is always a column header (`scope` is not forwarded).
@@ -7114,7 +7318,10 @@ so they take no layout or paint `style` and no pointer events. Their `style` tak
 ```
 
 Props are camelCase, as in React DOM, and are written as kebab-case SVG
-attributes (`strokeWidth` becomes `stroke-width`). `transform` is an SVG
+attributes (`strokeWidth` becomes `stroke-width`); the attribute names themselves (`stroke-width`, `fill-rule`), as Solid and the DOM
+write them, are read too (by a transition and an animation as well), and the camelCase prop wins where both are given.
+`xlinkHref` and `xlink:href` are written as `href`, which wins when both are set; the `marker` shorthand sets the
+markers no `markerStart`/`marker-start` (and the rest) sets. `transform` is an SVG
 transform list passed through as a string, and `strokeDasharray` takes a
 number, a list or a string. `width` and `height` size the element unless
 `style` sets its own; `viewBox` is the coordinate system the children draw in.
@@ -7454,6 +7661,7 @@ The details for a library author, with a minimal addon, are in
 | Key down | `onKeyDown`, `onKeyDownCapture` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
 | Key up | `onKeyUp`, `onKeyUpCapture` | `key`, `code`, `keyChar`, `repeat`, `isComposing`, `shiftKey`, `ctrlKey`, `altKey`, `metaKey`, `modifiers` |
 | Composition | `onCompositionStart`, `onCompositionUpdate`, `onCompositionEnd` | `data` — bubble from the `<input>` or `<textarea>` being composed in, not cancelable. See [Input method composition](#input-method-composition) |
+| Clipboard | `onCopy`, `onCut`, `onPaste`, with `on…Capture` twins | `clipboardData`, a `DataTransfer`. Bubble from the focused element, cancelable. See [Clipboard events](#clipboard-events) |
 | Focus | `onFocus`, `onFocusCapture` | `focusVisible`, `relatedTarget`. See [Focus events](#focus-events) |
 | Blur | `onBlur`, `onBlurCapture` | `focusVisible`, `relatedTarget` |
 | Focus in | `onFocusIn`, `onFocusInCapture` (Solid; React's `onFocus`, `onFocusCapture`) | `focusVisible`, `relatedTarget`. Bubbles |
@@ -7539,7 +7747,7 @@ drag events, delivered along the path under the pointer:
 />
 ```
 
-`event.dataTransfer` is one object for the whole drag. `files` entries carry
+`event.dataTransfer` is one [`DataTransfer`](#datatransfer) for the whole drag. `files` entries carry
 `path` (absolute), `name`, `size` in bytes, `type` and `lastModified` in
 milliseconds since the epoch. `type` is a MIME type guessed from the extension,
 or `""`. A file that is not valid UTF-8 or cannot be read is left out, and a
@@ -7600,7 +7808,7 @@ more than 4px (logical pixels, from the press) starts a drag:
 - A drag does not start while another element holds pointer capture. If the source itself
   holds it, it is released (`lostpointercapture`) as the drag starts.
 
-`event.dataTransfer` is one object for the whole drag, in DOM protected mode:
+`event.dataTransfer` is one [`DataTransfer`](#datatransfer) for the whole drag, in DOM protected mode:
 `setData`, `getData`, `clearData`, `types`, `effectAllowed` and `dropEffect`.
 `setData` and `effectAllowed` work in `dragstart` only. `getData` works in
 `dragstart` and `drop` and returns `""` in every other event, `dragover` included.
@@ -7674,7 +7882,7 @@ events reads the DOM event from (a React synthetic event has the same member).
 
 ### Event classes
 
-Every event Ghia delivers is an instance of the DOM class of its type, and of `Event`: a `click`, `auxclick`, `contextmenu` and every `pointer*` type is a `PointerEvent`; the other mouse types a `MouseEvent`; `wheel` a `WheelEvent`; the drag types a `DragEvent`; `keydown` and `keyup` a `KeyboardEvent`; `focus`, `blur`, `focusin` and `focusout` a `FocusEvent`; `input` an `InputEvent`; the composition types a `CompositionEvent`; the transition types a `TransitionEvent` and the animation types an `AnimationEvent`. Any other type is a plain `Event`. The classes are exported by `@ghia/native/host` and installed as globals where the runtime has none (`UIEvent`, `MouseEvent`, `PointerEvent`, `WheelEvent`, `DragEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent`, `CompositionEvent`, `TransitionEvent`, `AnimationEvent`), so `event instanceof PointerEvent` and `new (element.ownerDocument.defaultView.PointerEvent)('click', { bubbles: true, shiftKey: true })` work as they do in a browser. Each takes the DOM's constructor arguments (the type and an init dictionary with the DOM's defaults: `new MouseEvent('click')` has `clientX` 0 and `relatedTarget` `null`), and is a subclass of the runtime's own `Event`, so `Event`, `CustomEvent` and `EventTarget` are untouched. Pass one to [`dispatchEvent`](#listeners-and-dom-members-on-an-element) to send it through the tree.
+Every event Ghia delivers is an instance of the DOM class of its type, and of `Event`: a `click`, `auxclick`, `contextmenu` and every `pointer*` type is a `PointerEvent`; the other mouse types a `MouseEvent`; `wheel` a `WheelEvent`; the drag types a `DragEvent`; `keydown` and `keyup` a `KeyboardEvent`; `focus`, `blur`, `focusin` and `focusout` a `FocusEvent`; `input` and `beforeinput` an `InputEvent`; the composition types a `CompositionEvent`; `copy`, `cut` and `paste` a `ClipboardEvent`; the transition types a `TransitionEvent` and the animation types an `AnimationEvent`. Any other type is a plain `Event`. The classes are exported by `@ghia/native/host` and installed as globals where the runtime has none (`UIEvent`, `MouseEvent`, `PointerEvent`, `WheelEvent`, `DragEvent`, `KeyboardEvent`, `FocusEvent`, `InputEvent`, `CompositionEvent`, `ClipboardEvent`, `TransitionEvent`, `AnimationEvent`), so `event instanceof PointerEvent` and `new (element.ownerDocument.defaultView.PointerEvent)('click', { bubbles: true, shiftKey: true })` work as they do in a browser. Each takes the DOM's constructor arguments (the type and an init dictionary with the DOM's defaults: `new MouseEvent('click')` has `clientX` 0 and `relatedTarget` `null`), and is a subclass of the runtime's own `Event`, so `Event`, `CustomEvent` and `EventTarget` are untouched. Pass one to [`dispatchEvent`](#listeners-and-dom-members-on-an-element) to send it through the tree.
 
 `getModifierState(key)` is on `MouseEvent` (so on pointer, wheel and drag events) and `KeyboardEvent`: `"Shift"`, `"Control"`, `"Alt"` and `"Meta"` read the four modifier fields (`shiftKey`, `ctrlKey`, `altKey`, `metaKey`, which every mouse and key event has), and any other key (`"CapsLock"`, `"NumLock"`) is `false` on a delivered event, since no platform reports them to Ghia. A constructed event answers for the `modifier*` members of its init (`new KeyboardEvent('keydown', { modifierCapsLock: true })`).
 
@@ -9090,7 +9298,7 @@ way, overflow included.
 
 **Containment:** `contentVisibility` (`"visible"` (default) | `"auto"` | `"hidden"`) skips the content of an element and `containIntrinsicSize` (`none`, a length or `auto <length>` per axis; longhands `containIntrinsicWidth`, `containIntrinsicHeight`, `containIntrinsicInlineSize`, `containIntrinsicBlockSize`) sizes it while it is skipped — see [Skipping content with `contentVisibility`](#skipping-content-with-contentvisibility). Neither inherits.
 
-**Text:** `fontSize`, `fontFamily`, `fontWeight`, `fontStyle` (`"normal"` | `"italic"` | `"oblique"`, inherited), `WebkitFontSmoothing` (`"auto"` | `"antialiased"` | `"subpixel-antialiased"`, inherited; see below), `textAlign` (`"start"` | `"end"` | `"left"` | `"right"` | `"center"`, inherited), `direction` (`"ltr"` | `"rtl"`, inherited; see [Direction](#direction)), `lineHeight` (a number multiplies the font size, a string is a length, see [Lengths](#lengths)), `whiteSpace` (`"normal"` | `"nowrap"` | `"pre"` | `"pre-wrap"` | `"pre-line"` | `"break-spaces"`, inherited), `tabSize` (a number of spaces or a length such as `"40px"`, inherited, default 8; see [White space](#white-space)), `wordBreak` (`"normal"` | `"break-all"` | `"keep-all"` | `"break-word"`, inherited) and `overflowWrap` (`"normal"` | `"break-word"` | `"anywhere"`, inherited; see [Breaking words](#breaking-words)), `textOverflow`, `lineClamp`, `textDecoration` (`"underline line-through"`, `"underline wavy red"`...), `textDecorationLine`, `textDecorationStyle`, `textDecorationColor`, `textDecorationThickness`, `textUnderlineOffset` (see [Inline text](#inline-text)), `textWrap`, `textWrapMode` and `textWrapStyle` (see [Balanced and pretty lines](#balanced-and-pretty-lines)), `textBox`, `textBoxTrim` and `textBoxEdge` (see [Trimming text boxes](#trimming-text-boxes))
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `fontStyle` (`"normal"` | `"italic"` | `"oblique"`, inherited), `WebkitFontSmoothing` (`"auto"` | `"antialiased"` | `"subpixel-antialiased"`, inherited; see below), `textAlign` (`"start"` | `"end"` | `"left"` | `"right"` | `"center"`, inherited), `direction` (`"ltr"` | `"rtl"`, inherited; see [Direction](#direction)), `lineHeight` (a number multiplies the font size, a string is a length, see [Lengths](#lengths)), `whiteSpace` (`"normal"` | `"nowrap"` | `"pre"` | `"pre-wrap"` | `"pre-line"` | `"break-spaces"`, inherited), `tabSize` (a number of spaces or a length such as `"40px"`, inherited, default 8; see [White space](#white-space)), `wordBreak` (`"normal"` | `"break-all"` | `"keep-all"` | `"break-word"`, inherited) and `overflowWrap` (`"normal"` | `"break-word"` | `"anywhere"`, inherited; see [Breaking words](#breaking-words)), `textOverflow`, `lineClamp`, `textDecoration` (`"underline line-through"`, `"underline wavy red"`...), `textDecorationLine`, `textDecorationStyle`, `textDecorationColor`, `textDecorationThickness`, `textUnderlineOffset` (see [Inline text](#inline-text)), `textWrap`, `textWrapMode` and `textWrapStyle` (see [Balanced and pretty lines](#balanced-and-pretty-lines)), `textBox`, `textBoxTrim` and `textBoxEdge` (see [Trimming text boxes](#trimming-text-boxes)), `listStyle`, `listStyleType` and `listStylePosition` (inherited; see [Lists](#lists))
 
 `fontVariantNumeric` (`"tabular-nums"`, `"proportional-nums"`, `"lining-nums"`, `"oldstyle-nums"`, `"slashed-zero"`, `"diagonal-fractions"`, `"stacked-fractions"`, `"ordinal"`, `"normal"`, one keyword per group, combined with spaces) and `fontFeatureSettings` (`'"tnum" 1, "liga" 0'`) turn OpenType features on or off. Both inherit, and a descendant that sets one keeps the other. When both name a feature, `fontFeatureSettings` wins. The font needs the feature, and neither prop is available inside `hover`, `active` or `focusVisible`.
 
@@ -9098,7 +9306,7 @@ way, overflow included.
 
 `WebkitFontSmoothing` (`"auto"` | `"antialiased"` | `"subpixel-antialiased"`) is CSS `-webkit-font-smoothing` as Chrome has it on macOS. `"antialiased"` draws glyphs as plain coverage, the same ink for dark text and for light text, which is what a web page sets on `body` to keep its type from looking heavy; `"auto"` (the default) is CoreGraphics' font smoothing, which thickens the strokes, light text most, made into a mask for the colour of the text as Chrome does (the system's "font smoothing" preference still turns it off). On macOS `antialiased` and `auto` have the ink of Chrome's `antialiased` and `auto` (equal to 0.2 % for black on white and white on black, 0.7 % for a grey on a near black, measured on Inter at 14 and 24 px, at scale 1 and 2); `auto` has 9-17 % more ink than `antialiased` for dark text and 22-42 % more for light text. `"subpixel-antialiased"` is `"auto"`, as on current macOS, which draws no subpixel text. It inherits, works on a `<span>` (per run), on inputs and through `display: contents`, and can be set in `hover`, `active` and `focusVisible`. A value CSS does not have is ignored, as an invalid declaration is: the element keeps what it inherits. It does not animate. It is the first vendor-prefixed key, written as React writes it, with a capital `W`.
 
-`fontFamily` resolves installed fonts. To use your own, pass the files in the `fonts` window option or call [`registerFont()`](#custom-fonts). On macOS a variable font follows `fontWeight` and `fontVariationSettings` along its axes; elsewhere it renders its default instance, so use one static file per weight. The family name must match the font's family name exactly.
+`fontFamily` resolves installed fonts, and is a CSS list: the first family that is installed draws (`-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif`), with quotes allowed around a name. `system-ui`, `-apple-system` and `BlinkMacSystemFont` are the system UI font, `sans-serif` is Helvetica, `serif` is Times, `monospace` is Menlo, `cursive` is Apple Chancery, `fantasy` is Papyrus and `math` is STIX Two Math, as in Chrome on macOS; a quoted `"serif"` is a family name, and `ui-serif`, `ui-monospace` and the other `ui-*` keywords are plain names, as in Chrome. Each glyph is drawn in the first listed family that is installed and has it. A list with nothing installed in it draws in the face GPUI falls back to (Helvetica on a stock Mac; Ghia ships no fonts), and [deviations.md](fork/deviations.md#text) lists where this differs from Chrome. To use your own, pass the files in the `fonts` window option or call [`registerFont()`](#custom-fonts). On macOS a variable font follows `fontWeight` and `fontVariationSettings` along its axes; elsewhere it renders its default instance, so use one static file per weight. The family name must match the font's family name exactly.
 
 **Selection:** `userSelect` (`"text"` | `"none"`), `selectionColor` — both inherit down the tree
 
@@ -9569,8 +9777,8 @@ order, `focus` weakest and `focusVisible` strongest, after the pointer states.
 `:focus-visible` follows Chrome's heuristic, which keeps two facts for the whole
 window instead of asking the element focus left:
 
-- A text field (`<input>`, `<textarea>`) always matches while focused, mouse or
-  keyboard
+- A text field (`<input>`, `<textarea>`) or a `contenteditable` host always matches
+  while focused, mouse or keyboard
 - Any other element matches, unless the last focus a mouse press gave an element
   is still the last one and no key has gone down since
 - A mouse press whose `mousedown` is not cancelled and that moves focus (to an
@@ -9610,7 +9818,7 @@ Tab  ► [ Save ]  (dim New)  (dim Search)  (dim input)
 - It follows `:focus-visible`, so it lasts while that control stays focused,
   and ends when focus moves to a control that does not match (a mouse press on
   another control, for example). Moving the mouse does not end it
-- A focused `<input>` or `<textarea>` dims nothing: typing is keyboard input
+- A focused `<input>`, `<textarea>` or `contenteditable` host dims nothing: typing is keyboard input
   too, and the caret already shows focus
 - The focused element's ancestors never dim, because opacity covers the subtree
 - `focusVisible` and the dim are **independent**. An element with a ring from
@@ -10178,11 +10386,11 @@ document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
 | `replace(text)` | The same one microtask later; resolves with the sheet. |
 | `insertRule(rule, index = 0)` | Puts one rule at `index` and returns the index. Throws a `DOMException` named `SyntaxError` unless the text is exactly one rule (or is an `@import`), and `IndexSizeError` when `index` is past the end. |
 | `deleteRule(index)` | Throws `IndexSizeError` for an index that is not a rule. |
-| `cssRules` | A live, read-only, array-like list: `length`, `item(i)`, index access and iteration. Each entry is a `CSSRule` with `cssText`, `type` (`1` for a style rule, `4` `@media`, `5` `@font-face`, `7` `@keyframes`, `12` `@supports`, `3` `@import`, `0` for the others, `@layer` and `@container` included), `parentRule` (`null`) and `parentStyleSheet`; a style rule is a `CSSStyleRule` and has `selectorText`. |
+| `cssRules` | A live, read-only, array-like list: `length`, `item(i)`, index access and iteration. Each entry is a `CSSRule` with `cssText`, `type` (`1` for a style rule, `4` `@media`, `5` `@font-face`, `7` `@keyframes`, `12` `@supports`, `3` `@import`, `0` for the others, `@layer` and `@container` included), `parentRule` (`null`) and `parentStyleSheet`; a style rule is a `CSSStyleRule` and has `selectorText` and `style`, a `CSSStyleDeclaration` of its declarations (changing it changes that declaration only: `cssText` and what is drawn stay as written). |
 | `disabled` | A disabled sheet does not apply, adopted or not. |
-| `ownerNode`, `ownerRule`, `parentStyleSheet`, `href`, `title` | `null`. `type` is `"text/css"`. |
+| `ownerNode`, `ownerRule`, `parentStyleSheet`, `href`, `title` | `null`, except `ownerNode` on a sheet of a [parsed document](#html-parsing-and-serialization), which is its `<style>` element. `type` is `"text/css"`. |
 
-Native parses the sheet, so JS keeps only the text of each rule to answer `cssRules`. `cssText` is the rule as it was written, comments inside it included, not a re-serialization, and a rule with a selector native rejects is still listed. Every change sends the whole sheet to native, once per flush of the queue however many changes came before (1000 `insertRule` calls in one tick are one op). There is no `CSSStyleRule.style`, `CSSGroupingRule` or `CSSMediaRule`; see [deviations](./fork/deviations.md#stylesheets).
+Native parses the sheet, so JS keeps only the text of each rule to answer `cssRules`. `cssText` is the rule as it was written, comments inside it included, not a re-serialization, and a rule with a selector native rejects is still listed. Every change sends the whole sheet to native, once per flush of the queue however many changes came before (1000 `insertRule` calls in one tick are one op). There is no `CSSGroupingRule` or `CSSMediaRule`, and `CSSStyleRule.style` is read-only in effect; see [deviations](./fork/deviations.md#stylesheets).
 
 ### `document.adoptedStyleSheets`
 
@@ -10213,7 +10421,7 @@ Anything else makes the selector invalid and drops its rule (a list is all or no
 | `:checked` | a checkbox or a radio that is checked, as a click, `checked` or a script left it |
 | `:indeterminate` | a checkbox that is indeterminate (a radio never is) |
 | `:required`, `:optional` | a `select`, a `textarea` and an `input` whose `type` is not `hidden`, `range`, `color`, `submit`, `reset`, `button` or `image`, with and without `required`; every other element matches neither |
-| `:read-write` | a `textarea`, or an `input` that is edited as text, that is not `readOnly` and not disabled |
+| `:read-write` | a `textarea`, or an `input` that is edited as text, that is not `readOnly` and not disabled; any other element when it is editable (`contenteditable`, inherited) |
 | `:read-only` | every other element, `div`s and checkboxes included |
 | `:any-link`, `:link` | an `a` or `area` with an `href` (none is visited) |
 
@@ -10518,6 +10726,8 @@ a `code` (`"Space"`, `"KeyA"`, `"Digit1"`, `"ShiftLeft"`, `"NumpadEnter"`,
 case-sensitive, and one that is not a key throws before anything is pressed:
 GPUI's own syntax (`"enter"`, `"cmd-shift-p"`) is not accepted.
 
+`simulateMenuAction('copy' | 'cut' | 'paste' | 'selectAll')` on the test renderer chooses that Edit menu item as the menu bar does and runs the same command as the key ([clipboard events](#clipboard-events)). It returns whether the item was enabled, which the four always are, so it is `true`; an item name that is not one of the four throws.
+
 ```ts
 renderer.simulateKeystrokes('Shift+Tab')              // one press
 renderer.nativeSimulateKeystrokes(id, 'h i Enter')    // a sequence, spaces between presses
@@ -10534,20 +10744,30 @@ names a `code` (`"KeyA"`, `"NumpadEnter"`) reports exactly that `code`, and for
 a character key the US character on it (`"a"`, `"A"` with Shift), whatever
 layout the machine has; a press that names a key (`"a"`, `"Enter"`) derives
 `code` from it for a US QWERTY layout. The browser (wasm) automation path
-passes the names through to the page without checking them.
+passes the names through to the page without checking them. The live automation
+client (`keystrokes`, `press()`) presses a sequence one key at a time with a turn
+of the event loop after each, as separate key events from the OS arrive; a
+synchronous `simulateKeystrokes` on the test renderer runs every key inside one
+call, where no microtask runs between two keys, and an editor that commits its
+update in a microtask (Lexical) loses all but the first of "m i d" typed that
+way ([deviations.md](fork/deviations.md#events-and-input)): give it one call
+per key and `await` between them. Keys from the keyboard are not affected: the frame loop's pump ends after each key event and the next tick takes the next key, so each has its own microtask checkpoint ([frames-and-wakes.md](fork/frames-and-wakes.md#one-key-event-per-pump)). A sequence whose later press is not a key has
+pressed the ones before it by then, where the test renderer pressed none.
 `nativeSimulateModifiersChanged("shift")` reports the held modifiers changing, the
 way the platform does for a modifier pressed or released on its own (a `Shift`
 press sends a key event instead); Shift on its own counts as a key for
 `:focus-visible`, Ctrl, Alt and Meta do not.
 
-`simulateComposition(id, steps)` focuses an `<input>` or `<textarea>` and runs an
-input method composition in it, one step per key the input method takes. A step
+`simulateComposition(id, steps)` focuses an `<input>`, a `<textarea>` or an editing host and runs an
+input method composition in it, one step per key the input method takes. In a host the selection has to be
+in it first, and the steps go through the platform's text input as AppKit's would. A step
 is `{ key, action: 'mark', text }` (the composition becomes `text`),
 `{ key, action: 'commit', text }` (it ends with `text`) or
 `{ key, action: 'unmark' }` (it ends with the text it has). Each step sends the
 `"Process"` `keydown`, the composition events and the `change` of the edit, then
-the `keyup` of that key, as in [Input method composition](#input-method-composition).
-It throws when `id` is not a focusable text input.
+the `keyup` of that key, as in [Input method composition](#input-method-composition)
+and [Input events](#input-events). It throws when `id` is not a focusable text input or
+editing host.
 
 ```ts
 renderer.simulateComposition(id, [
@@ -10555,6 +10775,23 @@ renderer.simulateComposition(id, [
   { key: 'a', action: 'mark', text: 'か' },
   { key: 'Enter', action: 'commit', text: 'か' },
 ])
+```
+
+`simulateEditingInput(inputType, data?)` makes one edit of the focused editing host, without a key: `beforeinput`, the change
+unless a listener canceled it, then `input` (see [Input events](#input-events)). `simulateEditingComposition(steps)` runs a
+composition in it, with no platform text input (so what the platform is told is not exercised), with the same step shapes as `simulateComposition` (`{ action: 'mark', text }`, `{ action: 'commit', text }`,
+`{ action: 'unmark' }`; a `key` is accepted and ignored, and no key events are sent): `mark` replaces the marked text with `text`,
+`commit` does so with the final text if it differs and then fires `compositionend`, and `unmark` is `compositionend` alone. Both
+run synchronously and throw when no editing host holds focus and the selection. `getInputMethodBounds(hostId, start, end)` and
+`getInputMethodIndexAtPoint(hostId, x, y)` read what the platform's input method is told about a focused host: the window rect of the
+characters `start..end` (UTF-16 offsets into the text of the paragraphs the selection reaches, `null` where there is none), and the offset of
+the character at a point.
+
+```ts
+host.focus()
+document.getSelection().collapse(host.firstChild, 0)
+renderer.simulateEditingInput('insertText', 'a')
+renderer.simulateEditingComposition([{ action: 'mark', text: 'に' }, { action: 'commit', text: '日' }])
 ```
 
 A file drag is simulated in steps, each a native event that reaches your
@@ -10614,6 +10851,28 @@ render(<div style={{ width: '100%', height: '100%' }} onMouseMove={() => moved++
 const loop = startFrameLoop(renderer) // no timer: an idle window is not ticked
 renderer.postNativeEvent('mouseMove', 100, 100) // wakes the loop, which ticks, and runs onMouseMove
 loop.stop()
+```
+
+To test what the live pump does with several keys, the test renderer has three more
+calls (macOS only). `postNativeKeys(text)` queues a `keyDown` and a `keyUp` for each
+character of `text` in AppKit's queue for the test window, all before the next pump;
+it takes lowercase ASCII letters and spaces and throws on anything else.
+`pumpNativeEvents()` is one call of the pump a live window's `tick()` runs
+(`pump_app_nonblocking`), then the handlers' queued events: with
+`setYieldAfterKeyEvent(true)`, the default, it ends around the first key it reaches, so
+queued keys take one call each and the test runs the microtask checkpoint between calls
+(`await` a turn of the event loop), as the frame loop does for a live window.
+`setYieldAfterKeyEvent(false)` makes one call send every queued event, as before.
+`keyEventPending()` is true when the last `pumpNativeEvents()` left a key queued or ended
+after sending one; the live renderer has the same method for its last `tick()`. `tick()`
+itself is not that pump: it hands every queued event to the window at once.
+
+```ts
+renderer.postNativeKeys('abc')
+do {
+  renderer.pumpNativeEvents()
+  await new Promise((resolve) => setImmediate(resolve)) // the app's microtasks run here
+} while (renderer.keyEventPending())
 ```
 
 ### Testing native elements

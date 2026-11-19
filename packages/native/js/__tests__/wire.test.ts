@@ -18,6 +18,8 @@ type Tuple =
   | ["setAttribute", number, string, string | null]
   | ["setStyleSheet", number, string | null]
   | ["setAdoptedStyleSheets", number[]]
+  | ["setNodeSelection", number, number, number, number, number]
+  | ["setNodeSelection", null]
 
 function write(writer: WireWriter, tuple: Tuple): void {
   switch (tuple[0]) {
@@ -51,6 +53,12 @@ function write(writer: WireWriter, tuple: Tuple): void {
       return writer.setStyleSheet(tuple[1], tuple[2])
     case "setAdoptedStyleSheets":
       return writer.setAdoptedStyleSheets(tuple[1])
+    case "setNodeSelection":
+      return writer.setNodeSelection(
+        tuple[1] === null
+          ? null
+          : { anchorId: tuple[1], anchorOffset: tuple[2]!, focusId: tuple[3]!, focusOffset: tuple[4]!, hostId: tuple[5]! }
+      )
   }
 }
 
@@ -172,6 +180,9 @@ describe("WireWriter round trip", () => {
       ["setStyleSheet", 1, null],
       ["setAdoptedStyleSheets", []],
       ["setAdoptedStyleSheets", [2, 1, 300, 2 ** 40]],
+      ["setNodeSelection", 11, 3, 12, 70_000, 0],
+      ["setNodeSelection", 2 ** 40, 0, 5, 1, 7],
+      ["setNodeSelection", null],
     ])
   })
 

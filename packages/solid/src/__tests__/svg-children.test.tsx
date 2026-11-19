@@ -68,6 +68,27 @@ describe.skipIf(!hasNativeTestRenderer)("Solid svg children", () => {
     expect(shot(app, "defs-shown").equals(hidden)).toBe(false)
   })
 
+  it("draws a <use> sprite referenced by xlink:href and a marker shorthand beside a kebab-case longhand", () => {
+    const app = createTestRoot()
+    app.render(() => (
+      <div style={FRAME}>
+        <svg testId="svg" viewBox="0 0 100 100" width={100} height={100}>
+          <symbol id="icon" viewBox="0 0 10 10">
+            <rect width={10} height={10} fill="#ffffff" />
+          </symbol>
+          <use xlink:href="#icon" width={50} height={100} />
+          <path d="M60 50 L90 50" stroke="#ffffff" marker="url(#none)" marker-end="url(#none)" />
+        </svg>
+      </div>
+    ))
+    app.renderer.dispatchNativeEvents()
+    const markup = app.renderer.getSvgMarkup(app.renderer.findByTestId("svg")!.id)!
+    expect(markup).toMatch(/<use [^>]*href="#icon"/)
+    expect(markup).not.toContain("xlink")
+    expect(markup.match(/marker-end=/g)).toHaveLength(1)
+    expect(markup).toContain('marker-start="url(#none)"')
+  })
+
   it("sizes the box from width and height", () => {
     const app = createTestRoot()
     app.render(() => (

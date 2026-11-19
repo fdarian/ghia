@@ -3,11 +3,14 @@ import { bindClipboard, clipboard, createClipboard } from "../clipboard.js"
 
 function fakeHost(initial: string | null = null) {
   const host = {
-    text: initial,
-    writeClipboardText(text: string) {
-      host.text = text
+    entries: initial === null ? [] : [{ type: "text/plain", data: initial }],
+    writeClipboard(items: { type: string; data: string }[]) {
+      host.entries = items
     },
-    readClipboardText: () => host.text,
+    readClipboard: () => host.entries,
+    get text() {
+      return host.entries.find((entry) => entry.type === "text/plain")?.data
+    },
   }
   return host
 }
@@ -23,6 +26,16 @@ describe("createClipboard", () => {
 
   it("reads an empty string when the clipboard holds no text", async () => {
     expect(await createClipboard(() => fakeHost(null)).readText()).toBe("")
+    const host = fakeHost()
+    host.writeClipboard([{ type: "text/html", data: "<b>x</b>" }])
+    expect(await createClipboard(() => host).readText()).toBe("")
+  })
+
+  it("writes text as the whole clipboard, as writeText does", async () => {
+    const host = fakeHost()
+    host.writeClipboard([{ type: "text/html", data: "<b>x</b>" }])
+    await createClipboard(() => host).writeText("x")
+    expect(host.entries).toEqual([{ type: "text/plain", data: "x" }])
   })
 
   it("rejects when no renderer has a clipboard", async () => {

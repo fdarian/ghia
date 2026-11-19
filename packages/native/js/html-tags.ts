@@ -53,10 +53,24 @@ export function isInlineBox(type: string, style: { display?: unknown; position?:
 export const HTML_TAG_PROPS: Readonly<Partial<Record<HtmlTag, readonly string[]>>> = {
   a: ["href"],
   button: ["type", "disabled"],
+  ol: ["start", "reversed"],
+  li: ["value"],
 }
 
 export interface HtmlAnchorProps {
   href?: string
+}
+
+export interface HtmlOrderedListProps {
+  /** The ordinal of the first item. */
+  start?: number
+  /** Items count down. */
+  reversed?: boolean
+}
+
+export interface HtmlListItemProps {
+  /** The ordinal of the item, which the items after it count on from. */
+  value?: number
 }
 
 export interface HtmlButtonProps {

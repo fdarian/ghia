@@ -5,7 +5,10 @@
   "type": "module",
   "main": "./index.js",
   "types": "index.d.ts",
-  "browser": "browser.mjs",
+  "browser": {
+    "./index.js": "./browser.mjs",
+    "./dist/dom/html/parse5.js": "./dist/dom/html/parse5.web.js"
+  },
   "exports": {
     ".": {
       "browser": "./browser.mjs",
@@ -90,6 +93,7 @@
     "css-select": "^7.0.0",
     "css-what": "^8.0.0",
     "eventsource-parser": "^4.1.0",
+    "parse5": "^8.1.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

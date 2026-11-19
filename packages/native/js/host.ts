@@ -4,15 +4,18 @@ import type {
   DebugFrameOverlayStats,
   EdgeInsets,
   ElementBounds,
+  CaretPoint,
   EventPayload,
   GpuixRenderer,
   HighlightMatch,
   PathPromptOptions,
+  TextRect,
   WindowInsets as NativeWindowInsets,
 } from "../index.js"
 import type { DomEvent, RootEvent } from "./events/dispatch.js"
 import type {
   AnimationEventProps,
+  ClipboardEventProps,
   CompositionEventProps,
   ContentVisibilityEventProps,
   HostChangeEvent,
@@ -25,12 +28,14 @@ import type { MotionValue } from "./motion-value.js"
 import type { MotionGestureName } from "./motion-variants.js"
 
 export type {
+  CaretPoint,
   DebugFrameOverlayStats,
   EdgeInsets,
   ElementBounds,
   HighlightMatch,
   NativeWindowInsets,
   PathPromptOptions,
+  TextRect,
 }
 
 export * from "./events/listeners.js"
@@ -44,6 +49,9 @@ export * from "./style-properties.js"
 export * from "./dom/element-types.js"
 export type { DomElementOf, RefElementOf } from "./dom/dom-element-of.js"
 export * from "./dom/mutation-observer.js"
+export * from "./dom/range.js"
+export * from "./editing/caret-position.js"
+export { hasLiveRanges, liveRangesAfterInsert, liveRangesBeforeRemove, liveRangesReplaceData } from "./dom/live-ranges.js"
 export { bumpTreeVersion } from "./dom/tree-version.js"
 export * from "./dom/attribute-names.js"
 export * from "./dom/prototype-members.js"
@@ -1156,6 +1164,29 @@ export interface StyleDesc {
    *  a tab, `whiteSpace: "break-spaces"` or `lineClamp`, or where a word is wider
    *  than its line. */
   textWrapStyle?: "auto" | "balance" | "pretty" | "stable"
+  /** CSS `list-style`, inherited, the shorthand of `listStyleType` and `listStylePosition`:
+   *  a type, a position, or both in either order (`"none"`, `"inside"`, `"square inside"`). What it
+   *  leaves out is the longhand's initial value (`"disc"`, `"outside"`). A longhand declared on the
+   *  same element wins over it. An image (`url(...)`) is left out, and any other word is an
+   *  invalid value. */
+  listStyle?: string
+  /** CSS `list-style-type`, inherited, `"disc"` by default (`"decimal"` on an `<ol>`): the marker
+   *  of a `display: "list-item"` box (`<li>`). `"lower-latin"` and `"upper-latin"` are
+   *  `"lower-alpha"` and `"upper-alpha"`. A string or `symbols()` is an invalid value. */
+  listStyleType?:
+    | "disc"
+    | "circle"
+    | "square"
+    | "decimal"
+    | "lower-alpha"
+    | "upper-alpha"
+    | "lower-latin"
+    | "upper-latin"
+    | "lower-roman"
+    | "upper-roman"
+    | "none"
+  /** CSS `list-style-position`, inherited, `"outside"` by default. */
+  listStylePosition?: "outside" | "inside"
   textOverflow?: "ellipsis" | "ellipsis-start"
   lineClamp?: number
   /** CSS `text-decoration`: lines, a style, a colour and a thickness in any order,
@@ -1765,7 +1796,8 @@ export interface HostProps
     PointerEventProps,
     AnimationEventProps,
     ContentVisibilityEventProps,
-    CompositionEventProps {
+    CompositionEventProps,
+    ClipboardEventProps {
   style?: StyleDesc
 
   // Pointer, mouse and drag events, with `on…Capture` twins: see PointerEventProps.
@@ -2929,6 +2961,9 @@ export type NativeRenderer = MutationHost &
       | "getSelectedText"
       | "clearSelection"
       | "getPaintedHighlights"
+      | "getTextRangeRects"
+      | "caretPositionFromPoint"
+      | "moveCaretVisually"
       | "getWindowSize"
       | "getWindowInsets"
       | "setWindowTitle"
@@ -2936,8 +2971,8 @@ export type NativeRenderer = MutationHost &
       | "setAppearance"
       | "getAppearance"
       | "promptForPaths"
-      | "writeClipboardText"
-      | "readClipboardText"
+      | "writeClipboard"
+      | "readClipboard"
       | "supportsEyeDropper"
       | "openEyeDropper"
       | "activateWindow"

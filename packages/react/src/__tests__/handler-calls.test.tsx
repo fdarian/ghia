@@ -8,6 +8,7 @@
 import fs from "fs"
 import { describe, expect, it } from "vitest"
 import { defineKeyframes } from "../index"
+import { document } from "@ghia/native/host"
 import { encodeWireBatchForTest } from "@ghia/native/testing"
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing"
 
@@ -42,6 +43,8 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "setWindowSize",
   "simulateComposition",
   "simulateKeystrokes",
+  // The menu item's action runs the same command as the key, through the same input path as simulateKeystrokes.
+  "simulateMenuAction",
   // Each delivers the event the scripted page reports to its handler, as dispatchNativeEvents does (the tab out
   // moves focus, which reports its focus events the same way).
   "simulateWebviewFail",
@@ -66,10 +69,19 @@ const NOT_CALLABLE_FROM_A_HANDLER = new Set([
   "nativeSimulateMouseMove",
   "nativeSimulateMouseUp",
   "nativeSimulateScrollWheel",
-  // Both enter the test state, which the handler's own native call holds: they throw "cannot run inside an event handler".
+  // All of them enter the test state, which the handler's own native call holds: they throw "cannot run inside an event handler".
   "postNativeEvent",
+  "postNativeKeys",
+  "pumpNativeEvents",
   "tick",
 ])
+
+/** The editing calls need the editing host focused with the caret in it, which the calls before them may have moved. */
+function placeCaretInEditor() {
+  const host = document.body.querySelector("[contenteditable]")
+  host.focus()
+  document.getSelection().collapse(host.firstChild, 1)
+}
 
 function calls(r, ids) {
   return {
@@ -148,9 +160,15 @@ function calls(r, ids) {
     getNativeviewWarnings: () => r.getNativeviewWarnings(ids.nativeview),
     getMotionValueVelocity: () => r.getMotionValueVelocity(910),
     getPaintedFrameCount: () => r.getPaintedFrameCount(),
+    getInputMethodBounds: () => r.getInputMethodBounds(ids.box, 0, 0),
+    getInputMethodIndexAtPoint: () => r.getInputMethodIndexAtPoint(ids.box, 1, 1),
     getPaintedHighlights: () => r.getPaintedHighlights(),
+    getPaintedNodeSelection: () => r.getPaintedNodeSelection(),
     getPaintedText: () => r.getPaintedText(),
     getRetainMismatches: () => r.getRetainMismatches(),
+    getTextRangeRects: () => r.getTextRangeRects(ids.box, 0, ids.box, 0),
+    caretPositionFromPoint: () => r.caretPositionFromPoint(1, 1),
+    moveCaretVisually: () => r.moveCaretVisually(ids.box, 0, "lineEnd"),
     getRetainedElementCount: () => r.getRetainedElementCount(),
     getRoot: () => r.getRoot(),
     getScrollMetrics: () => r.getScrollMetrics(ids.scroller),
@@ -183,7 +201,7 @@ function calls(r, ids) {
     matchesFocus: () => r.matchesFocus(ids.field, ":focus"),
     pointerLockElement: () => r.pointerLockElement(),
     probeElementBounds: () => r.probeElementBounds(ids.box),
-    readClipboardText: () => r.readClipboardText(),
+    readClipboard: () => r.readClipboard(),
     registerFont: () => r.registerFont(SQUARE_FONT),
     releaseAnimation: () => r.releaseAnimation(r.getAnimations(ids.box)[0].id),
     releasePointerCapture: () => r.releasePointerCapture(ids.box, 1),
@@ -221,6 +239,7 @@ function calls(r, ids) {
     setTextLeafEnabled: () => r.setTextLeafEnabled(true),
     setStyleCache: () => r.setStyleCache("on"),
     getRegistrySlots: () => r.getRegistrySlots(),
+    keyEventPending: () => r.keyEventPending(),
     setRetainLift: () => r.setRetainLift(["svg"]),
     setRetainPlanning: () => r.setRetainPlanning(true),
     setRetainEnabled: () => r.setRetainEnabled(true),
@@ -237,6 +256,15 @@ function calls(r, ids) {
     setWindowTitle: () => r.setWindowTitle("handler-calls"),
     setWindowMediaChange: () => r.setWindowMediaChange(false),
     setWindowSelectionChange: () => r.setWindowSelectionChange(false, 1),
+    setYieldAfterKeyEvent: () => r.setYieldAfterKeyEvent(true),
+    simulateEditingComposition: () => {
+      placeCaretInEditor()
+      r.simulateEditingComposition([{ action: "mark", text: "a" }, { action: "unmark" }])
+    },
+    simulateEditingInput: () => {
+      placeCaretInEditor()
+      r.simulateEditingInput("insertText", "x")
+    },
     simulateLostMouseUp: () => r.simulateLostMouseUp(),
     simulatePointerLockGranting: () => r.simulatePointerLockGranting(true),
     simulatePointerLockLost: () => r.simulatePointerLockLost(),
@@ -248,7 +276,7 @@ function calls(r, ids) {
     webviewState: () => r.webviewState(ids.webview),
     takeSimulatedWindowActions: () => r.takeSimulatedWindowActions(),
     toJSON: () => r.toJSON(),
-    writeClipboardText: () => r.writeClipboardText("x"),
+    writeClipboard: () => r.writeClipboard([{ type: "text/plain", data: "x" }]),
     writeInputFlag: () => r.writeInputFlag(ids.check, "indeterminate", true),
     writeRangeValue: () => r.writeRangeValue(ids.range, "5"),
     // Last: a cancelled animation is not listed, which the calls above read.
@@ -303,6 +331,7 @@ describeNative("renderer calls from a sync handler", () => {
             <form testId="form">
               <input testId="field" defaultValue="hi" style={{ width: 100, height: 20 }} onKeyDown={on === "keydown" ? run : undefined} />
             </form>
+            <div contentEditable style={{ width: 100, height: 20 }}>hi</div>
             <input testId="check" type="checkbox" />
             <input testId="range" type="range" />
             <img testId="img" style={{ width: 10, height: 10 }} />
@@ -322,6 +351,7 @@ describeNative("renderer calls from a sync handler", () => {
         expect(failures).toEqual([])
         expect(ran.length).toBeGreaterThan(80)
       } finally {
+        document.getSelection().collapse(null)
         unmount()
       }
     })

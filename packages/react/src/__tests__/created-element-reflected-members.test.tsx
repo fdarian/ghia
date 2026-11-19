@@ -1,4 +1,4 @@
-/** The members of an element made by `document.createElement`: `hidden`, `tabIndex`, `isContentEditable`, `shadowRoot` and `assignedSlot`. */
+/** The members of an element made by `document.createElement`: `hidden`, `tabIndex`, `contentEditable`, `isContentEditable`, `shadowRoot` and `assignedSlot`. */
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { document } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
@@ -80,10 +80,13 @@ describeNative("tabIndex", () => {
   })
 })
 
-describeNative("isContentEditable, shadowRoot and assignedSlot", () => {
-  it("are what an element with no contenteditable and no shadow DOM has", () => {
+describeNative("contentEditable, isContentEditable, shadowRoot and assignedSlot", () => {
+  it("are what the attribute and no shadow DOM give", () => {
     const element = make("div", { contenteditable: "true" })
-    expect(element.isContentEditable, "Ghia has no contenteditable").toBe(false)
+    expect(element.isContentEditable).toBe(true)
+    expect(element.contentEditable).toBe("true")
+    expect(element.tabIndex).toBe(0)
+    expect(make("div").isContentEditable).toBe(false)
     expect(element.shadowRoot).toBeNull()
     expect(element.assignedSlot).toBeNull()
   })

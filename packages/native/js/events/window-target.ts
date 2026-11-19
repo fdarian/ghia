@@ -1,9 +1,14 @@
 import type { EventPayload } from "../../index.js"
+import type { FocusableElement } from "../focus.js"
 import type { Animation } from "../web-animations.js"
 import { isElementType, isSvgElementType } from "../dom/element-types.js"
-import { Document, DOM_BINDING, registerDocument, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
+import { Document, DOM_BINDING, registerDocument, type DocumentFragment, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
 import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
-import { getSelection, type Selection } from "../dom/selection.js"
+import { Range } from "../dom/range.js"
+import { createCaretPosition, type CaretPosition } from "../editing/caret-position.js"
+import { documentCommands } from "../editing/document-commands.js"
+import { caretFromPoint, setElementLookup } from "../editing/geometry.js"
+import { getSelection, holdsNodeSelection, setSelectionHooks, type Selection } from "../dom/selection.js"
 import { bumpTreeVersion } from "../dom/tree-version.js"
 import { createTreeWalker, type NodeFilterLike, type TreeWalker } from "../dom/tree-walker.js"
 import { mountedRenderer } from "../mounted-renderer.js"
@@ -171,6 +176,8 @@ export type DomNodeFactory = {
   /** `type` is one of the element types, as written: `isElementType` has checked it. */
   createElement(type: string): object
   createTextNode(data: string): Text
+  /** An empty `DocumentFragment`: never mounted, it holds children through the same mirror an element does. */
+  createDocumentFragment(): object
 }
 
 /** The elements every window root is made of: `html`, with `head` and `body` in it, the latter holding the app. */
@@ -186,6 +193,8 @@ type ElementSourceEntry = {
   windowGone: boolean
   /** Order in which the roots last heard a focus event; higher is more recent. */
   focusedAt: number
+  /** The element the last `focusin` named, until its `focusout`: what `document.activeElement` answers without asking native. */
+  focused: object | null
 }
 
 /**
@@ -311,6 +320,31 @@ export class GpuixDocument<Element = unknown> extends Document {
     return DOCUMENT_BINDING
   }
 
+  private executingCommand = false
+
+  /**
+   * Runs `copy`, `cut` or `selectAll` as the Edit menu does, and returns whether it did; `paste`
+   * and every other command return false and do nothing (docs/fork/deviations.md). A call made while
+   * another runs (from the `copy` event it fires) returns false and does nothing, as Chrome's does.
+   */
+  execCommand(commandId: string, _showUI?: boolean, _value?: string): boolean {
+    if (this.executingCommand) return false
+    this.executingCommand = true
+    try {
+      return documentCommands().exec(String(commandId))
+    } finally {
+      this.executingCommand = false
+    }
+  }
+
+  queryCommandSupported(commandId: string): boolean {
+    return documentCommands().supported(String(commandId))
+  }
+
+  queryCommandEnabled(commandId: string): boolean {
+    return documentCommands().enabled(String(commandId))
+  }
+
   /** The constructed sheets that apply to every window of the app, in order; later ones win. */
   get adoptedStyleSheets(): CSSStyleSheet[] {
     return getAdoptedStyleSheets()
@@ -402,6 +436,25 @@ export class GpuixDocument<Element = unknown> extends Document {
     return currentNodeFactory("createTextNode").createTextNode(String(data))
   }
 
+  /** A new empty `DocumentFragment` of the window that mounted last. */
+  createDocumentFragment(): DocumentFragment {
+    return currentNodeFactory("createDocumentFragment").createDocumentFragment() as DocumentFragment
+  }
+
+  /** A new `Range` collapsed at the start of the document: `(document, 0)`. */
+  createRange(): Range {
+    return new Range()
+  }
+
+  /**
+   * Whether a window of the app is open. Native does not tell JS which window is the key one, so
+   * the document of an app with a window is taken to have focus.
+   */
+  hasFocus(): boolean {
+    for (const entry of elementSources.values()) if (!entry.windowGone) return true
+    return false
+  }
+
   /** A `TreeWalker` over `root`, standing on `root`, as `document.createTreeWalker` does: `whatToShow` is every node by default. */
   createTreeWalker(root: Node, whatToShow?: number, filter: NodeFilterLike | null = null): TreeWalker {
     return createTreeWalker(root, whatToShow, filter)
@@ -459,6 +512,27 @@ export class GpuixDocument<Element = unknown> extends Document {
   /** The topmost of `elementsFromPoint`, or `null` for a point outside the window. */
   elementFromPoint(x: number, y: number): Element | null {
     return this.elementsFromPoint(x, y)[0] ?? null
+  }
+
+  /**
+   * The place in a Text node at the point `(x, y)` of the window that mounted last, in CSS pixels from
+   * its top left corner: the text under the point, or the nearest painted text, and the offset of the
+   * character boundary nearest to it. `null` when no text is painted. A point over no text still
+   * answers, with the nearest one (deviations.md).
+   */
+  caretPositionFromPoint(x: number, y: number, _options?: unknown): CaretPosition | null {
+    const found = caretFromPoint(finiteCoordinate(x, "x"), finiteCoordinate(y, "y"))
+    return found === null ? null : createCaretPosition(found.node, found.offset)
+  }
+
+  /** `caretPositionFromPoint` as a collapsed `Range`. */
+  caretRangeFromPoint(x: number, y: number): Range | null {
+    const found = caretFromPoint(finiteCoordinate(x, "x"), finiteCoordinate(y, "y"))
+    if (found === null) return null
+    const range = new Range()
+    range.setStart(found.node, found.offset)
+    range.collapse(true)
+    return range
   }
 
   /** The text selection of the window that mounted last. */
@@ -552,6 +626,19 @@ export function subscribeWindowEventTypes(listener: () => void): () => void {
 export const window = new GpuixEventTarget(notifyTypeSubscribers, globalThis)
 export const document = new GpuixDocument(notifyTypeSubscribers)
 registerDocument(document)
+setSelectionHooks({
+  listens: () => listensForSelectionChange(),
+  dispatch: () => {
+    document.dispatchEvent(new Event("selectionchange"))
+  },
+  heldChanged: notifyTypeSubscribers,
+  focusHost: (host) => {
+    for (const entry of elementSources.values()) {
+      if (!entry.windowGone && entry.focused !== null && host.contains(entry.focused as Node)) return
+    }
+    ;(host as unknown as FocusableElement).focus({ preventScroll: true })
+  },
+})
 
 /**
  * Lets the runtime see the elements of the root that drives `renderer`, through
@@ -581,6 +668,7 @@ export function installElementSource(
     },
     windowGone: false,
     focusedAt: 0,
+    focused: null,
   }
   const firstRoot = elementSources.size === 0
   elementSources.set(renderer, entry)
@@ -629,10 +717,23 @@ export function elementOf(renderer: object, id: number): object | undefined {
   return entry.source.elementById(id)
 }
 
+setElementLookup(elementOf)
+
 /** @internal Records that `owner`'s window just moved focus, for the tie-break of `activeElement`. */
 export function noteFocusEvent(owner: object): void {
   const entry = elementSources.get(owner)
   if (entry) entry.focusedAt = ++focusClock
+}
+
+/**
+ * @internal Follows the focus events native reports, so a question of "is focus inside this element" (the selection
+ * entering an editing host asks it on every change) is a read of JS state and no native query.
+ */
+export function trackFocusedElement(owner: object, eventType: "focusin" | "focusout", element: object | undefined): void {
+  const entry = elementSources.get(owner)
+  if (entry === undefined) return
+  if (eventType === "focusin") entry.focused = element ?? null
+  else if (entry.focused === element) entry.focused = null
 }
 
 /**
@@ -663,8 +764,16 @@ export function listensForSelectionChange(): boolean {
 }
 
 /**
+ * Whether native's `selectionChange` is wanted: for a listener, and while a node selection is held,
+ * which painted text that the user selects replaces.
+ */
+export function wantsNativeSelectionChange(): boolean {
+  return listensForSelectionChange() || holdsNodeSelection()
+}
+
+/**
  * Keeps the renderer's `selectionChange` event on while `rootListens()` says the root wants it or a
- * `selectionchange` listener exists on `window` or `document`. `resync` after `rootListens` may
+ * `selectionchange` listener exists on `window` or `document`, or a node selection is held. `resync` after `rootListens` may
  * have changed; `stop` turns it off. Native names the window's event with `eventId`.
  */
 export function syncWindowSelectionChange(
@@ -673,7 +782,7 @@ export function syncWindowSelectionChange(
   rootListens: () => boolean
 ): { resync: () => void; stop: () => void } {
   const resync = () => {
-    renderer.setWindowSelectionChange?.(rootListens() || listensForSelectionChange(), eventId)
+    renderer.setWindowSelectionChange?.(rootListens() || wantsNativeSelectionChange(), eventId)
   }
   resync()
   typeSubscribers.add(resync)

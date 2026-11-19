@@ -3,6 +3,7 @@ import type { NativeRenderer } from "../host.js"
 import type { InputChoiceState } from "../../index.js"
 import { namedError } from "../named-error.js"
 import { attributeText, inputAttributeValue, inputValueIsAttribute } from "./attribute-names.js"
+import { isListItem, readListItemValue, writeListItemValue } from "./list-members.js"
 import { requiredWriter } from "./renderer-writer.js"
 import { onTags } from "./tag-members.js"
 
@@ -144,6 +145,27 @@ function stepBy<This extends object>(self: This, bind: (self: This) => InputBind
 }
 
 /**
+ * `value` of an `<li>` is the number its marker shows (`HTMLLIElement.value`), which the member of the text controls
+ * would make a plain property of.
+ */
+function withListItemValue(target: object): void {
+  const text = Object.getOwnPropertyDescriptor(target, "value")
+  if (text?.get === undefined || text.set === undefined) throw new Error("withListItemValue runs after the value member is defined")
+  const read = text.get
+  const write = text.set
+  Object.defineProperty(target, "value", {
+    configurable: true,
+    get(this: object) {
+      return isListItem(this) ? readListItemValue(this) : read.call(this)
+    },
+    set(this: object, value: unknown) {
+      if (isListItem(this)) writeListItemValue(this, value)
+      else write.call(this, value)
+    },
+  })
+}
+
+/**
  * Defines `checked`, `defaultChecked`, `indeterminate`, `value` and `defaultValue` on `target`, which is the
  * prototype of an adapter's host elements. On anything but an `<input>` (`<textarea>` for `value`) they
  * read `undefined` and an assignment makes an own property, so no other element changes.
@@ -256,4 +278,5 @@ export function defineInputMembers<This extends object>(target: object, bind: (s
       }
     ),
   })
+  withListItemValue(target)
 }

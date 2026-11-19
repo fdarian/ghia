@@ -32,7 +32,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use web_time::Instant;
 
-use super::svg_names::{self, ATTRIBUTES, COLOUR_ATTRIBUTES, MARKER_ATTRIBUTES, MARKER_SHORTHAND};
+use super::svg_names::{self, ATTRIBUTES, COLOUR_ATTRIBUTES, MARKER_ATTRIBUTES, MARKER_SHORTHAND, XLINK_HREF};
 use super::svg_path::{
     circle_length, ellipse_length, format_number, line_length, polyline_length, rect_length,
     PathData,
@@ -489,7 +489,8 @@ fn escape_into(value: &str, xml: &mut String) {
 fn attributes(node: &Node, colors: &ColorContext) -> Vec<(&'static str, String)> {
     let mut written: Vec<(&'static str, String)> = Vec::new();
     for (prop, attribute) in ATTRIBUTES {
-        if let Some(text) = node.props.get(*prop).and_then(attribute_text) {
+        // Solid and the DOM write the attribute itself (`stroke-width`), React the camelCase prop.
+        if let Some(text) = node.props.get(*prop).or_else(|| node.props.get(*attribute)).and_then(attribute_text) {
             let text = if COLOUR_ATTRIBUTES.contains(attribute) {
                 resolve_paint(text, colors)
             } else {
@@ -499,14 +500,23 @@ fn attributes(node: &Node, colors: &ColorContext) -> Vec<(&'static str, String)>
         }
     }
     if let Some(shorthand) = node.props.get(MARKER_SHORTHAND).and_then(attribute_text) {
-        for (prop, attribute) in MARKER_ATTRIBUTES {
-            if !node.props.contains_key(prop) {
+        // The longhands were written above under either name, and win over the shorthand.
+        for (_, attribute) in MARKER_ATTRIBUTES {
+            if !written.iter().any(|(name, _)| *name == attribute) {
                 written.push((attribute, shorthand.clone()));
             }
         }
     }
+    // `href` was written above when the node has one, and wins over the XLink spelling, as in SVG 2.
+    for name in XLINK_HREF {
+        if let Some(text) = node.props.get(name).and_then(attribute_text) {
+            if !written.iter().any(|(attribute, _)| *attribute == "href") {
+                written.push(("href", text));
+            }
+        }
+    }
     for key in node.props.keys() {
-        let known = key == MARKER_SHORTHAND || ATTRIBUTES.iter().any(|(prop, _)| prop == key);
+        let known = key == MARKER_SHORTHAND || XLINK_HREF.contains(&key.as_str()) || ATTRIBUTES.iter().any(|(prop, attribute)| prop == key || attribute == key);
         let host = HOST_PROPS.contains(&key.as_str()) || key == "testId" || key == "autoFocus";
         if !known && !host {
             log::warn!("<{}> has no SVG attribute for the prop {key:?}", node.tag);
@@ -791,6 +801,24 @@ mod tests {
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\">\
              <path d=\"M0 0L10 10\" fill-opacity=\"0.5\" stroke-width=\"2\" stroke-linecap=\"round\" \
              stroke-dasharray=\"4 2\" transform=\"rotate(45 12 12)\"/></svg>"
+        );
+    }
+
+    #[test]
+    fn the_kebab_case_attribute_names_solid_writes_are_attributes_too() {
+        let svg = props(&[("viewBox", "0 0 24 24".into()), ("width", 24.into())]);
+        let path = props(&[
+            ("d", "M0 0L10 10".into()),
+            ("stroke-width", 2.into()),
+            ("stroke-linecap", "round".into()),
+            ("fill-opacity", 0.5.into()),
+            ("strokeWidth", 3.into()),
+        ]);
+        let xml = serialize(&node("svg", &svg, vec![node("path", &path, vec![])]));
+        assert_eq!(
+            xml,
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\">\
+             <path d=\"M0 0L10 10\" fill-opacity=\"0.5\" stroke-width=\"3\" stroke-linecap=\"round\"/></svg>"
         );
     }
 
@@ -1152,6 +1180,28 @@ mod tests {
         assert_eq!(raster.at(18.0, 10.0), [0, 255, 0, 255], "the dot sits on the path end");
         assert_eq!(raster.at(10.0, 10.0)[2], 255, "the line itself");
         assert!(!raster.painted(25.0, 10.0), "nothing past the dot");
+    }
+
+    #[test]
+    fn the_marker_shorthand_yields_to_longhands_written_in_either_spelling() {
+        let path = props(&[("d", "M0 0L9 9".into()), ("marker", "url(#d)".into()), ("marker-end", "url(#a)".into())]);
+        let xml = serialize(&node("svg", &HashMap::new(), vec![node("path", &path, vec![])]));
+        assert!(xml.contains("marker-end=\"url(#a)\""), "{xml}");
+        assert!(xml.contains("marker-start=\"url(#d)\""), "{xml}");
+        assert!(xml.contains("marker-mid=\"url(#d)\""), "{xml}");
+        assert_eq!(xml.matches("marker-end").count(), 1, "{xml}");
+    }
+
+    #[test]
+    fn an_xlink_href_is_written_as_href() {
+        for name in ["xlinkHref", "xlink:href"] {
+            let used = props(&[(name, "#icon".into())]);
+            let xml = serialize(&node("svg", &HashMap::new(), vec![node("use", &used, vec![])]));
+            assert!(xml.contains("<use href=\"#icon\"/>"), "{name}: {xml}");
+        }
+        let both = props(&[("xlinkHref", "#old".into()), ("href", "#new".into())]);
+        let xml = serialize(&node("svg", &HashMap::new(), vec![node("use", &both, vec![])]));
+        assert!(xml.contains("<use href=\"#new\"/>"), "{xml}");
     }
 
     #[test]

@@ -69,7 +69,7 @@ impl RowBox {
         let height = px(style.height.as_ref()?)?;
         let width = match style.width.as_ref() {
             // A flex or grid container with no width is as wide as its content when it is a root.
-            None | Some(DimensionValue::Auto) if matches!(style.display.as_deref(), None | Some("block" | "flow-root")) => {
+            None | Some(DimensionValue::Auto) if matches!(crate::layout::display::as_block(style.display.as_deref()), None | Some("block" | "flow-root")) => {
                 let margins = style.margin_below_longhands();
                 let side = |longhand: &Option<DimensionValue>, shorthand: &Option<DimensionValue>| {
                     longhand.as_ref().or(shorthand.as_ref()).map_or(Some(0.0), px)
@@ -125,7 +125,7 @@ fn px(value: &DimensionValue) -> Option<f32> {
 /// known until the row is built, and any of them may be a bound, the display or the padding.
 fn declares_the_box_alone(style: &StyleDesc) -> bool {
     let unbounded = |value: &Option<DimensionValue>| matches!(value, None | Some(DimensionValue::Auto));
-    matches!(style.display.as_deref(), None | Some("block" | "flex" | "grid" | "flow-root"))
+    matches!(crate::layout::display::as_block(style.display.as_deref()), None | Some("block" | "flex" | "grid" | "flow-root"))
         && matches!(style.position.as_deref(), None | Some("relative" | "static"))
         && unbounded(&style.min_width)
         && unbounded(&style.max_width)

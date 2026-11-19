@@ -88,7 +88,7 @@ pub(crate) fn read_in_window(
         .root::<GpuixView>()
         .flatten()
         .ok_or_else(|| Error::from_reason("the window has no view to read a style from"))?;
-    Ok(view.update(cx, |view, _cx| view.computed_style(id, pseudo_element, &boxes, window)))
+    Ok(view.update(cx, |view, cx| view.computed_style(id, pseudo_element, &boxes, window, cx)))
 }
 
 /// The values of every property of the set for element `id`, or `None` when it is not in the

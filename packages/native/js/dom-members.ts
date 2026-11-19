@@ -160,7 +160,7 @@ function propKeyForAttribute(bound: DomElementBinding, attribute: string, svg: b
 }
 
 /** The DOM rejects an empty name and one with a space, a slash, `>`, `=` or NUL. */
-const INVALID_NAME = /[\s\0/>=]|^$/
+export const INVALID_NAME = /[\s\0/>=]|^$/
 
 /** The prop of `<input>` that stands for the `checked` or `value` attribute, when it is not the prop of that name. */
 function defaultPropOf(element: Element, bound: DomElementBinding, attribute: string): "defaultChecked" | "defaultValue" | undefined {

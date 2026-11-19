@@ -1,4 +1,5 @@
 import type { EventPayload } from "../../index.js"
+import { flushPendingMutations } from "../bounds.js"
 import type { KeyEvent, NativeRenderer } from "../host.js"
 import type { ActiveRoot, DismissLayer } from "../renderer-state.js"
 import {
@@ -14,6 +15,9 @@ import {
   type PublicEventFields,
   type RootEvent,
 } from "./dispatch.js"
+import { paintedSelectionTookOver } from "../dom/selection.js"
+import { focusedEditingHost, runEditingInput } from "../editing/input.js"
+import { runKeyBinding } from "../editing/key-moves.js"
 import { scrollKeyName } from "../scroll.js"
 import { moveFocusByTab } from "../focus.js"
 import { isDragEvent } from "./drag.js"
@@ -24,6 +28,7 @@ import {
   document,
   isDocumentEvent,
   listensForSelectionChange,
+  wantsNativeSelectionChange,
   window,
 } from "./window-target.js"
 
@@ -63,7 +68,7 @@ export function handlesEvent(root: ActiveRoot, event: EventPayload): boolean {
   if (event.eventType === "selectionChange") {
     return (
       event.elementId === root.windowSelectionEventId &&
-      (Boolean(root.handlers.onSelectionChange) || listensForSelectionChange())
+      (Boolean(root.handlers.onSelectionChange) || wantsNativeSelectionChange())
     )
   }
   if (event.eventType === "appearanceChange") {
@@ -113,6 +118,8 @@ export function runRootEvent(
   context: RootEventContext
 ): DomDispatchResult {
   if (event.eventType === "selectionChange") {
+    // `value` is the painted text, absent after a clear: a clear is not a replacement of a node selection.
+    if (event.value != null) paintedSelectionTookOver()
     root.handlers.onSelectionChange?.(windowLevelEvent(root, event), context.renderer)
     if (listensForSelectionChange()) dispatchSelectionChange(root, event)
     return notHandled
@@ -146,15 +153,43 @@ export function runRootEvent(
   }
   const { event: domEvent, ...result } = dispatchPropagating(root, event, root.scoped)
   if (event.eventType === "keydown" && !result.defaultPrevented) {
-    runKeyDefault(root, domEvent, context)
+    return { ...result, handled: runKeyDefault(root, domEvent, context) }
   }
   return result
 }
 
+/**
+ * The edit a key makes in an editing host as its own default action: a paragraph or line break and the
+ * deletions. A key that types text is not here: native gives the text to the host through the platform's
+ * input handler, which is where the input method, dead keys and the emoji picker come in too.
+ */
+function editingInputOf(key: string | undefined, shift: boolean): string | undefined {
+  if (key === "Enter") return shift ? "insertLineBreak" : "insertParagraph"
+  if (key === "Backspace") return "deleteContentBackward"
+  if (key === "Delete") return "deleteContentForward"
+  return undefined
+}
+
+/** Whether the key was an edit of an editing host: native then keeps the platform from typing it. */
+function editInEditingHost(event: DomEvent): boolean {
+  // A key the input method is composing with is the input method's: what it does with the key is the edit.
+  if (event.isComposing) return false
+  const inputType = editingInputOf(event.key, Boolean(event.modifiers?.shift))
+  if (inputType === undefined) return false
+  if (focusedEditingHost() === null) return false
+  return runEditingInput(inputType, null).handled
+}
+
 // The default actions of a key run after every handler had the chance to
 // call preventDefault().
-function runKeyDefault(root: ActiveRoot, event: DomEvent, context: RootEventContext) {
-  if (hasCommandModifier(event)) return
+function runKeyDefault(root: ActiveRoot, event: DomEvent, context: RootEventContext): boolean {
+  const performed = runKeyBinding(event) || (!hasCommandModifier(event) && editInEditingHost(event))
+  if (performed) {
+    // The next thing the platform asks (the selection, the next key's insert) reads the new tree.
+    flushPendingMutations(context.renderer)
+    return true
+  }
+  if (hasCommandModifier(event)) return false
   if (event.key === "Escape") {
     context.topLayer()?.onEscapeKeyDown(event as KeyEvent)
   } else if (event.key === "Tab" && root.handlers.tabNavigation !== false) {
@@ -163,4 +198,5 @@ function runKeyDefault(root: ActiveRoot, event: DomEvent, context: RootEventCont
     const scrollKey = scrollKeyName(event.key)
     if (scrollKey) context.renderer.scrollByKey?.(scrollKey, Boolean(event.modifiers?.shift))
   }
+  return false
 }

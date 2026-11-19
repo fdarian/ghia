@@ -1,3 +1,4 @@
+import type { DataTransfer, DropEffect, EffectAllowed, FileListLike } from "../dom/data-transfer.js"
 import type { RootEvent } from "./dispatch.js"
 
 /** One entry of `DataTransfer.files`. Filled in by native on file drags. */
@@ -10,40 +11,21 @@ export type HostFile = {
   lastModified: number
 }
 
-export type HostDropEffect = "none" | "copy" | "link" | "move"
+export type HostDropEffect = DropEffect
 
-export type HostEffectAllowed =
-  | "none"
-  | "copy"
-  | "copyLink"
-  | "copyMove"
-  | "link"
-  | "linkMove"
-  | "move"
-  | "all"
-  | "uninitialized"
+export type HostEffectAllowed = EffectAllowed
 
 /**
- * The data of one drag, shared by every event of it. DOM protected mode
- * applies: `getData` returns `""` and `setData` does nothing except in
- * `dragstart` (where both work) and `drop` (where only `getData` does).
+ * The data of one drag, shared by every event of it: an instance of the global `DataTransfer`.
+ * DOM protected mode applies: `getData` returns `""` and `setData` does nothing except in
+ * `dragstart` (where both work) and `drop` (where only `getData` does). `dropEffect` is what the
+ * drop will do: a `dragover` handler picks it, it must be allowed by `effectAllowed` and not
+ * `"none"` for the drop to be delivered, and in `dragend` it is what the drop did, `"none"` when
+ * nothing was dropped. `effectAllowed` is writable in `dragstart` only. `files` are the files of
+ * a drag from the OS, with the fields of `HostFile`.
  */
-export type HostDataTransfer = {
-  /**
-   * What the drop will do. A `dragover` handler picks it; it must be allowed
-   * by `effectAllowed` and not `"none"` for the drop to be delivered. In
-   * `dragend` it is what the drop did, `"none"` when nothing was dropped.
-   */
-  dropEffect: HostDropEffect
-  /** What the source allows. Writable in `dragstart` only. */
-  effectAllowed: HostEffectAllowed
-  readonly files: readonly HostFile[]
-  readonly types: readonly string[]
-  getData(format: string): string
-  setData(format: string, data: string): void
-  clearData(format?: string): void
-  /** Accepted and ignored: there is no drag image. */
-  setDragImage(element: unknown, x: number, y: number): void
+export type HostDataTransfer = Omit<DataTransfer, "files"> & {
+  readonly files: FileListLike<HostFile>
 }
 
 /**
@@ -303,6 +285,22 @@ export interface CompositionEventHandlerProps {
   onCompositionEnd?: (event: HostCompositionEvent) => void
 }
 
+/**
+ * `copy`, `cut` and `paste`: the user copied, cut or pasted. They bubble from the focused element
+ * (`target`) and can be cancelled, which stops the default. `clipboardData` is a `DataTransfer`:
+ * writable in `copy` and `cut`, where what a handler sets replaces the default, readable in
+ * `paste`.
+ */
+export interface HostClipboardEvent extends HostDomEvent {
+  readonly clipboardData: DataTransfer | null
+}
+
+export interface ClipboardEventHandlerProps {
+  onCopy?: (event: HostClipboardEvent) => void
+  onCut?: (event: HostClipboardEvent) => void
+  onPaste?: (event: HostClipboardEvent) => void
+}
+
 type CaptureProps<Props> = {
   [Name in keyof Props & string as `${Name}Capture`]: Props[Name]
 }
@@ -318,6 +316,10 @@ export type AnimationEventProps = AnimationEventHandlerProps &
 /** The `content-visibility` handler, plus its capture-phase `on…Capture` twin. */
 export type ContentVisibilityEventProps = ContentVisibilityEventHandlerProps &
   Partial<CaptureProps<ContentVisibilityEventHandlerProps>>
+
+/** Each clipboard handler, plus its capture-phase `on…Capture` twin. */
+export type ClipboardEventProps = ClipboardEventHandlerProps &
+  Partial<CaptureProps<ClipboardEventHandlerProps>>
 
 /** Each composition handler, plus its capture-phase `on…Capture` twin. */
 export type CompositionEventProps = CompositionEventHandlerProps &

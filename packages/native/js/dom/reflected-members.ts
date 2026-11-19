@@ -1,12 +1,14 @@
 /**
  * The members of an element that are its attributes under another name or a fixed answer:
- * `hidden`, `tabIndex`, `disabled`, `htmlFor`, `type`, `isContentEditable`, `shadowRoot` and `assignedSlot`. They read and write
+ * `hidden`, `tabIndex`, `disabled`, `htmlFor`, `type`, `contentEditable`, `isContentEditable`, `shadowRoot` and `assignedSlot`, and the `start` and `reversed` of an `<ol>` (`list-members.ts`). They read and write
  * through `getAttribute` and `setAttribute`, so they follow a prop a framework committed and
  * a write reaches native as the attribute would.
  */
 
+import { contentEditableKeyword, isContentEditable, isEditingHost, ownContentEditable } from "../editing/host.js"
 import { normalizedInputType } from "./input-type.js"
 import type { Element } from "./nodes.js"
+import { defineListMembers, parseHtmlInteger } from "./list-members.js"
 import { onTags } from "./tag-members.js"
 
 /** The tags whose `tabIndex` is 0 without an attribute, from the HTML standard. Ghia's own `select` is one. */
@@ -31,17 +33,6 @@ const TYPED_TAGS: ReadonlySet<string> = new Set(["button", "input", "textarea"])
 
 const BUTTON_TYPES: ReadonlySet<string> = new Set(["submit", "reset", "button"])
 
-/** The DOM's "rules for parsing integers": leading white space, a sign, digits, and anything after them ignored. */
-const LEADING_INTEGER = /^[ \t\n\f\r]*([+-]?\d+)/
-const INT32_MAX = 2147483647
-
-function parseTabIndex(text: string): number | undefined {
-  const match = LEADING_INTEGER.exec(text)
-  if (match === null) return undefined
-  const value = Number(match[1])
-  return value >= -INT32_MAX - 1 && value <= INT32_MAX ? value : undefined
-}
-
 /** A `summary` that is the first one in its `details` is a tab stop. */
 function isMainSummary(element: Element): boolean {
   const parent = element.parentElement
@@ -51,7 +42,7 @@ function isMainSummary(element: Element): boolean {
 export interface ReflectedMembers {
   /** The `hidden` attribute. `"until-found"` reads back as that text, and any other value of the attribute is `true`. */
   hidden: boolean | "until-found"
-  /** The `tabindex` attribute as an integer, or the tag's default: 0 for a control, a link and the like, -1 for the rest. */
+  /** The `tabindex` attribute as an integer, or the tag's default: 0 for a control, a link, an editing host and the like, -1 for the rest. */
   tabIndex: number
   /** The `disabled` attribute of a button, input, select, textarea, fieldset, optgroup or option; `undefined` on any other element. */
   disabled: boolean
@@ -62,8 +53,14 @@ export interface ReflectedMembers {
    * unless it is `reset` or `button`); `"textarea"` on a `<textarea>`, which is read-only. `undefined` on any other element.
    */
   type: string
-  /** Always `false`: Ghia has no `contenteditable`. */
+  /** The `contenteditable` attribute as the DOM reflects it: `"true"`, `"false"`, `"plaintext-only"`, or `"inherit"` without a valid one. Assigning `"inherit"` removes the attribute and any other text that is not a keyword throws a `SyntaxError`. */
+  contentEditable: string
+  /** Whether the element is editable, by its own `contenteditable` or the nearest ancestor's. */
   readonly isContentEditable: boolean
+  /** The `start` attribute of an `<ol>` as an integer, `1` without a valid one; `undefined` on any other element. */
+  start: number
+  /** The `reversed` attribute of an `<ol>`; `undefined` on any other element. */
+  reversed: boolean
   /** Always `null`: there is no shadow DOM. */
   readonly shadowRoot: null
   /** Always `null`: there are no slots. */
@@ -72,6 +69,7 @@ export interface ReflectedMembers {
 
 /** Defines the members on `target`, which is the prototype of `Element`. */
 export function defineReflectedMembers(target: object): void {
+  defineListMembers(target)
   Object.defineProperties(target, {
     hidden: {
       configurable: true,
@@ -91,10 +89,10 @@ export function defineReflectedMembers(target: object): void {
       get(this: Element) {
         const text = this.getAttribute("tabindex")
         if (text !== null) {
-          const parsed = parseTabIndex(text)
+          const parsed = parseHtmlInteger(text)
           if (parsed !== undefined) return parsed
         }
-        return FOCUSABLE_TAGS.has(this.localName) || isMainSummary(this) ? 0 : -1
+        return FOCUSABLE_TAGS.has(this.localName) || isMainSummary(this) || isEditingHost(this) ? 0 : -1
       },
       set(this: Element, value: unknown) {
         const number = Math.trunc(Number(value))
@@ -127,7 +125,30 @@ export function defineReflectedMembers(target: object): void {
         element.setAttribute("type", String(value))
       }
     ),
-    isContentEditable: { configurable: true, get: () => false },
+    contentEditable: {
+      configurable: true,
+      get(this: Element) {
+        return ownContentEditable(this) ?? "inherit"
+      },
+      set(this: Element, value: unknown) {
+        const text = String(value)
+        if (text.toLowerCase() === "inherit") {
+          this.removeAttribute("contenteditable")
+          return
+        }
+        const keyword = contentEditableKeyword(text)
+        if (keyword === undefined) {
+          throw new DOMException("Failed to set the 'contentEditable' property on 'HTMLElement': The value provided ('" + text + "') is not one of 'true', 'false', 'plaintext-only', or 'inherit'.", "SyntaxError")
+        }
+        this.setAttribute("contenteditable", keyword)
+      },
+    },
+    isContentEditable: {
+      configurable: true,
+      get(this: Element) {
+        return isContentEditable(this)
+      },
+    },
     shadowRoot: { configurable: true, get: () => null },
     assignedSlot: { configurable: true, get: () => null },
   })

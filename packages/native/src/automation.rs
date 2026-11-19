@@ -284,6 +284,16 @@ pub(crate) fn window_point_in(to_window: &TransformationMatrix, position: Point<
     Some(point(px(x as f32), px(y as f32)))
 }
 
+/// The window point that `local`, a point in the space `to_window` maps into the window, is at, or
+/// `None` where the matrix puts it at the horizon or behind the eye.
+pub(crate) fn window_point_from(to_window: &TransformationMatrix, local: Point<Pixels>) -> Option<Point<Pixels>> {
+    if to_window.is_identity() {
+        return Some(local);
+    }
+    let (x, y) = apply(to_window, f64::from(f32::from(local.x)), f64::from(f32::from(local.y)))?;
+    Some(point(px(x as f32), px(y as f32)))
+}
+
 /// `(x, y)` after the matrix, or `None` where a matrix with perspective puts it at the horizon or
 /// behind the eye.
 fn apply(matrix: &TransformationMatrix, x: f64, y: f64) -> Option<(f64, f64)> {

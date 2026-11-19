@@ -227,6 +227,39 @@ fn read_write_is_a_text_field_that_is_neither_read_only_nor_disabled() {
 }
 
 #[test]
+fn read_write_is_an_editable_element_and_what_is_inside_it() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ":read-write { color: red } :read-only { background-color: blue }");
+    let host = doc.classed("div", ROOT, "a");
+    let inner = doc.classed("span", host, "b");
+    let island = doc.classed("div", host, "c");
+    doc.tree.set_custom_prop(island, "contenteditable".into(), json!("false"));
+    let field = doc.classed("input", host, "d");
+    let outside = doc.classed("div", ROOT, "e");
+    doc.flush();
+    for id in [host, inner, island, outside] {
+        assert_eq!((red(&doc, id), doc.background(id)), (false, Some("blue")), "{id}");
+    }
+
+    doc.tree.set_custom_prop(host, "contentEditable".into(), json!(true));
+    doc.flush();
+    for id in [host, inner, field] {
+        assert_eq!((red(&doc, id), doc.background(id)), (true, None), "{id}");
+    }
+    for id in [island, outside] {
+        assert_eq!((red(&doc, id), doc.background(id)), (false, Some("blue")), "{id}");
+    }
+
+    doc.tree.set_custom_prop(field, "readOnly".into(), json!(true));
+    doc.flush();
+    assert_eq!((red(&doc, field), doc.background(field)), (false, Some("blue")), "a control is read-write by its own state");
+
+    doc.tree.set_custom_prop(host, "contentEditable".into(), json!(false));
+    doc.flush();
+    assert_eq!((red(&doc, inner), doc.background(inner)), (false, Some("blue")));
+}
+
+#[test]
 fn any_link_is_an_anchor_with_an_href() {
     let mut doc = Doc::new();
     doc.style_element(ROOT, ":any-link { color: red } a:link { background-color: blue }");

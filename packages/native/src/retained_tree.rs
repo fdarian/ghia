@@ -253,7 +253,8 @@ impl RetainedElement {
 
     /// Whether the element must own a gpui focus handle, which is what DOM calls
     /// focusable: an enabled text control or `<button>`, an `<a>` with an `href`, a `<webview>`, or any
-    /// other element with a `tabIndex`.
+    /// other element with a `tabIndex`. An editing host is too, but that needs the parent:
+    /// `RetainedTree::takes_focus` adds it.
     /// A key or focus listener does not make an element focusable; an ancestor's
     /// key listener still hears the keys of a focused descendant.
     pub fn needs_focus(&self) -> bool {
@@ -805,6 +806,10 @@ struct StyleChange {
     regrouped: bool,
     text_reprocessed: bool,
     focusability_changed: bool,
+    /// The element became or stopped being a `display: list-item`.
+    list_item: bool,
+    /// What the element declares of `list-style-type` and `list-style-position` changed.
+    list_style: bool,
 }
 
 impl StyleChange {
@@ -814,6 +819,22 @@ impl StyleChange {
         self.regrouped |= other.regrouped;
         self.text_reprocessed |= other.text_reprocessed;
         self.focusability_changed |= other.focusability_changed;
+        self.list_item |= other.list_item;
+        self.list_style |= other.list_style;
+    }
+}
+
+fn is_list_item_style(style: Option<&StyleDesc>) -> bool {
+    style.is_some_and(|style| style.display.as_deref() == Some("list-item"))
+}
+
+/// What a style declares of the marker, which the items below inherit.
+fn declared_list_style(
+    style: Option<&StyleDesc>,
+) -> (Option<crate::css::list_style::ListStyleType>, Option<crate::css::list_style::ListStylePosition>) {
+    match style {
+        Some(style) => (crate::css::list_style::declared_type(style), crate::css::list_style::declared_position(style)),
+        None => (None, None),
     }
 }
 
@@ -908,6 +929,9 @@ pub struct RetainedTree {
     /// How many elements carry `inert`. While it is zero, no mutation has to
     /// look at ancestors to decide what is focusable.
     inert_count: usize,
+    /// How many elements carry their own `contenteditable`. While it is zero, moving a subtree
+    /// cannot change what is an editing host.
+    editable_count: usize,
     /// Elements whose style declares a `visibility`, so a tree without any skips the ancestor walk.
     visibility_count: usize,
     /// Elements whose own style says `display: none`, so a tree without any skips the ancestor walk
@@ -943,6 +967,8 @@ pub struct RetainedTree {
     fresh: std::cell::RefCell<rustc_hash::FxHashSet<u64>>,
     /// The document's stylesheets and what has to be matched against them again.
     pub(crate) sheets: crate::css::sheet::StyleSheets,
+    /// What list markers wait for the end of the batch to be marked with (`layout::list_marker`).
+    pub(crate) list_markers: crate::layout::list_marker::ListMarkers,
     /// The attribute names the elements hold, one allocation each however many elements use it.
     pub(crate) attribute_names: crate::attributes::AttributeNames,
     /// What each built element was painted with, for the walks that read the tree.
@@ -956,6 +982,10 @@ pub struct RetainedTree {
     pub root_id: Option<u64>,
     /// Dim other focusables while a control has keyboard focus. Set per root.
     keyboard_focus_dim: bool,
+    /// The selection of nodes JS holds in this root, see [`crate::editing::node_selection`].
+    pub(crate) node_selection: crate::editing::node_selection::NodeSelection,
+    /// The text an input method has marked in an editing host, see [`crate::editing::composition`].
+    pub(crate) composition: crate::editing::composition::Composition,
     next_revision: u64,
     /// Whether a paint-only restyle is classified for a patch frame (`StyleChange::strict`). The
     /// view says so (`GpuixView::sync_commit_patching`): patching on and the retention planning.
@@ -1015,6 +1045,7 @@ impl RetainedTree {
             focusable_ids: Default::default(),
             geometry_ids: FxHashSet::default(),
             inert_count: 0,
+            editable_count: 0,
             visibility_count: 0,
             display_none_count: 0,
             pending_hides: Default::default(),
@@ -1026,6 +1057,7 @@ impl RetainedTree {
             relations: RelationRegistry::default(),
             styles: StyleTable::default(),
             sheets: Default::default(),
+            list_markers: Default::default(),
             attribute_names: Default::default(),
             resolved: Default::default(),
             fresh: Default::default(),
@@ -1033,6 +1065,8 @@ impl RetainedTree {
             universal: None,
             root_id: None,
             keyboard_focus_dim: true,
+            node_selection: Default::default(),
+            composition: Default::default(),
             next_revision: 1,
             commit_patching: false,
             patch_barrier: 0,
@@ -1267,6 +1301,7 @@ impl RetainedTree {
 
     pub fn create_element(&mut self, id: u64, element_type: String) {
         let is_style = element_type == "style";
+        self.list_markers.element_created(&element_type);
         self.relations.created(id, &element_type);
         self.anchored_count += usize::from(element_type == "anchored");
         if element_type == "img" {
@@ -1343,16 +1378,19 @@ impl RetainedTree {
         false
     }
 
-    /// Bring `focusable_ids` in line with `id` after anything `needs_focus`
+    /// What `focusable_ids` holds: `needs_focus`, and an editing host (an element whose own
+    /// `contenteditable` makes it editable and whose parent is not), which has a box.
+    fn takes_focus(&self, id: u64) -> bool {
+        self.elements.get(&id).is_some_and(|element| {
+            element.needs_focus()
+                || (!crate::layout::contents::is_display_contents(element) && crate::html::editing::is_editing_host(self, id))
+        })
+    }
+
+    /// Bring `focusable_ids` in line with `id` after anything `takes_focus`
     /// reads has changed.
     fn track_focusable(&mut self, id: u64) {
-        if !self.is_inert(id)
-            && !self.is_visibility_hidden(id)
-            && self
-                .elements
-                .get(&id)
-                .is_some_and(RetainedElement::needs_focus)
-        {
+        if !self.is_inert(id) && !self.is_visibility_hidden(id) && self.takes_focus(id) {
             self.focusable_ids.insert(id);
         } else {
             self.focusable_ids.remove(&id);
@@ -1375,12 +1413,13 @@ impl RetainedTree {
         };
         let inert = inherited_inert || element.has_inert_prop();
         let hidden = element.declared_hidden().unwrap_or(inherited_hidden);
-        let focusable = !inert && !hidden && element.needs_focus();
         let children = element.children.clone();
-        if focusable {
-            self.focusable_ids.insert(id);
-        } else {
-            self.focusable_ids.remove(&id);
+        let focusable = !inert && !hidden && self.takes_focus(id);
+        let was_focusable = if focusable { !self.focusable_ids.insert(id) } else { self.focusable_ids.remove(&id) };
+        if focusable != was_focusable {
+            // The element's own props did not change, so a retained root holding it would replay the
+            // tab stop and focus registration it had.
+            self.mark_render_changed(id);
         }
         for child in children {
             self.track_focusable_below(child, inert, hidden);
@@ -1441,6 +1480,13 @@ impl RetainedTree {
     /// props, whose text is matched at paint and never enters a `GroupList`.
     pub(crate) fn mark_render_changed(&mut self, id: u64) {
         self.mark_changed_detail(id, false, Dirty::Layout);
+    }
+
+    /// [`Self::mark_render_changed`] for a change that no root of a patch follows: it is a barrier, so a patch
+    /// of the frame before declines (`Unpatchable::Edited`) and the frame is built whole, through retention.
+    pub(crate) fn mark_render_changed_unfollowed(&mut self, id: u64) {
+        self.mark_render_changed(id);
+        self.patch_barrier = self.next_revision.wrapping_sub(1).max(1);
     }
 
     /// [`Self::mark_render_changed`] for a style change that only paints: the window is not asked to
@@ -1508,6 +1554,7 @@ impl RetainedTree {
     /// Unlinks from the parent before removing, then marks the parent chain
     /// changed so caches cannot serve text that is no longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
+        self.list_unlinking(id);
         if self.sheets.enabled {
             self.sheets_unlinking(id);
         }
@@ -1557,6 +1604,8 @@ impl RetainedTree {
     fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
             self.removals += 1;
+            self.list_markers.element_destroyed(&element.element_type);
+            self.list_markers.forget_ordinals(id);
             self.detached_from.remove(&id);
             self.motion_ids.remove(&id);
             self.image_ids.remove(&id);
@@ -1567,6 +1616,7 @@ impl RetainedTree {
             self.focusable_ids.remove(&id);
             self.geometry_ids.remove(&id);
             self.inert_count -= usize::from(element.has_inert_prop());
+            self.editable_count -= usize::from(crate::html::editing::own_value(&element).is_some());
             self.visibility_count -= usize::from(element.declared_hidden().is_some());
             self.display_none_count -= usize::from(styles_display_none(&element));
             self.anchored_count -= usize::from(element.element_type == "anchored");
@@ -1594,6 +1644,7 @@ impl RetainedTree {
         let Some(parent_id) = self.elements.get(&id).and_then(|element| element.parent) else {
             return;
         };
+        self.list_unlinking(id);
         if self.sheets.enabled {
             self.sheets_unlinking(id);
         }
@@ -1607,6 +1658,9 @@ impl RetainedTree {
         self.mark_fresh_subtree(id);
         if self.sheets.enabled {
             self.sheets_linked(id);
+        }
+        if self.editable_count > 0 {
+            self.track_focusable_subtree(id);
         }
         self.mark_changed(parent_id);
         self.relations.restructured();
@@ -1639,6 +1693,7 @@ impl RetainedTree {
     }
 
     pub fn append_child(&mut self, parent_id: u64, child_id: u64) {
+        self.list_unlinking(child_id);
         if self.sheets.enabled {
             self.sheets_unlinking(child_id);
         }
@@ -1662,7 +1717,8 @@ impl RetainedTree {
         if self.sheets.enabled {
             self.sheets_linked(child_id);
         }
-        if self.inert_count > 0 || self.visibility_count > 0 {
+        self.list_linked(child_id);
+        if self.inert_count > 0 || self.visibility_count > 0 || self.editable_count > 0 {
             self.track_focusable_subtree(child_id);
         }
         if placed_before {
@@ -1676,6 +1732,7 @@ impl RetainedTree {
     }
 
     pub fn insert_before(&mut self, parent_id: u64, child_id: u64, before_id: u64) {
+        self.list_unlinking(child_id);
         if self.sheets.enabled {
             self.sheets_unlinking(child_id);
         }
@@ -1704,7 +1761,8 @@ impl RetainedTree {
         if self.sheets.enabled {
             self.sheets_linked(child_id);
         }
-        if self.inert_count > 0 || self.visibility_count > 0 {
+        self.list_linked(child_id);
+        if self.inert_count > 0 || self.visibility_count > 0 || self.editable_count > 0 {
             self.track_focusable_subtree(child_id);
         }
         if placed_before {
@@ -1728,6 +1786,17 @@ impl RetainedTree {
     /// The end of a frame's build. What it built has been seen with its style, so a change to it
     /// can start a transition (`assign_style`). An element outside the document was not built, and
     /// stays one whose style has never been seen however many batches pass.
+    /// Whether no frame has drawn `id` yet.
+    pub(crate) fn is_fresh(&self, id: u64) -> bool {
+        self.fresh.borrow().contains(&id)
+    }
+
+    /// Styles `id` again, for a layer that depends on where it is (the user agent style of a list).
+    pub(crate) fn restyle_list(&mut self, id: u64) {
+        let change = self.refresh_effective_style(id, false);
+        self.settle_style_change(id, change);
+    }
+
     pub(crate) fn note_frame_built(&self) {
         let mut fresh = self.fresh.borrow_mut();
         if fresh.is_empty() {
@@ -1845,7 +1914,8 @@ impl RetainedTree {
             None => element.own_style.clone().map(InternedStyle::into_arc),
         };
         let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
-        let tag_style = crate::html::ua_style_of(element);
+        let above = if crate::html::is_list(&element.element_type) { self.lists_above(id) } else { Default::default() };
+        let tag_style = crate::html::ua_style_of(element, above);
         let user_agent = crate::html::popover::user_agent(element, tag_style.as_ref()).or(tag_style);
         let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), declared) {
             (Some(base), Some(declared)) => Some(self.styles.layered.effective(&base, &declared)),
@@ -1883,6 +1953,8 @@ impl RetainedTree {
         if paints_only && element.style.as_deref().zip(style.as_deref()).is_some_and(|(old, new)| old.touches_transform(new)) {
             self.relevance.note_transform_write(id);
         }
+        let list_item = is_list_item_style(element.style.as_deref()) != is_list_item_style(style.as_deref());
+        let list_style = declared_list_style(element.style.as_deref()) != declared_list_style(style.as_deref());
         let was_declared = element.declared_hidden();
         let was_display_none = styles_display_none(element);
         let was_contents = crate::layout::contents::is_display_contents(element);
@@ -1946,12 +2018,20 @@ impl RetainedTree {
             regrouped,
             text_reprocessed,
             focusability_changed,
+            list_item,
+            list_style,
         }
     }
 
     fn settle_style_change(&mut self, id: u64, change: StyleChange) {
         if change.focusability_changed {
             self.track_focusable_subtree(id);
+        }
+        if change.list_item {
+            self.list_item_changed(id);
+        }
+        if change.list_style {
+            self.list_style_changed(id);
         }
         if change.text_reprocessed {
             // `white-space` is inherited and decides what text is left of a
@@ -2042,11 +2122,15 @@ impl RetainedTree {
         let mut changed = false;
         let is_input_type = is_input && key == "type";
         let is_hidden_attribute = key == "hidden";
+        let is_list_value = key == "value";
+        let is_list_counting = key == "start" || key == "reversed";
         let is_input_group = is_input && matches!(key.as_str(), "type" | "name");
         let is_highlight = key == "highlight";
         let is_motion = key == "motion";
         let is_motion_values = key == "motionValues" || key == "layout";
         let affects_focusability = key == "tabIndex" || key == "disabled" || key == "href" || key == "type";
+        // The editing host of a subtree is the topmost editable element in it, so a write moves it.
+        let is_editing = crate::html::editing::is_prop(&key);
         let is_inert = key == "inert";
         let is_popover = crate::html::popover::is_popover_prop(&key);
         let changed_states =
@@ -2058,6 +2142,7 @@ impl RetainedTree {
             .elements
             .get(&id)
             .is_some_and(RetainedElement::has_inert_prop);
+        let was_editable = is_editing && self.elements.get(&id).is_some_and(|element| crate::html::editing::own_value(element).is_some());
         let was_declaration = self
             .elements
             .get(&id)
@@ -2124,6 +2209,11 @@ impl RetainedTree {
         if affects_focusability {
             self.track_focusable(id);
         }
+        if is_editing {
+            let now_editable = self.elements.get(&id).is_some_and(|element| crate::html::editing::own_value(element).is_some());
+            self.editable_count = self.editable_count + usize::from(now_editable) - usize::from(was_editable);
+            self.track_focusable_subtree(id);
+        }
         if is_hidden_attribute {
             // The user agent style of any element is `display: none` while it is `hidden`.
             let change = self.refresh_effective_style(id, false);
@@ -2139,6 +2229,12 @@ impl RetainedTree {
             if is_input_type {
                 self.range_type_changed(id);
             }
+        }
+        if is_list_value {
+            self.list_value_changed(id);
+        }
+        if is_list_counting {
+            self.list_counting_changed(id);
         }
         if is_form_control {
             if self.elements.get(&id).is_some_and(|element| element.control_disabled().is_some()) {
@@ -2157,6 +2253,9 @@ impl RetainedTree {
         }
         if !changed_states.is_empty() {
             self.sheets_tree_state_changed(id, changed_states);
+            if is_editing {
+                self.sheets_tree_state_changed_below(id, changed_states);
+            }
         }
         if is_popover {
             let change = self.refresh_effective_style(id, false);
@@ -2401,7 +2500,15 @@ impl RetainedTree {
         if opens_frame {
             walk.frames.pop();
         }
-        let own = (!clipped && !none && !hidden && own_box.is_some_and(|bounds| inside(&bounds, true, true))).then_some(id);
+        // The marker of a list item is where the item is hit, though it is outside its box.
+        let marker_hit = || {
+            (walk.painted_box)(crate::layout::list_marker_paint::marker_box_id(id)).is_some_and(|bounds| inside(&bounds, true, true))
+        };
+        let own = (!clipped
+            && !none
+            && !hidden
+            && (own_box.is_some_and(|bounds| inside(&bounds, true, true)) || (element.display().as_deref() == Some("list-item") && marker_hit())))
+        .then_some(id);
         match own_context {
             Some(own_context) => own_context.paint_order(own, in_flow),
             None => own.into_iter().chain(in_flow).collect(),
@@ -2936,6 +3043,87 @@ mod tests {
             tree.focusable_ids.is_empty(),
             "destroying a subtree forgets its ids"
         );
+    }
+
+    #[test]
+    fn an_editing_host_is_focusable_and_its_editable_descendants_are_not() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=5 {
+            tree.create_element(id, "div".to_string());
+        }
+        for (parent, child) in [(1, 2), (2, 3), (3, 4), (4, 5)] {
+            tree.append_child(parent, child);
+        }
+        let focusable = |tree: &RetainedTree| tree.focusable_ids.iter().copied().collect::<Vec<_>>();
+        assert!(focusable(&tree).is_empty());
+
+        tree.set_custom_prop(2, "contentEditable".to_string(), serde_json::json!(true));
+        tree.set_custom_prop(4, "contenteditable".to_string(), serde_json::json!("true"));
+        assert_eq!(focusable(&tree), vec![2], "4 is inside the host 2");
+
+        tree.set_custom_prop(3, "contenteditable".to_string(), serde_json::json!("false"));
+        assert_eq!(focusable(&tree), vec![2, 4], "a false island makes 4 a host of its own");
+
+        tree.set_custom_prop(3, "contenteditable".to_string(), serde_json::json!("inherit"));
+        assert_eq!(focusable(&tree), vec![2], "a text that is no keyword inherits");
+
+        tree.set_custom_prop(2, "contentEditable".to_string(), serde_json::json!(false));
+        assert_eq!(focusable(&tree), vec![4], "turning the host off exposes the next one");
+
+        tree.set_custom_prop(2, "contentEditable".to_string(), serde_json::Value::Null);
+        tree.set_custom_prop(4, "contenteditable".to_string(), serde_json::json!("plaintext-only"));
+        assert_eq!(focusable(&tree), vec![4]);
+        tree.set_custom_prop(4, "contenteditable".to_string(), serde_json::json!(""));
+        assert_eq!(focusable(&tree), vec![4], "an empty text is true");
+    }
+
+    #[test]
+    fn an_editable_element_is_a_host_only_by_where_it_is_put() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=3 {
+            tree.create_element(id, "div".to_string());
+        }
+        let focusable = |tree: &RetainedTree| tree.focusable_ids.iter().copied().collect::<Vec<_>>();
+        // React writes the props before it appends the child.
+        tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::json!(true));
+        tree.set_custom_prop(2, "contentEditable".to_string(), serde_json::json!(true));
+        assert_eq!(focusable(&tree), vec![1, 2], "parentless, both are hosts");
+        tree.append_child(1, 2);
+        assert_eq!(focusable(&tree), vec![1], "put into a host, 2 is not one");
+
+        tree.set_custom_prop(3, "contentEditable".to_string(), serde_json::json!(true));
+        tree.append_child(2, 3);
+        assert_eq!(focusable(&tree), vec![1]);
+
+        tree.detach_child(2);
+        assert_eq!(focusable(&tree), vec![1, 2], "taken out of the host, 2 and its subtree are hosts again, 3 is not");
+        tree.insert_before(1, 2, 0);
+        assert_eq!(focusable(&tree), vec![1]);
+
+        tree.destroy_element(1);
+        assert_eq!(tree.editable_count, 0);
+    }
+
+    #[test]
+    fn a_descendant_whose_focusability_flips_with_an_ancestor_is_marked_changed() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=3 {
+            tree.create_element(id, "div".to_string());
+        }
+        tree.append_child(1, 2);
+        tree.append_child(2, 3);
+        tree.set_custom_prop(3, "contentEditable".to_string(), serde_json::json!(true));
+        let revision = |tree: &RetainedTree, id: u64| tree.elements[&id].subtree_revision;
+
+        let before = revision(&tree, 3);
+        tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::json!(true));
+        assert!(revision(&tree, 3) > before, "3 stopped being a tab stop");
+        let before = revision(&tree, 3);
+        tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::json!(false));
+        assert!(revision(&tree, 3) > before, "and became one again");
+        let before = revision(&tree, 3);
+        tree.set_custom_prop(1, "contentEditable".to_string(), serde_json::Value::Null);
+        assert_eq!(revision(&tree, 3), before, "nothing flipped");
     }
 
     #[test]

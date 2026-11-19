@@ -35,6 +35,8 @@ use super::text_selection::{
     describe, resolve, utf16_len, SelectionRequest, TextSelection,
 };
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
+use crate::caret::{caret_rect, caret_visible, until_phase_change};
+use crate::events::clipboard::{Copy, Cut, Paste, SelectAll};
 use crate::events::keyboard::InputRouting;
 use crate::renderer::{emit_bubbling_event, EventCallback, GpuixView};
 use crate::retained_tree::RetainedTree;
@@ -53,7 +55,6 @@ actions!(
         SelectRight,
         SelectUp,
         SelectDown,
-        SelectAll,
         Home,
         End,
         DocStart,
@@ -70,9 +71,6 @@ actions!(
         DeleteWordRight,
         DeleteToLineStart,
         DeleteToLineEnd,
-        Copy,
-        Cut,
-        Paste,
         Undo,
         Redo,
         Newline,
@@ -87,15 +85,9 @@ const INPUT_KEY_CONTEXT: &str = "GpuixInput";
 const NUMBER_KEY_CONTEXT: &str = "GpuixNumberInput";
 const NUMBER_INPUT_KEY_CONTEXT: &str = "GpuixInput GpuixNumberInput";
 const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
-const CARET_BLINK_MS: u64 = 500;
-const CARET_WIDTH: Pixels = px(2.0);
 const DRAG_SCROLL_FRAME_MS: u64 = 16;
 const UNDO_COALESCE: Duration = Duration::from_millis(700);
 const UNDO_LIMIT: usize = 200;
-
-fn caret_visible(ms_since_activity: u64) -> bool {
-    (ms_since_activity / CARET_BLINK_MS) % 2 == 0
-}
 
 fn clipboard_text(item: ClipboardItem) -> Option<String> {
     if item
@@ -106,12 +98,6 @@ fn clipboard_text(item: ClipboardItem) -> Option<String> {
         return None;
     }
     item.text()
-}
-
-// Chrome paints the caret at line height, not font size. Firefox uses the em
-// square after you type. Match Chrome so a 14/20 composer bar is 20px tall.
-fn caret_rect(origin: Point<Pixels>, line_height: Pixels) -> Bounds<Pixels> {
-    Bounds::new(origin, size(CARET_WIDTH, line_height))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -597,7 +583,7 @@ impl CustomElement for TextEditorElement {
         editor = crate::events::ids::host_hitbox(editor, ctx.pointer_events_none);
         editor = crate::events::app_region::mark(editor, ctx.app_region);
         if let Some(style) = ctx.style {
-            editor = crate::renderer::apply_interactive_styles(editor, style, &ctx.colors, &ctx.lengths);
+            editor = crate::renderer::apply_interactive_styles(editor, style, &ctx.colors, &ctx.lengths, &ctx.fonts);
             // Clip text to rounded corners, matching HTML input behavior.
             if style.border_radius.is_some() {
                 editor = editor.overflow_hidden();
@@ -617,6 +603,7 @@ impl CustomElement for TextEditorElement {
             ctx.style,
             &ctx.colors,
             &ctx.lengths,
+            &ctx.fonts,
             &ctx.focus_styles,
         );
         if ctx.resolved.position == crate::layout::containing_block::Position::Static {
@@ -1054,7 +1041,7 @@ impl TextEditorState {
     }
 
     fn until_phase_change(&self, cx: &App) -> Duration {
-        Duration::from_millis(CARET_BLINK_MS - self.ms_since_activity(cx) % CARET_BLINK_MS)
+        until_phase_change(self.ms_since_activity(cx))
     }
 
     /// The caret starts solid when focus comes to it.
@@ -2732,22 +2719,6 @@ mod tests {
     #[test]
     fn single_line_newlines_become_one_space() {
         assert_eq!(single_line_text("a\r\nb\nc\rd"), "a b c d");
-    }
-
-    #[test]
-    fn caret_blink_phase() {
-        assert!(caret_visible(0));
-        assert!(caret_visible(CARET_BLINK_MS - 1));
-        assert!(!caret_visible(CARET_BLINK_MS));
-        assert!(!caret_visible(2 * CARET_BLINK_MS - 1));
-        assert!(caret_visible(2 * CARET_BLINK_MS));
-    }
-
-    #[test]
-    fn caret_matches_the_line_height() {
-        let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0));
-        assert_eq!(bounds.origin, point(px(10.0), px(4.0)));
-        assert_eq!(bounds.size, size(px(2.0), px(20.0)));
     }
 
     #[test]

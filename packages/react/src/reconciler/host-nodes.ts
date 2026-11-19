@@ -9,6 +9,7 @@ import {
   defineDomMembers,
   copyPrototypeMembers,
   defineScrollMembers,
+  DocumentFragment,
   SentWrites,
   document,
   DOM_BINDING,
@@ -16,7 +17,10 @@ import {
   HOST_BINDING,
   HTMLElement,
   bumpTreeVersion,
+  hasLiveRanges,
   hasMutationObservers,
+  liveRangesAfterInsert,
+  liveRangesBeforeRemove,
   queueChildListMutation,
   readBoundingClientRect,
   splitMotionStyle,
@@ -36,14 +40,35 @@ import type {
   KeyframesInput,
   Node,
   NodeBinding,
+  ParentBinding,
   StyleDesc,
   TextBinding,
 } from "@ghia/native/host"
 import type { Container, ElementType, Instance, Props, TextInstance } from "../types/host.js"
-import { assertSameWindow, createDomElement, createDomText, insertDomNode, removeDomNode, setDomProp, setDomStyle, setDomTextData } from "./dom-mutation.js"
+import { assertSameWindow, createDomElement, createDomFragment, createDomText, insertDomNode, removeDomNode, setDomProp, setDomStyle, setDomTextData } from "./dom-mutation.js"
 import { listenersOf } from "./event-registry.js"
 
 export type HostNode = Instance | TextInstance
+
+/**
+ * What `document.createDocumentFragment()` makes. It holds children in its state like an element,
+ * is never mounted, and is not a `HostNode`: the reconciler never places or renders one.
+ */
+export class HostFragment extends DocumentFragment {
+  constructor(readonly nativeId: number) {
+    super()
+  }
+
+  [DOM_BINDING](): ParentBinding {
+    const state = stateFor(this)
+    const binding = state.binding ?? new FragmentDomBinding(this, state)
+    state.binding = binding
+    return binding as ParentBinding
+  }
+}
+
+/** A node that can hold children placed by code: an element or a fragment. */
+export type HostParent = Instance | HostFragment
 
 export interface HostNodeState {
   container: Container
@@ -51,7 +76,7 @@ export interface HostNodeState {
   /** The style native holds for the element, so a write of the same live style queues nothing. Reset when the native element is made. */
   readonly sent: SentWrites
   /** The node it is placed in, or `null` at the top of a window or before it is placed. */
-  parent: HostNode | null
+  parent: HostParent | null
   /** The nodes placed in it, in order. */
   children: HostNode[]
   /** The members of its type (`<input>`, `<form>`, ...) were attached when its ref was handed out. */
@@ -70,9 +95,9 @@ export interface HostNodeState {
   propOverrides?: Map<string, unknown>
 }
 
-const hostNodeStates = new WeakMap<HostNode, HostNodeState>()
+const hostNodeStates = new WeakMap<HostNode | HostFragment, HostNodeState>()
 
-export function stateFor(node: HostNode): HostNodeState {
+export function stateFor(node: HostNode | HostFragment): HostNodeState {
   const state = hostNodeStates.get(node)
   if (!state) {
     throw new Error(`GPUIX host node ${node.nativeId} does not belong to a root`)
@@ -223,7 +248,7 @@ function isConnected(instance: Instance): boolean {
 /** The node or an ancestor of it is the window's `<html>`: nothing took it out of the document. */
 export function isInTree(node: HostNode): boolean {
   const html = containerFor(node).html
-  for (let current: HostNode | null = node; current !== null; current = stateFor(current).parent) {
+  for (let current: HostParent | HostNode | null = node; current !== null; current = stateFor(current).parent) {
     if (current === html) return true
   }
   return false
@@ -323,10 +348,56 @@ class ElementDomBinding implements ElementBinding {
     return createDomElement(this.state.container, type) as unknown as Element
   }
 
+  createFragment(): DocumentFragment {
+    return createDomFragment(this.state.container)
+  }
+
   get native(): ElementBinding["native"] {
     return this.state.mounted
       ? { renderer: this.state.container.nativeRenderer, id: this.instance.nativeId }
       : undefined
+  }
+}
+
+class FragmentDomBinding implements ParentBinding {
+  constructor(
+    private readonly fragment: HostFragment,
+    private readonly state: HostNodeState
+  ) {}
+
+  readonly parent = null
+  readonly connected = false
+
+  get children(): NodeBinding["children"] {
+    return this.state.children
+  }
+
+  get root(): object | null {
+    return this.state.container
+  }
+
+  assertSameWindow(child: Node): void {
+    assertSameWindow(this.fragment, child as unknown as HostNode)
+  }
+
+  insertBefore(child: Node, before: Node | null): void {
+    insertDomNode(this.fragment, child as unknown as HostNode, before as unknown as HostNode | null)
+  }
+
+  removeChild(child: Node): void {
+    removeDomNode(this.fragment, child as unknown as HostNode)
+  }
+
+  createText(data: string): Text {
+    return createDomText(this.state.container, data) as unknown as Text
+  }
+
+  createElement(type: string): Element {
+    return createDomElement(this.state.container, type) as unknown as Element
+  }
+
+  createFragment(): DocumentFragment {
+    return createDomFragment(this.state.container)
   }
 }
 
@@ -357,8 +428,16 @@ class TextDomBinding implements TextBinding {
     return this.text.text
   }
 
+  get native(): TextBinding["native"] {
+    return this.state.mounted ? { renderer: this.state.container.nativeRenderer, id: this.text.nativeId } : undefined
+  }
+
   createText(data: string): Text {
     return createDomText(this.state.container, data) as unknown as Text
+  }
+
+  createFragment(): DocumentFragment {
+    return createDomFragment(this.state.container)
   }
 
   setData(data: string): void {
@@ -380,6 +459,12 @@ export function createHostElement(
   return instance
 }
 
+export function createHostFragment(id: number, container: Container): HostFragment {
+  const fragment = new HostFragment(id)
+  hostNodeStates.set(fragment, createState(container))
+  return fragment
+}
+
 export function createHostText(id: number, text: string, container: Container): TextInstance {
   const instance = new ReactHostText(id, text, null)
   hostNodeStates.set(instance, createState(container))
@@ -390,7 +475,7 @@ export function createHostText(id: number, text: string, container: Container): 
  * Places `child` in `parent` before `before`, or last, taking it out of the parent it was in:
  * React moves a node by placing it again.
  */
-export function linkChild(parent: HostNode, child: HostNode, before?: HostNode): void {
+export function linkChild(parent: HostParent, child: HostNode, before?: HostNode): void {
   if (before === child) return
   unlinkChild(child)
   const siblings = stateFor(parent).children
@@ -399,6 +484,7 @@ export function linkChild(parent: HostNode, child: HostNode, before?: HostNode):
   siblings.splice(index, 0, child)
   stateFor(child).parent = parent
   bumpTreeVersion()
+  if (hasLiveRanges()) liveRangesAfterInsert(parent, index, 1)
   if (hasMutationObservers()) {
     queueChildListMutation(parent, [child], [], siblings[index - 1] ?? null, siblings[index + 1] ?? null)
   }
@@ -410,6 +496,7 @@ export function unlinkChild(child: HostNode): void {
   if (parent === null) return
   const siblings = stateFor(parent).children
   const index = siblings.indexOf(child)
+  if (index >= 0 && hasLiveRanges()) liveRangesBeforeRemove(parent, child, index)
   if (index >= 0) siblings.splice(index, 1)
   state.parent = null
   if (index >= 0) {

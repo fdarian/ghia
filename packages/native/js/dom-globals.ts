@@ -16,16 +16,24 @@ import {
 } from "./dom/nodes.js"
 import { DOMTokenList } from "./dom/class-list.js"
 import { ValidityState } from "./dom/constraint-validation.js"
+import { DataTransfer, DataTransferItem, DataTransferItemList } from "./dom/data-transfer.js"
 import { CSSStyleDeclaration } from "./dom/css-style-declaration.js"
 import { DOMRect, DOMRectReadOnly } from "./dom/dom-rect.js"
+import { DOMParser } from "./dom/html/dom-parser.js"
+import { Comment } from "./dom/html/inert-nodes.js"
+import { defineHtmlMembers } from "./dom/html/members.js"
+import { defineInnerTextMember } from "./dom/inner-text.js"
+import { StyleSheetList } from "./dom/html/style-sheet-list.js"
 import { HTMLCollection, NodeList } from "./dom/html-collection.js"
 import { HTMLButtonElement, HTMLInputElement, HTMLTextAreaElement } from "./dom/html-element-classes.js"
 import { MutationObserver, MutationRecord } from "./dom/mutation-observer.js"
+import { AbstractRange, Range, StaticRange } from "./dom/range.js"
 import { ToggleEvent } from "./dom/toggle-event.js"
 import { NodeFilter, TreeWalker } from "./dom/tree-walker.js"
 import { Selection } from "./dom/selection.js"
 import { EVENT_CLASSES } from "./events/classes.js"
 import { replaceStandInDocumentElements, standInDocumentElements } from "./dom/stand-in-document.js"
+import { CaretPosition } from "./editing/caret-position.js"
 import { document, installStandInDocument, window } from "./events/window-target.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
@@ -47,6 +55,7 @@ const DOM_CLASSES = {
   Node,
   CharacterData,
   Text,
+  Comment,
   Element,
   HTMLElement,
   HTMLInputElement,
@@ -64,15 +73,24 @@ const DOM_CLASSES = {
   TreeWalker,
   CSSStyleDeclaration,
   CSSStyleSheet,
+  StyleSheetList,
+  DOMParser,
   CSSRule,
   CSSStyleRule,
   CSSRuleList,
   Selection,
+  AbstractRange,
+  StaticRange,
+  Range,
+  CaretPosition,
   MutationObserver,
   MutationRecord,
   DOMRect,
   DOMRectReadOnly,
   ToggleEvent,
+  DataTransfer,
+  DataTransferItem,
+  DataTransferItemList,
   KeyframeEffect,
   Animation,
   CSSAnimation,
@@ -136,6 +154,8 @@ function install(): void {
     scrollBy: { value: noScroll, configurable: true, writable: true },
   })
   installWindowMembers()
+  defineHtmlMembers(Element.prototype)
+  defineInnerTextMember(Element.prototype)
   // A runtime that has its own keeps it, which is what a library that takes `window.ResizeObserver` gets elsewhere.
   for (const name of Object.keys(DOM_FUNCTIONS)) {
     if (Reflect.get(globalThis, name) !== undefined) continue

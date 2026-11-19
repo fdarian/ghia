@@ -50,6 +50,8 @@ pub struct RunStyle {
     pub weight: Option<FontWeight>,
     pub font_style: Option<gpui::FontStyle>,
     pub family: Option<SharedString>,
+    /// The families after `family` that a glyph it lacks is looked for in, set with it.
+    pub fallbacks: Option<gpui::FontFallbacks>,
     pub features: Option<gpui::FontFeatures>,
     pub variations: Option<gpui::FontVariations>,
     pub font_smoothing: Option<gpui::FontSmoothing>,
@@ -180,7 +182,7 @@ pub struct BoxStyle {
 /// children inherit them. `states` says which states apply to a box, so that its `hover`, `active`,
 /// `focus`, `focusWithin` and `focusVisible` styles are folded into the run it paints.
 /// `motion` holds the boxes whose colours a transition or an animation moves.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub fn run_styles(
     tree: &RetainedTree,
     paragraph: &Paragraph,
@@ -198,6 +200,7 @@ pub fn run_styles(
         lengths,
         font_state,
         underline_offset,
+        &crate::text::font_family::Fonts::for_tests(),
         states,
         motion,
     )
@@ -236,6 +239,7 @@ pub fn styles(
     lengths: &LengthContext,
     font_state: &FontFeatureState,
     underline_offset: &TextUnderlineOffset,
+    fonts: &crate::text::font_family::Fonts,
     states: &dyn Fn(u64, &StyleDesc) -> PointerStates,
     motion: &InlineStyles,
 ) -> Styles {
@@ -301,7 +305,9 @@ pub fn styles(
                 style.font_style = Some(font_style);
             }
             if let Some(family) = declared.font_family.as_ref() {
-                style.family = Some(SharedString::from(family.clone()));
+                let resolved = fonts.resolve(family);
+                style.family = Some(resolved.family);
+                style.fallbacks = Some(resolved.fallbacks);
             }
             let (next, features) = font_state.descend(
                 declared.font_variant_numeric.as_deref(),
@@ -630,6 +636,7 @@ impl InlineText {
         }
         if let Some(family) = &style.family {
             run.font.family = family.clone();
+            run.font.fallbacks = style.fallbacks.clone();
         }
         if let Some(features) = &style.features {
             run.font.features = features.clone();
@@ -999,7 +1006,7 @@ mod tests {
             &ColorContext::root(Scheme::Light),
             &container_lengths(),
             &FontFeatureState::default(),
-                &Default::default(),
+            &Default::default(),
             &|_, _| PointerStates::default(),
             &InlineStyles::default(),
         );
@@ -1613,6 +1620,7 @@ mod tests {
             &container_lengths(),
             &FontFeatureState::default(),
             &Default::default(),
+            &crate::text::font_family::Fonts::for_tests(),
             &|_, _| PointerStates::default(),
             &InlineStyles::default(),
         )
@@ -1683,7 +1691,7 @@ mod tests {
     fn the_boxes_the_line_layout_hears_of_are_the_shifted_ones_and_those_around_them() {
         let paragraph_of = |tree: &RetainedTree| match plan_children(tree, &tree.elements[&1]).remove(0) {
             Child::Paragraph(paragraph) => paragraph,
-            Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine => panic!("a paragraph"),
+            Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine | Child::BlankLine => panic!("a paragraph"),
         };
         let ids = |tree: &RetainedTree, shifted: &[u64]| {
             let paragraph = paragraph_of(tree);
@@ -1706,7 +1714,7 @@ mod tests {
     fn a_span_around_an_atomic_is_listed_for_its_strut_when_its_font_or_line_height_is_its_own() {
         let paragraph_of = |tree: &RetainedTree| match plan_children(tree, &tree.elements[&1]).remove(0) {
             Child::Paragraph(paragraph) => paragraph,
-            Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine => panic!("a paragraph"),
+            Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine | Child::BlankLine => panic!("a paragraph"),
         };
         let ids = |style: serde_json::Value| {
             let tree = tree_with_atomic(&[(3, style)]);
@@ -1749,7 +1757,7 @@ mod tests {
             let tree = tree_with(styles);
             let paragraph = match plan_children(&tree, &tree.elements[&1]).remove(0) {
                 Child::Paragraph(paragraph) => paragraph,
-                Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine => panic!("a paragraph"),
+                Child::Block(_) | Child::AnonymousCell(_) | Child::AnonymousTable(_) | Child::EmptyLine | Child::BlankLine => panic!("a paragraph"),
             };
             let styles = styles_of(&tree);
             listed_boxes(&paragraph, &styles.boxes, &HashSet::new())

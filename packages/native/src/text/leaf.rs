@@ -109,6 +109,8 @@ pub(super) struct TextLeaf<Prepaint, Paint> {
     prepaint: Option<Prepaint>,
     paint: Option<Paint>,
     cull_outset: Option<Edges<Pixels>>,
+    /// Runs once the glyphs are prepainted, which is when the layout knows where its rows are.
+    settled: Option<Box<dyn FnOnce()>>,
 }
 
 impl<Prepaint, Paint> TextLeaf<Prepaint, Paint>
@@ -116,8 +118,14 @@ where
     Prepaint: FnOnce(&mut Window) + 'static,
     Paint: FnOnce(&mut Window, &mut App) + 'static,
 {
-    pub(super) fn new(glyphs: Glyphs, prepaint: Prepaint, paint: Paint, cull_outset: Option<Edges<Pixels>>) -> Self {
-        Self { glyphs, prepaint: Some(prepaint), paint: Some(paint), cull_outset }
+    pub(super) fn new(
+        glyphs: Glyphs,
+        prepaint: Prepaint,
+        paint: Paint,
+        cull_outset: Option<Edges<Pixels>>,
+        settled: Option<Box<dyn FnOnce()>>,
+    ) -> Self {
+        Self { glyphs, prepaint: Some(prepaint), paint: Some(paint), cull_outset, settled }
     }
 
     fn prepaint_with(
@@ -131,9 +139,13 @@ where
     ) {
         let underlay = self.prepaint.take().expect("a text leaf is prepainted once");
         let glyphs = &mut self.glyphs;
+        let settled = self.settled.take();
         window.with_element_space(ElementSpace::default(), |window| {
             underlay(window);
             glyphs.prepaint(id, inspector_id, bounds, culled, window, cx);
+            if let Some(settled) = settled {
+                settled();
+            }
         });
     }
 

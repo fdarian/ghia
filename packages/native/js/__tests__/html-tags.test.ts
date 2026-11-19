@@ -18,7 +18,7 @@ describe("HTML tags", () => {
     }
   })
 
-  it("forward the props of every host element, and `href`, `type` and `disabled` where a tag has them", () => {
+  it("forward the props of every host element, and `href`, `type`, `disabled`, `start`, `reversed` and `value` where a tag has them", () => {
     for (const tag of HTML_TAGS) expect(BUILT_IN_TYPES.has(tag), tag).toBe(true)
     expect(forwardsCustomProp("p", "testId")).toBe(true)
     expect(forwardsCustomProp("p", "aria-label")).toBe(true)
@@ -28,6 +28,11 @@ describe("HTML tags", () => {
     expect(forwardsCustomProp("button", "disabled")).toBe(true)
     expect(forwardsCustomProp("button", "type")).toBe(true)
     expect(forwardsCustomProp("button", "href")).toBe(false)
+    expect(forwardsCustomProp("ol", "start")).toBe(true)
+    expect(forwardsCustomProp("ol", "reversed")).toBe(true)
+    expect(forwardsCustomProp("li", "value")).toBe(true)
+    expect(forwardsCustomProp("ul", "start")).toBe(false)
+    expect(forwardsCustomProp("li", "start")).toBe(false)
   })
 
   it("list as inline the tags whose native style is display inline", () => {

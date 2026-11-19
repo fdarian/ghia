@@ -266,8 +266,8 @@ export function isNotNativeAttribute(prop: string): boolean {
 
 /**
  * A prop as the string a DOM attribute holds, or null where the DOM would have no attribute. A
- * `data-*` or `aria-*` attribute holds "false" for false, and `draggable`, which is enumerated,
- * holds "true" and "false" as `el.draggable = true` reflects them; any other boolean attribute is
+ * `data-*` or `aria-*` attribute holds "false" for false, and `draggable` and `contenteditable`, which
+ * are enumerated, hold "true" and "false" as `el.draggable = true` reflects them; any other boolean attribute is
  * present (empty) for true and absent for false.
  */
 export function attributeText(name: string, value: unknown): string | null {
@@ -291,7 +291,7 @@ export function attributeText(name: string, value: unknown): string | null {
 
 function holdsBooleanText(name: string): boolean {
   const lower = lowerCased(name)
-  return lower.startsWith("data-") || lower.startsWith("aria-") || lower === "draggable"
+  return lower.startsWith("data-") || lower.startsWith("aria-") || lower === "draggable" || lower === "contenteditable"
 }
 
 /**

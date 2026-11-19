@@ -769,6 +769,7 @@ mod tests {
                 &desc,
                 &colors,
                 &LengthContext::initial(800.0, 600.0),
+                &crate::text::font_family::Fonts::for_tests(),
             )
         });
         cx.update(|window, _| {
@@ -1049,6 +1050,7 @@ mod tests {
                 &desc,
                 &colors,
                 &LengthContext::initial(800.0, 600.0),
+                &crate::text::font_family::Fonts::for_tests(),
             )
         });
         let quad = cx

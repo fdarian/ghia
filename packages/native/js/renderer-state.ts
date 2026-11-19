@@ -2,10 +2,14 @@ import type { EventPayload } from "../index.js"
 import { addFrameSource, runAnimationFrame } from "./animation-frame.js"
 import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
-import { focusElementById } from "./focus.js"
+import { focusElementById, placeCaretOnFocusIn } from "./focus.js"
+import type { Element } from "./dom/nodes.js"
+import { CLIPBOARD_COMMAND_EVENT, isClipboardCommand, runClipboardCommand } from "./editing/clipboard-commands.js"
+import { EDIT_INPUT_EVENT, endCompositionOnBlur, runNativeEditInput } from "./editing/native-input.js"
+import { EDIT_POINTER_EVENT, runEditingPointer } from "./editing/pointer-selection.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { popoversOfRendererGone } from "./dom/popover.js"
-import { elementOf, GpuixEventTarget, noteFocusEvent } from "./events/window-target.js"
+import { elementOf, GpuixEventTarget, noteFocusEvent, trackFocusedElement } from "./events/window-target.js"
 import { mountedRenderers, notifyMountedRenderer } from "./mounted-renderer.js"
 import { deliverObservation } from "./observers.js"
 import type {
@@ -55,6 +59,8 @@ export interface RendererRootBinding {
 export interface SyncDispatchResult {
   defaultPrevented: boolean
   propagationStopped: boolean
+  /** Set for a `keydown` whose default JS carried out (an edit of an editing host): native must not also type the key. */
+  handled?: boolean
   /** Set for a `dragover`: what the drop would do. Native tells the OS, for a drag of files. */
   dropEffect?: DomDispatchResult["dropEffect"]
 }
@@ -235,6 +241,64 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
     }
   }
 
+  /**
+   * An edit the platform's text input made in an editing host. It runs as a handler does, so the
+   * framework flushes what its `input` listeners changed, and it is no DOM event: nothing hears it.
+   */
+  const runNativeInput = (root: ActiveRoot, received: EventPayload) => {
+    const host = root.elementById(received.elementId)
+    // The host left the tree after native queued the edit: there is nowhere to put it.
+    if (host === undefined) return
+    let ran = false
+    const run = () => {
+      ran = true
+      runNativeEditInput(received, host as Element, renderer)
+    }
+    if (root.handlers.schedule) root.handlers.schedule(run)
+    else run()
+    if (!ran) {
+      throw new Error("The schedule handler did not run the edit before returning. Text from the input method needs its result now, so schedule must call it synchronously.")
+    }
+  }
+
+  /**
+   * Copy, cut, paste or select all that no text control took (`src/events/clipboard.rs`). It runs as a
+   * handler does, and its answer is whether native has nothing left to do.
+   */
+  const runNativeClipboardCommand = (root: ActiveRoot, received: EventPayload): boolean => {
+    if (!isClipboardCommand(received.value)) {
+      throw new Error(`A clipboardcommand of ${String(received.value)} is not one this version knows`)
+    }
+    const command = received.value
+    let handled: boolean | undefined
+    const run = () => {
+      handled = runClipboardCommand(command, renderer)
+    }
+    if (root.handlers.schedule) root.handlers.schedule(run)
+    else run()
+    if (handled === undefined) {
+      throw new Error("The schedule handler did not run the clipboard command before returning. Its answer is needed now, so schedule must call it synchronously.")
+    }
+    return handled
+  }
+
+  /**
+   * A press, drag or release of the primary button in an editing host. The selection it makes is the
+   * state the next event of the same press reads, so it runs before this returns, like an edit.
+   */
+  const runNativePointer = (root: ActiveRoot, received: EventPayload) => {
+    let ran = false
+    const run = () => {
+      ran = true
+      runEditingPointer(received, root.elementById(received.elementId) as Element | undefined, renderer)
+    }
+    if (root.handlers.schedule) root.handlers.schedule(run)
+    else run()
+    if (!ran) {
+      throw new Error("The schedule handler did not run the pointer event before returning. The selection of a press is read by the next event, so schedule must call it synchronously.")
+    }
+  }
+
   /** The callbacks run as a handler does, so the framework flushes what they changed before the frame builds. */
   const runFrameCallbacks = (event: EventPayload) => {
     if (event.timelineTime === undefined) {
@@ -328,7 +392,28 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       }
       const root = active
       if (!root) return false
-      if (received.eventType === "focusin") noteFocusEvent(renderer)
+      if (received.eventType === EDIT_INPUT_EVENT) {
+        runNativeInput(root, received)
+        return true
+      }
+      if (received.eventType === EDIT_POINTER_EVENT) {
+        runNativePointer(root, received)
+        return true
+      }
+      if (received.eventType === CLIPBOARD_COMMAND_EVENT) {
+        runNativeClipboardCommand(root, received)
+        return true
+      }
+      if (received.eventType === "focusin") {
+        noteFocusEvent(renderer)
+        const focused = elementOf(renderer, received.elementId)
+        trackFocusedElement(renderer, "focusin", focused)
+        placeCaretOnFocusIn(focused)
+      } else if (received.eventType === "focusout") {
+        trackFocusedElement(renderer, "focusout", elementOf(renderer, received.elementId))
+      } else if (received.eventType === "blur") {
+        endCompositionOnBlur(elementOf(renderer, received.elementId))
+      }
       const event = shapeScrollEvent(normalizeEventType(received))
       if (deliverObservation(renderer, event)) return true
       if (!handlesEvent(root, event)) {
@@ -350,7 +435,28 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         return { defaultPrevented: false, propagationStopped: false }
       }
       const root = active
-      if (received.eventType === "focusin") noteFocusEvent(renderer)
+      if (received.eventType === EDIT_INPUT_EVENT) {
+        if (root) runNativeInput(root, received)
+        return { defaultPrevented: false, propagationStopped: false }
+      }
+      if (received.eventType === EDIT_POINTER_EVENT) {
+        if (root) runNativePointer(root, received)
+        return { defaultPrevented: false, propagationStopped: false }
+      }
+      if (received.eventType === CLIPBOARD_COMMAND_EVENT) {
+        const handled = root ? runNativeClipboardCommand(root, received) : false
+        return { defaultPrevented: false, propagationStopped: false, handled }
+      }
+      if (received.eventType === "focusin") {
+        noteFocusEvent(renderer)
+        const focused = elementOf(renderer, received.elementId)
+        trackFocusedElement(renderer, "focusin", focused)
+        placeCaretOnFocusIn(focused)
+      } else if (received.eventType === "focusout") {
+        trackFocusedElement(renderer, "focusout", elementOf(renderer, received.elementId))
+      } else if (received.eventType === "blur") {
+        endCompositionOnBlur(elementOf(renderer, received.elementId))
+      }
       const event = shapeScrollEvent(normalizeEventType(received))
       if (!root || !handlesEvent(root, event)) {
         if (root) settleAfter(root, event)

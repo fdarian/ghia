@@ -9,11 +9,21 @@ pub(crate) fn is_atomic_inline(display: Option<&str>) -> bool {
     matches!(display, Some("inline-block" | "inline-flex" | "inline-grid" | "inline-table"))
 }
 
+/// `list-item` is a block box that also has a marker, which is the marker's to draw
+/// (`layout::list_marker`): to layout it is `block`.
+pub(crate) fn as_block(display: Option<&str>) -> Option<&str> {
+    match display {
+        Some("list-item") => Some("block"),
+        display => display,
+    }
+}
+
 /// The inner display type, which is what gpui lays the box out as. A
 /// flex or grid item or an absolutely positioned box has its `display`
 /// blockified, and for these values that is the same mapping.
 pub(crate) fn inner(display: Option<&str>) -> Option<&str> {
     match display {
+        Some("list-item") => Some("block"),
         Some("inline-block") => Some("block"),
         Some("inline-flex") => Some("flex"),
         Some("inline-grid") => Some("grid"),
@@ -39,6 +49,16 @@ mod tests {
         assert_eq!(inner(Some("inline-table")), Some("table"));
         assert_eq!(inner(Some("flex")), Some("flex"));
         assert_eq!(inner(None), None);
+    }
+
+    #[test]
+    fn a_list_item_lays_out_as_a_block() {
+        assert_eq!(inner(Some("list-item")), Some("block"));
+        assert_eq!(as_block(Some("list-item")), Some("block"));
+        assert_eq!(as_block(Some("inline-block")), Some("inline-block"), "only the list item");
+        assert_eq!(as_block(None), None);
+        assert!(!is_atomic_inline(Some("list-item")));
+        assert!(!lays_out_items(Some("list-item")));
     }
 
     #[test]

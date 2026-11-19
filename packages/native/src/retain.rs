@@ -128,6 +128,7 @@ fn inherited_fingerprint(inherited: &Inherited) -> u64 {
     fp.hash(&inherited.computed_variations);
     inherited.font_state.fingerprint(&mut fp);
     inherited.direction.fingerprint(&mut fp);
+    fp.hash(&inherited.list_style);
     fp.hash(&inherited.interpolate_size);
     fp.f64(inherited.table.spacing.horizontal);
     fp.f64(inherited.table.spacing.vertical);
@@ -436,11 +437,12 @@ struct Record {
     forms_context: bool,
     /// `Node::lift_run`.
     lift_run: bool,
-    /// The element or something in it is lifted out of it, which a recording is not moved with.
+    /// The element or something in it is handed to the stacking context around it.
     lifts: bool,
-    /// Something in it lifts out of it, past it to the context around (`Node::lifts_out`): the
-    /// part of `lifts` that is not its own `lift_z`.
-    lifts_out: bool,
+    /// gpui is not asked to move a recording of it (`Node::blocks_move`).
+    blocks_move: bool,
+    /// Something it hands to the context around it is a retained root of its own, `Below::lifted_roots`.
+    lifted_roots: bool,
     /// The element or something in it carries the relevance watch, `Below::watched` for the parent.
     watches: bool,
     /// What `Below::holes` added up to when it was built: what the lifted elements in it, however
@@ -740,7 +742,7 @@ struct Node {
     /// [`Retain::forced_host`].
     forced_host: bool,
     /// The element carries the relevance watch (`layout::content_visibility::watch`), see
-    /// [`Retain::watches_relevance`] and [`Node::lifts_out`].
+    /// [`Retain::watches_relevance`] and [`Node::lifts_watched`].
     watches_relevance: bool,
     /// An element above it is a forced host: it is built as the content of one.
     under_forced: bool,
@@ -761,20 +763,39 @@ impl Node {
     /// root that lifts itself and forms a context is recorded and moved whole, as gpui records
     /// it (`Retained::lift_z` with `Retained::relocatable`).
     ///
-    /// The exception is an element that carries the relevance watch, or has one below it: its own `lift_z`
-    /// counts. A replay that moves it skips the prepaint listener of the watch, which remembers its size and
-    /// answers whether it is near the viewport, and moving it is when that answer changes. What is below a
-    /// root that lifts itself was never moved with it until its own lift stopped keeping it in place, and it
-    /// is not moved now; a root that does not lift was always moved with what is below it.
+    /// What is handed to the context around the element is moved with a recording of it (gpui paints each box in
+    /// the region of the recording and hands it over, moved), so a replay is no reason to refuse it; see
+    /// [`Self::lifts_watched`] for what is, and [`Self::hands_lifts_out`] for what a patch declines.
     fn lifts_out(&self, below: &Below) -> bool {
-        (self.lift_z.is_some() && (self.watches_relevance || below.watched)) || self.hands_lifts_out(below)
+        self.lifts_watched(below) || self.hands_lifts_out(below)
+    }
+
+    /// Whether the element lifts itself and carries the relevance watch, or has one below it. A replay that
+    /// moves it skips the prepaint listener of the watch, which remembers its size and answers whether it is
+    /// near the viewport, and moving it is when that answer changes. What is below a root that lifts itself was
+    /// never moved with it until its own lift stopped keeping it in place, and it is not moved now; a root that
+    /// does not lift was always moved with what is below it.
+    fn lifts_watched(&self, below: &Below) -> bool {
+        self.lift_z.is_some() && (self.watches_relevance || below.watched)
+    }
+
+    /// Whether a recording of the element is not asked to be moved by a scroller: it carries the relevance watch, or hands
+    /// the context around it a retained root of its own (`Below::lifted_roots`). A recording that hands over only plain
+    /// boxes is moved with them (gpui records each in the region of the recording, a regional cell).
+    ///
+    /// The second is a matter of cost and not of correctness: inside a region of its own gpui builds a nested lifted root
+    /// again instead of recording a hole for it, so a moved recording is right without the gate, but the nested root is then
+    /// built late every time the root is. On Showcase, without the gate the scroll frame built 206 elements and took a
+    /// test-renderer p50 of 8.2 ms against 6.5 for the base of that run; with it, 174 and 4.5 ms against 5.0.
+    fn blocks_move(&self, below: &Below) -> bool {
+        self.lifts_watched(below) || (self.hands_lifts_out(below) && below.lifted_roots)
     }
 
     /// Whether something below is handed to a stacking context around the element, which a patch of the element
     /// as one piece does not repeat (gpui declines it, `PatchDecline::Lifts`). The element's own lift is not this:
     /// gpui patches a lifted root in the place its context orders it, and what is lifted below a root that forms a
-    /// context goes into that context, inside the patch. Not [`Self::lifts_out`], whose relevance clause is for
-    /// the relocation of a replay: a patch prepaints the watch itself.
+    /// context goes into that context, inside the patch. A recording that is moved takes these along, so it is
+    /// not part of [`Self::lifts_watched`]: a patch prepaints the watch itself.
     fn hands_lifts_out(&self, below: &Below) -> bool {
         !self.forms_context && below.lifts
     }
@@ -825,8 +846,11 @@ struct Below {
     excluded: Option<Exclusion>,
     /// Something below is lifted out of the elements between it and here.
     lifts: bool,
+    /// Something below is handed to the context around the elements between it and here as a retained root of its own
+    /// with a `lift_z`; what that costs a root that is moved is in [`Node::blocks_move`].
+    lifted_roots: bool,
     /// Something below carries the relevance watch, however far down: a replay that moves the element moves it too, and
-    /// skips its listener (see [`Node::lifts_out`]).
+    /// skips its listener (see [`Node::lifts_watched`]).
     watched: bool,
     /// The tokens of the lifted elements below that this one's recording holds a hole or a
     /// fragment for.
@@ -3089,7 +3113,7 @@ impl Retain {
                     Some(wrapped) if self.layout_only => wrapped,
                     _ => node
                         .scroller
-                        .filter(|scroller| scroller.holds(node.id) && !record.lifts_out)
+                        .filter(|scroller| scroller.holds(node.id) && !record.blocks_move)
                         .map(|scroller| scroller.overscan),
                 };
                 let planned = overscan.is_some() && moved && record.seasoned;
@@ -3130,7 +3154,7 @@ impl Retain {
     /// to be moved, and frames are not resting from planning on it.
     fn relocates(&self, node: &Node, record: Option<&Record>) -> bool {
         !self.relocation.resting
-            && record.is_some_and(|record| !record.lifts_out)
+            && record.is_some_and(|record| !record.blocks_move)
             && node.scroller.is_some_and(|scroller| scroller.holds(node.id))
     }
 
@@ -3202,7 +3226,7 @@ impl Retain {
         // a build that is not asked to move it does not. A pass that only lays out follows the wrap.
         if !self.layout_only
             && record.wrapped.is_some_and(|overscan| overscan.is_some())
-            && !(node.scroller.is_some_and(|scroller| scroller.holds(node.id)) && !record.lifts_out)
+            && !(node.scroller.is_some_and(|scroller| scroller.holds(node.id)) && !record.blocks_move)
         {
             return Err(Kept::Unmoved);
         }
@@ -3264,12 +3288,13 @@ impl Retain {
         // frame after a patch of a row builds it (the record the patch kept is of the build before the edit), and it has
         // to be a recorded root again for the next edit of the row to be a patch.
         let lifts_out = node.lifts_out(own);
+        let blocks_move = node.blocks_move(own);
         // Any root that a scroller moved is recorded where it is built when `skippable` would move that recording, as
         // it moves the one a frame that moved nothing leaves: the frame after is a replay, not a build late in prepaint
-        // to make the recording this one did not ask for. What gpui cannot move (a box too big for a root, a lift out
-        // of the root, a stretch that does not plan on moves) is built and left unrecorded, since nothing would use it.
+        // to make the recording this one did not ask for. What is not asked to be moved (a box too big for a root, a root
+        // that blocks a move, a stretch that does not plan on moves) is built and left unrecorded, since nothing would use it.
         let moves_with_scroller = !self.relocation.resting
-            && !lifts_out
+            && !blocks_move
             && node.scroller.is_some_and(|scroller| scroller.fits(node.id) != Some(false));
         let moved = node.moved
             && !moves_with_scroller
@@ -3293,7 +3318,7 @@ impl Retain {
         let lifts = node.lift_z.is_some() || lifts_out;
         let overscan = node
             .scroller
-            .filter(|scroller| !lifts_out && scroller.fits(node.id) != Some(false))
+            .filter(|scroller| !blocks_move && scroller.fits(node.id) != Some(false))
             .map(|scroller| scroller.overscan);
         Some(Recording {
             token: own.token,
@@ -3326,7 +3351,10 @@ impl Retain {
         let (escapes, epoch, token, holes, watches) = match (&node.skipped, self.records.get(&node.id)) {
             // Its children were never entered, so `own.lifts` is empty: what they lift is what its
             // last build folded, which is `Record::lifts`, and the same goes for the watch.
-            (Some(_), Some(record)) => (record.lifts, record.epoch, record.token, record.holes, record.watches),
+            (Some(_), Some(record)) => {
+                own.lifted_roots = record.lifted_roots;
+                (record.lifts, record.epoch, record.token, record.holes, record.watches)
+            }
             (Some(_), None) => unreachable!("an element is skipped by the record of its last build"),
             (None, before) => {
                 let escapes = node.lift_z.is_some() || node.lifts_out(&own);
@@ -3379,7 +3407,10 @@ impl Retain {
         if node.parent == NO_PARENT {
             return;
         }
+        // A lifted element that is a root of its own is handed over as a hole, and one that is not as a plain box.
+        let lifted_root = node.lift_z.is_some() && (node.skipped.is_some() || self.recording_as(at, node.box_root, false).is_some());
         let parent = &mut self.below[node.parent as usize];
+        parent.lifted_roots |= lifted_root || (!node.forms_context && own.lifted_roots);
         parent.changed_below |= own.changed.is_some() || own.changed_below;
         parent.lifts |= escapes;
         parent.watched |= watches;
@@ -3486,7 +3517,7 @@ impl Retain {
     }
 
     /// The element being built carries the relevance watch, which asks whether it is near the viewport
-    /// when it is prepainted: a replay that moves it does not run that, see [`Node::lifts_out`].
+    /// when it is prepainted: a replay that moves it does not run that, see [`Node::lifts_watched`].
     pub(crate) fn watches_relevance(&mut self) {
         if let Some(node) = self.top() {
             node.watches_relevance = true;
@@ -3801,13 +3832,14 @@ impl Retain {
             let unit_clear = node.exclusion.is_none() && own.excluded.is_none() && !escaped_below;
             let lifts_out = node.lifts_out(&own);
             let lifts = node.lift_z.is_some() || lifts_out;
+            let blocks_move = node.blocks_move(&own);
             let clean = own.changed.is_none() && !own.changed_below;
             let parent = (node.parent != NO_PARENT).then_some(node.parent as usize);
             self.moved[at] = parent.is_some_and(|parent| self.moved[parent] || self.below[parent].scrolled);
             // A root under a scroller that gpui can record to move is skipped by a frame that finds
             // the scroller moved. One that it cannot is built when it does.
             let holds = eligible
-                && !lifts_out
+                && !blocks_move
                 && node.skipped.is_none()
                 && node.scroller.is_some_and(|scroller| scroller.holds(node.id));
             let relocates = holds && !self.relocation.resting;
@@ -3902,7 +3934,8 @@ impl Retain {
                     forms_context: node.forms_context,
                     lift_run: node.lift_run,
                     lifts,
-                    lifts_out,
+                    blocks_move,
+                    lifted_roots: own.lifted_roots,
                     watches: node.watches_relevance || own.watched,
                     holes,
                     size: own.size,
@@ -7050,13 +7083,17 @@ mod tests {
     }
 
     #[test]
-    fn a_root_is_relocatable_unless_something_lifts_out_of_it_or_it_is_watched_and_lifts_itself() {
+    fn a_root_is_relocatable_unless_it_is_watched_and_lifts_itself() {
         let window = gpui::WindowId::from(5);
         let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         // `watched`: 0 nothing, 1 the root carries the relevance watch, 2 an element two levels below it does.
         let root_skip = |lift_z: Option<i32>, forms_context: bool, child_lifted: bool, watched: u8| {
             let mut page = Units::new();
+            // A test takes every element for a root of its own unless it says it does not: here the root is one and
+            // what it hands out (a lifted child of one element) is a plain box.
+            page.retain.set_verify(false);
+            page.retain.set_min_root(2);
             for _ in 0..2 {
                 let mut skip = None;
                 page.edit(1);
@@ -7101,11 +7138,12 @@ mod tests {
         assert_eq!(forming.lift_z, Some(0));
         assert_eq!(forming.overscan, overscan, "what is lifted in its own context stays in the recording");
         assert_eq!(root_skip(None, false, false, 0).overscan, overscan);
-        // What lifts out of a root that forms no context is a hole in its recording, lifted or not.
+        // What lifts out of a root that forms no context goes to the context around it, which gpui records a
+        // box of in the region of the root and moves with it: the root is moved, lifted or not.
         let leaking = root_skip(Some(0), false, true, 0);
         assert_eq!(leaking.lift_z, Some(0));
-        assert_eq!(leaking.overscan, None);
-        assert_eq!(root_skip(None, false, true, 0).overscan, None);
+        assert_eq!(leaking.overscan, overscan);
+        assert_eq!(root_skip(None, false, true, 0).overscan, overscan);
         // A root with the relevance watch is not moved by its own lift either: the replay would skip the
         // listener that answers whether it is near, and its move is when that changes.
         let watched = root_skip(Some(0), true, false, 1);
@@ -7118,6 +7156,77 @@ mod tests {
         assert_eq!(watching.lift_z, Some(0));
         assert_eq!(watching.overscan, None);
         assert_eq!(root_skip(None, true, false, 2).overscan, overscan);
+    }
+
+    /// The root 2 of a list in a page, with what it hands to the context around it as `below` builds it inside: the second
+    /// frame edits the root, so the elements in it that are skipped are the ones `below` marks, and the third skips the root.
+    fn handing_root_skip(scroller: Scroller, below: impl Fn(&mut Units)) -> Skip {
+        let mut page = Units::new();
+        page.retain.set_verify(false);
+        page.retain.set_min_root(2);
+        for frame in 0..3 {
+            if frame == 1 {
+                page.edit(2);
+            }
+            page.edit(1);
+            let mut skip = None;
+            page.frame(&[], false, |page| {
+                page.element(1, None, |page| {
+                    skip = page.enter_in(2, Some(scroller));
+                    if skip.is_none() {
+                        page.retain.stacking(|| (None, false));
+                        below(page);
+                        page.retain.exit();
+                    }
+                });
+            });
+            if let Some(skip) = skip {
+                return skip;
+            }
+        }
+        unreachable!("the third frame found the root unchanged")
+    }
+
+    #[test]
+    fn a_root_that_hands_a_retained_root_of_its_own_to_the_context_is_not_moved_unless_a_context_is_between() {
+        let window = gpui::WindowId::from(6);
+        let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
+        crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
+        let overscan = Some(gpui::px(390.0));
+        // A lifted element that is a root of its own is a hole in the recording of the root, and one that is
+        // not (too small to be worth one) is a plain box in it, which is moved along.
+        let lifted = |page: &mut Units, id: u64| {
+            if !page.enter(id) {
+                page.retain.stacking(|| (Some(1), false));
+                page.retain.exit();
+            }
+        };
+        // Below, directly: a lifted root keeps overscan None, a box that is no root does not.
+        assert_eq!(handing_root_skip(scroller, |page| lifted(page, 4)).overscan, overscan, "one that is no root of its own");
+        let held = |page: &mut Units| {
+            page.element(4, None, |page| {
+                page.retain.stacking(|| (Some(1), false));
+                page.leaf(104);
+            });
+        };
+        assert_eq!(handing_root_skip(scroller, held).overscan, None, "a lifted root is handed over as a hole");
+        // A skipped element in the root is where the flag is read from `Record::lifted_roots`, since its children are
+        // not entered.
+        let skipped = |page: &mut Units| {
+            page.element(5, None, |page| {
+                page.retain.stacking(|| (None, false));
+                held(page);
+            });
+        };
+        assert_eq!(handing_root_skip(scroller, skipped).overscan, None, "through an element that is skipped");
+        // An element that forms a context keeps what is lifted in it.
+        let forming = |page: &mut Units| {
+            page.element(5, None, |page| {
+                page.retain.stacking(|| (None, true));
+                held(page);
+            });
+        };
+        assert_eq!(handing_root_skip(scroller, forming).overscan, overscan, "a context is between");
     }
 
     #[test]

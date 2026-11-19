@@ -89,6 +89,7 @@ impl TreeStates {
             "formControl" => TreeStates::DISABLED | TreeStates::ENABLED,
             "required" => TreeStates::REQUIRED | TreeStates::OPTIONAL,
             "readOnly" => TreeStates::READ_ONLY | TreeStates::READ_WRITE,
+            key if crate::html::editing::is_prop(key) => TreeStates::READ_ONLY | TreeStates::READ_WRITE,
             "href" => TreeStates::ANY_LINK,
             "type" => {
                 TreeStates::CHECKED
@@ -145,8 +146,8 @@ pub(super) fn read(tree: &RetainedTree, id: u64, element: &RetainedElement, stat
         TreeState::Indeterminate => is_choice(element, false) && tree.is_indeterminate(id),
         TreeState::Required => takes_required(element) && flag(element, "required"),
         TreeState::Optional => takes_required(element) && !flag(element, "required"),
-        TreeState::ReadWrite => is_read_write(element),
-        TreeState::ReadOnly => !is_read_write(element),
+        TreeState::ReadWrite => is_read_write(tree, id, element),
+        TreeState::ReadOnly => !is_read_write(tree, id, element),
         TreeState::AnyLink => matches!(element.element_type.as_str(), "a" | "area") && crate::html::has_href(element),
     }
 }
@@ -176,12 +177,14 @@ fn takes_required(element: &RetainedElement) -> bool {
     }
 }
 
-/// A `textarea`, or an `input` that is edited as text, that is neither `readOnly` nor disabled.
-fn is_read_write(element: &RetainedElement) -> bool {
+/// A `textarea`, or an `input` that is edited as text, that is neither `readOnly` nor disabled; any
+/// other element when it is editable (`contenteditable`). A control is read-write by its own state
+/// whatever it sits in, as in Chrome.
+fn is_read_write(tree: &RetainedTree, id: u64, element: &RetainedElement) -> bool {
     let editable = match element.element_type.as_str() {
         "textarea" => true,
         "input" => takes_text(element.custom_props().get("type").and_then(Value::as_str).unwrap_or_default()),
-        _ => false,
+        _ => return crate::html::editing::is_editable(tree, id),
     };
     editable && !flag(element, "readOnly") && !element.is_disabled()
 }

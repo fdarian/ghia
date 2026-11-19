@@ -818,7 +818,7 @@ fn collect_plan(tree: &RetainedTree, plan: Vec<super::inline::Child>, out: &mut 
         match child {
             super::inline::Child::Block(child_id) => collect_into(tree, child_id, false, out),
             super::inline::Child::Paragraph(paragraph) => collect_paragraph(tree, &paragraph, out),
-            super::inline::Child::EmptyLine => {}
+            super::inline::Child::EmptyLine | super::inline::Child::BlankLine => {}
             super::inline::Child::AnonymousCell(cell) => {
                 collect_plan(tree, cell.into_iter().map(|(child, _)| child).collect(), out)
             }

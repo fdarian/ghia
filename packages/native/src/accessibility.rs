@@ -278,7 +278,7 @@ pub(crate) fn labels_paragraphs(
     use crate::text::inline::Child;
     a11y_active
         && carries_text(element)
-        && plan.iter().any(|(child, _)| !matches!(child, Child::Paragraph(_) | Child::EmptyLine))
+        && plan.iter().any(|(child, _)| !matches!(child, Child::Paragraph(_) | Child::EmptyLine | Child::BlankLine))
 }
 
 /// The node of a paragraph that sits beside blocks in `host`, which has no element of its own to carry

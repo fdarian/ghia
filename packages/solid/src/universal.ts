@@ -20,7 +20,7 @@ import {
   type HostParent,
   type HostText,
 } from "./host.js"
-import { jsxAttributeOf, jsxAttributeValue } from "@ghia/native/host"
+import { hasLiveRanges, jsxAttributeOf, jsxAttributeValue, liveRangesReplaceData } from "@ghia/native/host"
 import { createSpread } from "./spread.js"
 import { notePresenceHost, runInPresenceScope } from "./presence-scope.js"
 
@@ -89,7 +89,9 @@ const runtime = createRenderer<HostNode | HostParent>({
   createTextNode: createHostText,
   replaceText(node, value) {
     if (!isHostText(node)) throw new TypeError("Expected a GPUIX text node")
-    replaceHostText(node, value)
+    const next = String(value)
+    if (hasLiveRanges() && node.text !== next) liveRangesReplaceData(node, 0, node.text.length, next.length)
+    replaceHostText(node, next)
   },
   setProperty,
   insertNode(parent, node, anchor) {

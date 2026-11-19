@@ -102,4 +102,29 @@ describe("liveRendererAsTest", () => {
 
     expect(live.moves.map((move) => move.pressedButton)).toEqual([undefined, 2])
   })
+
+  it("a sequence of keys is pressed one at a time, with a microtask and a loop turn between two", async () => {
+    const live = fakeLiveRenderer()
+    const keys: string[] = []
+    live.renderer.simulateKeystrokes = (press) => {
+      keys.push(press)
+      // An editor that commits its update in a microtask (Lexical) has done so before the next key.
+      queueMicrotask(() => live.heard.push(`committed:${press}`))
+    }
+    const test = liveRendererAsTest(live.renderer)
+
+    await test.simulateKeystrokes("m  i\td")
+
+    expect(keys).toEqual(["m", "i", "d"])
+    expect(live.heard).toEqual(["committed:m", "committed:i", "committed:d"])
+  })
+
+  it("an empty sequence is left to native to refuse", async () => {
+    const live = fakeLiveRenderer()
+    live.renderer.simulateKeystrokes = (press) => {
+      if (press.trim() === "") throw new Error("No keys to press")
+    }
+
+    await expect(liveRendererAsTest(live.renderer).simulateKeystrokes(" ")).rejects.toThrow("No keys to press")
+  })
 })

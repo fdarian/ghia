@@ -3,6 +3,7 @@
 //! stylesheet gives the tag. The style is the lowest layer under an element: below the universal
 //! style, which is below the element's own (`RetainedTree::refresh_effective_style`).
 
+pub(crate) mod editing;
 pub(crate) mod popover;
 mod semantics;
 mod tags;
@@ -30,6 +31,52 @@ fn styles() -> &'static FxHashMap<&'static str, Arc<StyleDesc>> {
             })
             .collect()
     })
+}
+
+fn nested_list_styles() -> &'static FxHashMap<&'static str, Arc<StyleDesc>> {
+    static STYLES: OnceLock<FxHashMap<&'static str, Arc<StyleDesc>>> = OnceLock::new();
+    STYLES.get_or_init(|| {
+        tags::NESTED_LISTS
+            .iter()
+            .map(|(name, json)| {
+                let style = crate::retained_tree::parse_style(json.as_bytes())
+                    .unwrap_or_else(|error| panic!("the user agent style of {name} is invalid: {error}"));
+                (*name, Arc::new(style))
+            })
+            .collect()
+    })
+}
+
+/// A `<ul>`, `<ol>` or `<dl>`, the tags whose user agent style depends on the lists around them.
+pub(crate) fn is_list(element_type: &str) -> bool {
+    matches!(element_type, "ul" | "ol" | "dl")
+}
+
+/// What is above a list that its user agent style reads (see [`crate::retained_tree::RetainedTree::lists_above`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ListsAbove {
+    /// How many `<ul>` and `<ol>` elements, counted to two: the marker of a `<ul>` follows it.
+    pub marked: usize,
+    /// Whether there is any `<ul>`, `<ol>` or `<dl>`: it takes the block margin off a list.
+    pub any: bool,
+}
+
+/// The style of a list below `above`, which Chrome gives by descendant selectors: `:is(dir, dl,
+/// menu, ol, ul) :is(dir, dl, menu, ol, ul)` has no block margin, and `ul ul` and `ol ul` are
+/// `circle`, `ul ul ul` and the like `square`, whatever else is between.
+fn nested_list_style(element_type: &str, above: ListsAbove) -> Option<Arc<StyleDesc>> {
+    if !above.any {
+        return None;
+    }
+    let name = match (element_type, above.marked) {
+        ("ul", 0) => "ul in dl",
+        ("ul", 1) => "ul in 1",
+        ("ul", _) => "ul in 2",
+        ("ol", _) => "ol in list",
+        ("dl", _) => "dl in list",
+        _ => return None,
+    };
+    nested_list_styles().get(name).cloned()
 }
 
 /// What `<wbr>` puts in the text of its paragraph: a zero width space, where a line may break. It is
@@ -76,9 +123,9 @@ fn displayed_as_none(base: Option<Arc<StyleDesc>>) -> Arc<StyleDesc> {
 /// The user agent style of `element`: its tag's, and for an `<input>` its `type`'s, since Chrome's `html.css`
 /// has a rule for each (a checkbox and a radio are small `inline-block` boxes with a margin, a hidden input
 /// is not displayed). A text field has none. An element with the `hidden` attribute is `display: none` over
-/// that, whatever its tag.
-pub fn ua_style_of(element: &crate::retained_tree::RetainedElement) -> Option<Arc<StyleDesc>> {
-    let tag_style = ua_style_of_tag_and_type(element);
+/// that, whatever its tag. `above` is the lists that are ancestors, which only a list reads.
+pub fn ua_style_of(element: &crate::retained_tree::RetainedElement, above: ListsAbove) -> Option<Arc<StyleDesc>> {
+    let tag_style = nested_list_style(&element.element_type, above).or_else(|| ua_style_of_tag_and_type(element));
     if element.hidden_attribute() {
         return Some(displayed_as_none(tag_style));
     }

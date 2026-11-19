@@ -206,7 +206,7 @@ second wake went from 5% to nearly all between runs of the same build. `-NSUpdat
 
 **Design.** `pump_app_nonblocking` calls `[CATransaction flush]` after each `sendEvent:`. The update cycle's next pass
 then finds no transaction to commit and arms nothing. Nothing else in the pump changed: the run-until-unhandled loop
-stays as it is and nothing blocks (#39).
+stays as it is and nothing blocks (#39), except that it ends after a frame step ([One step per pump](#one-frame-per-js-task)).
 
 **What the pump does not do.** `pump_app_nonblocking` does not call `[NSApplication updateWindows]`. `sendEvent:` sets
 `windowsNeedUpdate`, which installs a one-shot run loop observer that calls `updateWindows` in the next pass of the loop;
@@ -267,8 +267,40 @@ flag stays set from the wake until `tick()` returns, so wakes that arrive during
 
 Work that arrived meanwhile is not dropped: the frame step the display link merged into the main queue during a long tick
 is still there when `tick()` returns and `run_loop_pumped()` re-arms the watch, so it fires at once and the step runs in
-the next tick, right after the JS tasks that were queued. Two steps can run in one pump when a step outlasts a vsync. A
-frame that ends before the next vsync takes every wake, so fast frames keep the display rate.
+the next tick, right after the JS tasks that were queued. A frame that ends before the next vsync takes every wake, so
+fast frames keep the display rate.
+
+**One step per pump.** `pump_app_nonblocking` runs at most one display-link step (`step` in
+`gpui_macos/src/window.rs`, counted by `link_steps()`), and so does a tick. Without the stop, a frame that overran a vsync kept the
+pump in its run loop: each step blocks in `nextDrawable` until the next vsync, the link has queued its next tick by then,
+and the loop found a source every time. No wheel event was dequeued for 0.1 to 2 s, JS did not run, the window kept
+presenting a frozen scroll for 3 to 8 s of every 30 s, and a gap of 500 ms expired the wheel latch (`scroll_routing.rs`),
+so the scroll then stuck partway.
+
+The pump drains the NSEvents first (`drain_events`), then runs the run loop one source at a time while that handles
+sources (the loop exists for the webview's sources, see [the webview wake](#waking-js-for-a-webview)); a pump that
+ran a step, or that yielded to a key event ([below](#one-key-event-per-pump)), does not run it. The pump is one
+main-queue drain and at most one step per window. `nextEventMatchingMask:` runs one pass of the run loop in its mode when
+it finds no event, so a step can run inside the drain, and the pass of the source poll runs one too. Once a step has run,
+the drain goes on in a private mode with no sources (`GPUIPumpDrainMode`): the events that are queued, among them those
+that the same pass queued, come back in order, `sendEvent:` and the transaction flush run for each, and no source, the
+display link's next tick among them, runs. Without that, a pump that ran a step left the events of its pass for the next
+pump, and an overrunning animation handled one NSEvent per frame. A step in the drain or in the poll ends the call without
+polling the sources again. Other sources keep the loop.
+
+The block that has the embedder pump again is posted only when a step stopped its link (`link_stops()`, bumped by
+`count_step`), at the 256-iteration cap, and when the pump yields to a key event (below). While a link runs, its next tick wakes the embedder within a vsync; a block
+after every step doubled the wakes of an animation (about 240 ticks a second at 120 Hz). With several windows the block
+is also posted when one window's link stops while another's runs, which costs one extra wake.
+
+The function returns whether a step ran in the call: a caller that steps the display links itself after the pump skips
+that step when it did, since the pump's step was the frame (`MacPlatform::pump_events` drops the flag for now). Only a
+step that ran a frame callback counts.
+`tests/pump_one_step.rs` (`harness = false`): a window whose frame sleeps 30 ms and asks for the next frame has at most
+one frame per pump, a pump that drew says a step ran, and several application-defined events posted before each pump are
+all handled by it (a main-queue block posts them, so they arrive in the pass that runs the step; events posted straight to NSApp were all returned before a pass and did not show the bug). With the wake hook installed, a step that leaves the link running is followed by a wake a vsync
+later, not at once, and every pump that ran a step after the last frame request is followed by a wake, the last one from
+the block.
 
 Don't tick inline from the wake callback or clear the flag before the tick (#56). Bun's `ThreadSafeFunction::on_dispatch`
 drains its queue without yielding, so once a frame outlasted a vsync each wake queued the next, and timers, promises
@@ -278,6 +310,25 @@ What the frame of a running animation costs is not the pump's, but it decides ho
 paint-only animation is offered to gpuix's patcher before gpui builds anything and costs what the changed units cost; a
 tick the patcher declines is drawn whole, and an animation whose content is culled draws and presents nothing. A scroll
 animation is always asked for as `request_animation_frame` and drawn whole. See [patch-frames.md](patch-frames.md).
+
+### One key event per pump
+
+**Problem.** Key handlers run synchronously inside the napi call that pumps (`keydown` through `sync_dispatch`, the `editinput` of an `insertText:` through `editing/input_handler.rs`), and the engine runs JS microtasks only when that call returns. `drain_events` used to send every queued NSEvent (up to 256) in one call, so two keys waiting when a tick started (a slow frame, key repeat) shared one microtask checkpoint, and a library that commits in a microtask lost all but the first: Lexical (`scheduleMicroTask` in `$beginUpdate`) given three keys kept the first. A browser runs a checkpoint after each task, so each key has its own.
+
+**Design.** `MacPlatform::set_yield_after_key_event(true)` (a setting of the platform instance, off by default; Ghia turns it on in `GpuixRenderer::init` and the test renderer's constructor) makes the pump give a key event (`keyDown`, `keyUp`, `flagsChanged`) a checkpoint on both sides. `pump_app_nonblocking(yield_after_key)` returns a `PumpOutcome { stepped, yielded_to_key }`, and `MacPlatform::key_event_pending()` is its `yielded_to_key`:
+
+- Before the key: once the call has sent an event or run a step, `drain_events` peeks the next event in the private drain mode (which runs nothing) and leaves a key event queued, so the events or the step before it end the pump first and their microtasks run before the key's `keydown`. When the call has sent nothing yet, the first event is peeked too (a pass of the default mode that finds it can run a step and queue a key, which then stays out of this call), and a key that is first is sent.
+- After the key: the call ends after the `sendEvent:` of a key event.
+
+On either end `pump_app_nonblocking` posts the block it posts when a step stops its link (`DispatchQueue::main().exec_async(|| {})`), returns without running the run loop's sources, and still reports a step that ran; it never runs a second step. Mouse and other events are drained together as before, up to the first key. The block is main-queue work, so the run-loop watch wakes JS: `tick()` ends with `tick_finished()`, which clears `pending` and re-arms the watch (`run_loop_pumped()`), and the posted block fires it at once. `startFrameLoop` takes the wake as a `setImmediate`, which runs after the microtasks of the tick that just returned, so the next tick starts after the key's microtasks and picks up the next key. The sources the early return skipped run in the next pump.
+
+**The timer path.** `startFrameLoop` with `frameMs` set (or on a runtime with no `setFrameWakeCallback`) ticks on a timer and ignores the wake. There, a tick that left a key queued (`renderer.keyEventPending()`, from the platform's `key_event_pending`) re-ticks with `setImmediate` instead of waiting out `frameMs`, so the keys that were queued together are taken a turn of the event loop apart, not a frame apart.
+
+**What it costs.** One extra tick per key, one wake and a pump that does less than a full one; a keyDown and a keyUp are two ticks, and a key that follows other events costs one more for them. An idle window is unchanged (nothing posts the block without a key).
+
+**What is left.** A key's own `keydown` and its `beforeinput` and `input` are one `sendEvent:` and one call into JS (AppKit's `keyDown:` and `insertText:` of it run in it), and the listeners of one event share a call: there is no checkpoint between them ([deviations.md](deviations.md)). Automation's `simulateKeystrokes` dispatches directly and does not go through AppKit's queue, so the live automation client still presses one key per call with a turn of the event loop between them (`liveRendererAsTest`). The test renderer's `tick()` drains AppKit with its own loop (`native_event::drain_app_events`), not this pump; `pumpNativeEvents()` is the one call of the real pump.
+
+**Tests.** zed `gpui_macos/tests/pump_yields_per_key.rs` (`harness = false`, like `pump_one_step.rs`): with the setting on, key events posted to NSApp take one pump each, each followed by a wake, and mouse moves posted before the first key drain together up to it, a key behind a step or an event waits for the next pump; with it off one pump sends all of them. `packages/native/js/__tests__/key-microtasks.test.ts`: three keys posted before one pump through `postNativeKeys` and `pumpNativeEvents` run each key's microtask before the next `keydown`; with the setting off they run after all three. `packages/native/js/__tests__/frame-loop.test.ts`: the timer path re-ticks at once while `keyEventPending()` is true. `examples/lexical/react.test.tsx` and `solid.test.tsx` 15: the same keys typed into Lexical, which commits all three.
 
 ### The steps before a frame (`Window::set_frame_steps`)
 
@@ -338,7 +389,7 @@ Memory layout that is not API, so `enable` refuses (an `Error`, and nothing is w
 
 Where it refuses, `webview_pulse.rs` logs the reason once and keeps the repeating `CFRunLoopTimer` it used before (16 ms for 1.5 s after anything asked a page for work, 250 ms otherwise); that timer exists only as this fallback.
 
-A run of the loop that returns after one source (`CFRunLoopRunInMode(.., 0.0, returnAfterSourceHandled)`) handles one source and receives the wake message in the same iteration, so another source that is signalled stays signalled and nothing wakes for it. `pump_app_nonblocking` therefore runs it until an iteration handles nothing. With one source per run, a `reload()` after a few idle seconds delivered `did-start-loading` and then nothing for seconds.
+A run of the loop that returns after one source (`CFRunLoopRunInMode(.., 0.0, returnAfterSourceHandled)`) handles one source and receives the wake message in the same iteration, so another source that is signalled stays signalled and nothing wakes for it. `pump_app_nonblocking` therefore runs it until an iteration handles nothing, or ran a display-link step ([One step per pump](#one-frame-per-js-task)). With one source per run, a `reload()` after a few idle seconds delivered `did-start-loading` and then nothing for seconds.
 
 **Numbers** (release addon, one machine, runs of the two addons back to back in one lock hold; load average 3 to 7 unless noted; `examples/webview-wake/`):
 

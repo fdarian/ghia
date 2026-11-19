@@ -288,6 +288,7 @@ describe.skipIf(!hasNativeTestRenderer)("DOM building from code in Solid", () =>
       eventHandlers: new Map(),
       allocateId: () => ++nextId,
     })
+    otherWindow.ensureDocumentElements()
     expect(() => (otherWindow.body as unknown as Node).appendChild(box)).toThrow(
       expect.objectContaining({ name: "HierarchyRequestError" })
     )
@@ -305,6 +306,7 @@ describe.skipIf(!hasNativeTestRenderer)("DOM building from code in Solid", () =>
       eventHandlers: new Map(),
       allocateId: () => ++nextId,
     })
+    otherWindow.ensureDocumentElements()
     creates.length = 0
     const holder = document.createElement("div")
     const sibling = document.createElement("span")
@@ -327,6 +329,7 @@ describe.skipIf(!hasNativeTestRenderer)("DOM building from code in Solid", () =>
       eventHandlers: new Map(),
       allocateId: () => ++nextId,
     })
+    otherWindow.ensureDocumentElements()
     const holder = document.createElement("div")
     box.appendChild(holder)
     holder.remove()

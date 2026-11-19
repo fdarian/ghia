@@ -65,7 +65,7 @@ fn is_ordinary_box(style: &StyleDesc) -> bool {
         && !uses_groups(style)
         && !has_intrinsic_size(style)
         && style.aspect_ratio.is_none()
-        && matches!(style.display.as_deref(), None | Some("block" | "flex" | "grid"))
+        && matches!(super::display::as_block(style.display.as_deref()), None | Some("block" | "flex" | "grid"))
 }
 
 /// A length that does not follow its containing block or the content.
@@ -106,7 +106,7 @@ fn is_stretched(tree: &RetainedTree, element: &RetainedElement, style: &StyleDes
     if parent.element_type != "div" || parent_style.container_rules.is_some() {
         return false;
     }
-    match parent.display().as_deref() {
+    match super::display::as_block(parent.display().as_deref()) {
         None | Some("block") => true,
         Some("flex") => {
             let column = matches!(parent_style.flex_direction.as_deref(), Some("column" | "column-reverse"));

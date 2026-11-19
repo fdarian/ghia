@@ -22,8 +22,8 @@ describe.skipIf(!hasNativeTestRenderer)("renderer calls from a keydown handler",
   it("writes and reads the clipboard", async () => {
     const reads: Array<Promise<string>> = []
     const { press } = mount((renderer) => {
-      renderer.writeClipboardText("direct")
-      expect(renderer.readClipboardText()).toBe("direct")
+      renderer.writeClipboard([{ type: "text/plain", data: "direct" }])
+      expect(renderer.readClipboard()).toEqual([{ type: "text/plain", data: "direct" }])
       reads.push(clipboard.writeText("from handler").then(() => clipboard.readText()))
     })
     press()
