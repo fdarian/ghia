@@ -53,6 +53,24 @@ export declare class GpuixRenderer {
   tick(): boolean
   isInitialized(): boolean
   /**
+   * Whether a display link started since it last drew still waits for its first step, so the
+   * frame loop has to call `stepStartedLinks` after the task and microtasks of the tick that
+   * started it. macOS only; everything else answers false.
+   */
+  startedLinksPending(): boolean
+  /**
+   * Draws the input frame: the first step of the display links the last ticks started, now
+   * instead of at the link's first vsync, which comes up to a frame period later. The frame
+   * loop calls it from its own task after the tick's microtasks, so what the key's handlers
+   * queued there is in the frame, as a browser paints after an input task and its microtasks.
+   * Returns whether it stepped a window.
+   *
+   * Throws when called from a handler: a step draws, and a handler is inside the input
+   * dispatch of a tick. It discards the list with `GPUIX_INPUT_FRAME_OFF` set. macOS only;
+   * everything else answers false.
+   */
+  stepStartedLinks(): boolean
+  /**
    * Whether the last `tick()` left a key event queued or ended after sending one, so the
    * frame loop has to tick again at once instead of waiting for a wake or its timer. Only a
    * macOS window yields per key event; everything else answers false.
@@ -110,6 +128,16 @@ export declare class GpuixRenderer {
    * the others were drawn whole: subtract two reads for a span of frames.
    */
   getPatchCounters(): PatchCounters
+  /**
+   * How many frames the window has painted, as the test renderer's `getPaintedFrameCount`: a
+   * test of a live window compares reads to see which tick drew a frame.
+   */
+  getPaintedFrameCount(): number
+  /**
+   * Whether AppKit counts this window as visible (not occluded), which a display link needs to
+   * start: a test of the frame a window draws skips itself while this is false.
+   */
+  isWindowVisible(): boolean
   /**
    * Whether AppKit reports this window as the key window. A `kind: "panel"` window opened
    * with `focus: true` is key while another app stays frontmost. Unlike `setWindowActive` and

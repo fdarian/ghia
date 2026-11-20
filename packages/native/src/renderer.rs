@@ -946,7 +946,7 @@ enum MouseInput {
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum KeyInput {
-    Keystrokes(String),
+    Keystrokes(Vec<crate::automation::KeyStep>),
     Down { keystroke: String, is_held: bool },
     Up(String),
 }
@@ -1547,19 +1547,33 @@ async fn run_ui_commands(
                 result
             }
             UiCommand::DispatchKey { input, response } => {
-                let result = gpui::AnyWindowHandle::from(window)
-                    .update(cx, move |_view, window, cx| match input {
-                        KeyInput::Keystrokes(keystrokes) => {
-                            crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
+                let handle = gpui::AnyWindowHandle::from(window);
+                let result = match input {
+                    // An update per step, as the platform sends the events: what a keydown defers
+                    // (the editor's `input`) is delivered before the keyup, not after the sequence.
+                    KeyInput::Keystrokes(steps) => {
+                        let mut result = Ok(());
+                        for step in steps {
+                            result = handle.update(cx, move |_view, window, cx| {
+                                step.dispatch(window, cx)
+                            });
+                            if result.is_err() {
+                                break;
+                            }
                         }
-                        KeyInput::Down { keystroke, is_held } => {
+                        result
+                    }
+                    KeyInput::Down { keystroke, is_held } => handle
+                        .update(cx, move |_view, window, cx| {
                             crate::automation::dispatch_key_down(window, cx, &keystroke, is_held)
-                        }
-                        KeyInput::Up(keystroke) => {
+                        })
+                        .and_then(|result| result.map_err(anyhow::Error::msg)),
+                    KeyInput::Up(keystroke) => handle
+                        .update(cx, move |_view, window, cx| {
                             crate::automation::dispatch_key_up(window, cx, &keystroke)
-                        }
-                    })
-                    .and_then(|result| result.map_err(anyhow::Error::msg));
+                        })
+                        .and_then(|result| result.map_err(anyhow::Error::msg)),
+                };
                 response
                     .send(
                         result
@@ -1613,6 +1627,14 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         .or_else(|| payload.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "unknown panic".to_string())
 }
+
+/// `GPUIX_INPUT_FRAME_OFF`: `stepStartedLinks` does not step a display link a tick started (the
+/// A-B switch for the input frame, docs/fork/testing.md). Read once, so set it before the first call.
+#[cfg(target_os = "macos")]
+static INPUT_FRAME_OFF: std::sync::LazyLock<std::sync::atomic::AtomicBool> =
+    std::sync::LazyLock::new(|| {
+        std::sync::atomic::AtomicBool::new(std::env::var_os("GPUIX_INPUT_FRAME_OFF").is_some())
+    });
 
 #[cfg(target_os = "macos")]
 type FrameWakeHook = Arc<dyn Fn() + Send + Sync>;
@@ -2518,12 +2540,12 @@ impl GpuixRenderer {
             // Key input is dispatched while the platform pumps, and JS handlers
             // run synchronously from there.
             let result = crate::events::sync_dispatch::native_call(|| {
-                let running = MAC_PLATFORM.with(|p| {
+                let pumped = MAC_PLATFORM.with(|p| {
                     p.borrow()
                         .as_ref()
-                        .map(|platform| platform.pump_events())
-                        .unwrap_or(false)
+                        .map(|platform| platform.pump_events_reporting_step())
                 });
+                let running = pumped.is_some_and(|outcome| outcome.is_some());
                 #[cfg(feature = "test-support")]
                 {
                     let delay = self
@@ -2563,6 +2585,59 @@ impl GpuixRenderer {
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.initialized.lock().unwrap()
+    }
+
+    /// Whether a display link started since it last drew still waits for its first step, so the
+    /// frame loop has to call `stepStartedLinks` after the task and microtasks of the tick that
+    /// started it. macOS only; everything else answers false.
+    #[napi]
+    pub fn started_links_pending(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            gpui_macos::started_display_links_pending()
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    /// Draws the input frame: the first step of the display links the last ticks started, now
+    /// instead of at the link's first vsync, which comes up to a frame period later. The frame
+    /// loop calls it from its own task after the tick's microtasks, so what the key's handlers
+    /// queued there is in the frame, as a browser paints after an input task and its microtasks.
+    /// Returns whether it stepped a window.
+    ///
+    /// Throws when called from a handler: a step draws, and a handler is inside the input
+    /// dispatch of a tick. It discards the list with `GPUIX_INPUT_FRAME_OFF` set. macOS only;
+    /// everything else answers false.
+    #[napi]
+    pub fn step_started_links(&self) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            crate::events::sync_dispatch::native_call(|| {
+                if !crate::events::sync_dispatch::outermost_native_call() {
+                    return Err(Error::from_reason(
+                        "stepStartedLinks cannot run inside an event handler that native called synchronously: it draws a frame. The frame loop calls it from its own task.",
+                    ));
+                }
+                if INPUT_FRAME_OFF.load(std::sync::atomic::Ordering::Relaxed) {
+                    gpui_macos::discard_started_display_links();
+                    return Ok(false);
+                }
+                if !gpui_macos::started_display_links_pending() {
+                    return Ok(false);
+                }
+                gpui_macos::step_started_display_links();
+                Ok(true)
+            })
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(false)
+        }
     }
 
     /// Whether the last `tick()` left a key event queued or ended after sending one, so the
@@ -2830,6 +2905,30 @@ impl GpuixRenderer {
 
         #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("getPatchCounters needs macOS"))
+    }
+
+    /// How many frames the window has painted, as the test renderer's `getPaintedFrameCount`: a
+    /// test of a live window compares reads to see which tick drew a frame.
+    #[cfg(feature = "test-support")]
+    #[napi]
+    pub fn get_painted_frame_count(&self) -> Result<f64> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, _window, _cx| view.painted_frame_count() as f64);
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("getPaintedFrameCount needs macOS"))
+    }
+
+    /// Whether AppKit counts this window as visible (not occluded), which a display link needs to
+    /// start: a test of the frame a window draws skips itself while this is false.
+    #[cfg(feature = "test-support")]
+    #[napi]
+    pub fn is_window_visible(&self) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(|window, _cx| crate::window_key::is_visible(window))?;
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("isWindowVisible needs macOS"))
     }
 
     /// Whether AppKit reports this window as the key window. A `kind: "panel"` window opened
@@ -4851,13 +4950,19 @@ impl GpuixRenderer {
     #[napi]
     pub fn simulate_keystrokes(&self, keystrokes: String) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
-            crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
-        })?
-        .map_err(Error::from_reason);
+        {
+            // An update per event, as AppKit sends them: what a keydown defers (the editor's `input`)
+            // is delivered before the keyup, not after the whole sequence.
+            for step in crate::automation::keystroke_steps(&keystrokes).map_err(Error::from_reason)? {
+                update_window_without_view(move |window, cx| step.dispatch(window, cx))?;
+            }
+            return Ok(());
+        }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.dispatch_key_input(KeyInput::Keystrokes(keystrokes));
+        return self.dispatch_key_input(KeyInput::Keystrokes(
+            crate::automation::keystroke_steps(&keystrokes).map_err(Error::from_reason)?,
+        ));
 
         #[cfg(not(any(
             target_os = "macos",
@@ -6854,6 +6959,33 @@ fn is_within(tree: &crate::retained_tree::RetainedTree, id: u64, ancestor: u64) 
     false
 }
 
+/// The payload of a DOM event that bubbles and cannot be cancelled, aimed at `id`, or `None` when
+/// neither the element nor an ancestor listens for it.
+pub(crate) fn bubbling_event_payload(
+    tree: &crate::retained_tree::RetainedTree,
+    id: u64,
+    event_type: &str,
+    build: impl FnOnce(&mut EventPayload),
+) -> Option<EventPayload> {
+    if !crate::events::path::path_listens(tree, id, event_type) {
+        return None;
+    }
+    let mut payload = EventPayload {
+        element_id: id as f64,
+        event_type: event_type.to_string(),
+        target: Some(id as f64),
+        path: Some(
+            crate::events::path::event_path(tree, id)
+                .into_iter()
+                .map(|id| id as f64)
+                .collect(),
+        ),
+        ..Default::default()
+    };
+    build(&mut payload);
+    Some(payload)
+}
+
 /// Emits a DOM event that bubbles and cannot be cancelled, aimed at `id`, when
 /// the element or an ancestor listens for it.
 pub(crate) fn emit_bubbling_event(
@@ -6863,19 +6995,12 @@ pub(crate) fn emit_bubbling_event(
     event_type: &str,
     build: impl FnOnce(&mut EventPayload),
 ) {
-    if !crate::events::path::path_listens(tree, id, event_type) {
+    let (Some(callback), Some(payload)) =
+        (callback, bubbling_event_payload(tree, id, event_type, build))
+    else {
         return;
-    }
-    emit_event_full(callback, id, event_type, |payload| {
-        payload.target = Some(id as f64);
-        payload.path = Some(
-            crate::events::path::event_path(tree, id)
-                .into_iter()
-                .map(|id| id as f64)
-                .collect(),
-        );
-        build(payload);
-    });
+    };
+    callback(payload);
 }
 
 pub(crate) fn emit_transition_events(

@@ -36,9 +36,11 @@ use super::text_selection::{
 };
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::caret::{caret_rect, caret_visible, until_phase_change};
+use crate::element_tree::EventPayload;
 use crate::events::clipboard::{Copy, Cut, Paste, SelectAll};
 use crate::events::keyboard::InputRouting;
-use crate::renderer::{emit_bubbling_event, EventCallback, GpuixView};
+use crate::events::sync_dispatch;
+use crate::renderer::{bubbling_event_payload, EventCallback, GpuixView};
 use crate::retained_tree::RetainedTree;
 use crate::theme::Theme;
 
@@ -1190,6 +1192,7 @@ impl TextEditorState {
         range_utf16: Option<Range<usize>>,
         new_text: &str,
         kind: InputKind,
+        window: &Window,
         cx: &mut Context<Self>,
     ) {
         if self.read_only || self.disabled {
@@ -1200,18 +1203,40 @@ impl TextEditorState {
             .map(|range| self.range_from_utf16(range))
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
-        self.edit(range, new_text, true, kind, cx);
+        self.edit(range, new_text, true, kind, window, cx);
     }
 
-    fn emit_composition(&self, event_type: &str, data: &str) {
-        let tree = self.tree.lock().unwrap();
-        emit_bubbling_event(&self.callback, &tree, self.element_id, event_type, |payload| {
-            payload.data = Some(data.to_string());
+    /// Delivers `payload` to JS once the edit is over, with `sync_dispatch::emit`.
+    ///
+    /// The editor is leased for as long as GPUI is dispatching the edit to it, so a handler that reads
+    /// or writes this input would re-lease it. Every event the editor emits goes through here, so
+    /// they reach JS in the order the edits made them, and ahead of the keyup of the key that made them.
+    fn deliver_event(&self, payload: Option<EventPayload>, window: &Window, cx: &mut Context<Self>) {
+        let Some(payload) = payload else {
+            return;
+        };
+        let callback = self.callback.clone();
+        window.defer(cx, move |window, cx| {
+            sync_dispatch::emit(window, cx, &callback, payload);
         });
     }
 
+    fn emit_composition(&self, event_type: &str, data: &str, window: &Window, cx: &mut Context<Self>) {
+        let payload = bubbling_event_payload(&self.tree.lock().unwrap(), self.element_id, event_type, |payload| {
+            payload.data = Some(data.to_string());
+        });
+        self.deliver_event(payload, window, cx);
+    }
+
     /// The DOM `input` event of one edit, which bubbles and cannot be canceled.
-    fn emit_input(&mut self, kind: InputKind, inserted: &str, is_composing: bool) {
+    fn emit_input(
+        &mut self,
+        kind: InputKind,
+        inserted: &str,
+        is_composing: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         self.edited.set(true);
         self.routing.text_commits().edited(self.element_id, &self.content);
         let tree = self.tree.lock().unwrap();
@@ -1222,26 +1247,26 @@ impl TextEditorState {
         while self.pending_values.len() > 32 {
             self.pending_values.pop_front();
         }
-        emit_bubbling_event(&self.callback, &tree, self.element_id, "input", |payload| {
+        let payload = bubbling_event_payload(&tree, self.element_id, "input", |payload| {
             payload.value = Some(self.content.clone());
             payload.input_type = Some(kind.input_type().to_string());
             payload.data = kind.carries_text().then(|| inserted.to_string());
             payload.is_composing = Some(is_composing);
         });
+        drop(tree);
+        self.deliver_event(payload, window, cx);
     }
 
     /// The DOM `change` event for an edit that commits itself, as the number stepper's does.
-    fn emit_change(&self) {
+    fn emit_change(&self, window: &Window, cx: &mut Context<Self>) {
         let Some(value) = self.routing.text_commits().commit(self.element_id) else {
             return;
         };
-        let tree = self.tree.lock().unwrap();
-        emit_bubbling_event(&self.callback, &tree, self.element_id, "change", |payload| {
-            payload.value = Some(value);
-        });
+        let payload = crate::events::text_commit::change_payload(&self.tree.lock().unwrap(), self.element_id, value);
+        self.deliver_event(payload, window, cx);
     }
 
-    fn restore(&mut self, snapshot: EditSnapshot, kind: InputKind, cx: &mut Context<Self>) {
+    fn restore(&mut self, snapshot: EditSnapshot, kind: InputKind, window: &Window, cx: &mut Context<Self>) {
         self.content = snapshot.content;
         self.selected_range = snapshot.selected_range;
         self.selection_reversed = snapshot.selection_reversed;
@@ -1249,7 +1274,7 @@ impl TextEditorState {
         self.follow_cursor = true;
         self.last_edit = None;
         self.reset_blink(cx);
-        self.emit_input(kind, "", false);
+        self.emit_input(kind, "", false, window, cx);
         self.changed(cx);
     }
 
@@ -1360,7 +1385,7 @@ impl TextEditorState {
         ))
     }
 
-    fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+    fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
             return;
         }
@@ -1371,10 +1396,10 @@ impl TextEditorState {
             }
             self.select_to(previous, cx);
         }
-        self.replace_range(None, "", InputKind::DeleteContentBackward, cx);
+        self.replace_range(None, "", InputKind::DeleteContentBackward, window, cx);
     }
 
-    fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+    fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
             return;
         }
@@ -1385,7 +1410,7 @@ impl TextEditorState {
             }
             self.select_to(next, cx);
         }
-        self.replace_range(None, "", InputKind::DeleteContentForward, cx);
+        self.replace_range(None, "", InputKind::DeleteContentForward, window, cx);
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
@@ -1498,7 +1523,7 @@ impl TextEditorState {
     fn delete_word_left(
         &mut self,
         _: &DeleteWordLeft,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.read_only {
@@ -1507,13 +1532,13 @@ impl TextEditorState {
         if self.selected_range.is_empty() {
             self.select_to(self.previous_word_boundary(self.cursor_offset()), cx);
         }
-        self.replace_range(None, "", InputKind::DeleteWordBackward, cx);
+        self.replace_range(None, "", InputKind::DeleteWordBackward, window, cx);
     }
 
     fn delete_word_right(
         &mut self,
         _: &DeleteWordRight,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.read_only {
@@ -1522,13 +1547,13 @@ impl TextEditorState {
         if self.selected_range.is_empty() {
             self.select_to(self.next_word_boundary(self.cursor_offset()), cx);
         }
-        self.replace_range(None, "", InputKind::DeleteWordForward, cx);
+        self.replace_range(None, "", InputKind::DeleteWordForward, window, cx);
     }
 
     fn delete_to_line_start(
         &mut self,
         _: &DeleteToLineStart,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.read_only {
@@ -1541,13 +1566,13 @@ impl TextEditorState {
             }
             self.select_to(start, cx);
         }
-        self.replace_range(None, "", InputKind::DeleteSoftLineBackward, cx);
+        self.replace_range(None, "", InputKind::DeleteSoftLineBackward, window, cx);
     }
 
     fn delete_to_line_end(
         &mut self,
         _: &DeleteToLineEnd,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.read_only {
@@ -1560,7 +1585,7 @@ impl TextEditorState {
             }
             self.select_to(end, cx);
         }
-        self.replace_range(None, "", InputKind::DeleteSoftLineForward, cx);
+        self.replace_range(None, "", InputKind::DeleteSoftLineForward, window, cx);
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
@@ -1580,10 +1605,10 @@ impl TextEditorState {
             return;
         }
         self.copy(&Copy, window, cx);
-        self.replace_range(None, "", InputKind::DeleteByCut, cx);
+        self.replace_range(None, "", InputKind::DeleteByCut, window, cx);
     }
 
-    fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
+    fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
             cx.propagate();
             return;
@@ -1592,33 +1617,33 @@ impl TextEditorState {
             cx.propagate();
             return;
         };
-        self.replace_range(None, &text, InputKind::InsertFromPaste, cx);
+        self.replace_range(None, &text, InputKind::InsertFromPaste, window, cx);
     }
 
-    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+    fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
             return;
         }
         if let Some(previous) = self.undo_stack.pop_back() {
             self.redo_stack.push(self.snapshot());
-            self.restore(previous, InputKind::HistoryUndo, cx);
+            self.restore(previous, InputKind::HistoryUndo, window, cx);
         }
     }
 
-    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+    fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
             return;
         }
         if let Some(next) = self.redo_stack.pop() {
             let snapshot = self.snapshot();
             push_undo_snapshot(&mut self.undo_stack, snapshot);
-            self.restore(next, InputKind::HistoryRedo, cx);
+            self.restore(next, InputKind::HistoryRedo, window, cx);
         }
     }
 
-    fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
+    fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
         if self.multiline && !self.read_only {
-            self.replace_range(None, "\n", InputKind::InsertLineBreak, cx);
+            self.replace_range(None, "\n", InputKind::InsertLineBreak, window, cx);
         }
     }
 
@@ -1642,6 +1667,7 @@ impl TextEditorState {
         new_text: &str,
         user_input: bool,
         kind: InputKind,
+        window: &Window,
         cx: &mut Context<Self>,
     ) {
         let replacement = self.single_line_if_needed(new_text);
@@ -1673,12 +1699,14 @@ impl TextEditorState {
             kind.for_outcome(ends_composition, &replacement),
             &replacement,
             ends_composition,
+            window,
+            cx,
         );
         if kind == InputKind::Stepped {
-            self.emit_change();
+            self.emit_change(window, cx);
         }
         if ends_composition {
-            self.emit_composition("compositionend", &replacement);
+            self.emit_composition("compositionend", &replacement, window, cx);
         }
         self.changed(cx);
     }
@@ -1708,15 +1736,15 @@ impl TextEditorState {
         Some(truncate_to_utf16(&replacement, room).to_string())
     }
 
-    fn step_up(&mut self, _: &StepUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.step_number(1.0, cx);
+    fn step_up(&mut self, _: &StepUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.step_number(1.0, window, cx);
     }
 
-    fn step_down(&mut self, _: &StepDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.step_number(-1.0, cx);
+    fn step_down(&mut self, _: &StepDown, window: &mut Window, cx: &mut Context<Self>) {
+        self.step_number(-1.0, window, cx);
     }
 
-    fn step_number(&mut self, direction: f64, cx: &mut Context<Self>) {
+    fn step_number(&mut self, direction: f64, window: &Window, cx: &mut Context<Self>) {
         if self.read_only || self.disabled {
             return;
         }
@@ -1727,7 +1755,7 @@ impl TextEditorState {
             return;
         };
         // Not user typing, so `maxLength` does not apply.
-        self.edit(0..self.content.len(), &next, false, InputKind::Stepped, cx);
+        self.edit(0..self.content.len(), &next, false, InputKind::Stepped, window, cx);
     }
 
     fn vertical_target(&self, direction: f32) -> Option<usize> {
@@ -2169,10 +2197,10 @@ impl EntityInputHandler for TextEditorState {
             .map(|range| self.range_to_utf16(range))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(marked) = self.marked_range.take() {
             let text = self.content[marked].to_string();
-            self.emit_composition("compositionend", &text);
+            self.emit_composition("compositionend", &text, window, cx);
         }
         self.changed(cx);
     }
@@ -2181,10 +2209,10 @@ impl EntityInputHandler for TextEditorState {
         &mut self,
         range_utf16: Option<Range<usize>>,
         new_text: &str,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.replace_range(range_utf16, new_text, InputKind::InsertText, cx);
+        self.replace_range(range_utf16, new_text, InputKind::InsertText, window, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -2192,7 +2220,7 @@ impl EntityInputHandler for TextEditorState {
         range_utf16: Option<Range<usize>>,
         new_text: &str,
         new_selected_range_utf16: Option<Range<usize>>,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.read_only || self.disabled {
@@ -2232,20 +2260,22 @@ impl EntityInputHandler for TextEditorState {
         let is_composing = self.marked_range.is_some();
         match (was_composing, is_composing) {
             (false, true) => {
-                self.emit_composition("compositionstart", &replaced);
-                self.emit_composition("compositionupdate", &replacement);
+                self.emit_composition("compositionstart", &replaced, window, cx);
+                self.emit_composition("compositionupdate", &replacement, window, cx);
             }
-            (true, true) => self.emit_composition("compositionupdate", &replacement),
+            (true, true) => self.emit_composition("compositionupdate", &replacement, window, cx),
             _ => {}
         }
         self.emit_input(
             InputKind::InsertCompositionText.for_outcome(was_composing, &replacement),
             &replacement,
             was_composing || is_composing,
+            window,
+            cx,
         );
         // Marking nothing cancels the composition; its input event is still part of it.
         if was_composing && !is_composing {
-            self.emit_composition("compositionend", "");
+            self.emit_composition("compositionend", "", window, cx);
         }
         self.changed(cx);
     }

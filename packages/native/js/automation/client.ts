@@ -767,6 +767,8 @@ export interface LiveAutomationRenderer {
   simulateKeyDown?(keystroke: string, isHeld?: boolean): void
   simulateKeyUp?(keystroke: string): void
   tick?(): void
+  startedLinksPending?(): boolean
+  stepStartedLinks?(): boolean
   focusElement(elementId: number): void
   blur(): void
   scrollTo(elementId: number, x: number, y: number): void
@@ -787,14 +789,24 @@ export interface LiveAutomationRenderer {
 const nextLoopTurn = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 0))
 
+const nextImmediate = (): Promise<void> =>
+  new Promise((resolve) => setImmediate(resolve))
+
 export function liveRendererAsTest(
   renderer: LiveAutomationRenderer
 ): TestAutomationRenderer {
   // The live renderer delivers a press or release to JS inside the call but queues a move
   // until the event loop turns, so a drag stepped without yielding would hear its release
   // before its moves.
+  // As the frame loop does: tick() draws nothing, and the frame a started display link owes is
+  // drawn from a later task, after the microtasks the input's handlers queued. The link is looked
+  // for in that task: one only a microtask starts does not exist when tick() returns.
   const afterInput = async (): Promise<void> => {
     renderer.tick?.()
+    if (renderer.startedLinksPending && renderer.stepStartedLinks) {
+      await nextImmediate()
+      if (renderer.startedLinksPending()) renderer.stepStartedLinks()
+    }
     await nextLoopTurn()
   }
   // A sequence is pressed one key at a time, with the loop turning after each, as separate key events

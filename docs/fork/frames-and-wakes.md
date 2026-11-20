@@ -130,6 +130,46 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
 - **A draw outside a frame request asks for a frame** (`Window::draw` calls `schedule_frame`). It leaves `needs_present`
   for the next request to present, and a stopped link had nothing to wake it for that request. Not covered:
   `needs_present` set by `patch_frame` in a draw outside a frame request (`patch.rs`, left as it is).
+- **The input frame: a started link is stepped from the frame loop, after the tick's task and its microtasks.** The link's
+  first vsync is up to a frame period after the start (7 to 10 ms at 120 Hz), and input that reaches an idle window starts
+  the link in the tick that dispatches it, so its frame waited that long. A frame request (or the window becoming visible)
+  that starts a link that was stopped sets the window's `first_step_pending` and lists it; a link that
+  `restart_display_link` or `resubscribe_display_link` brings back does not, and a step or a synchronous draw
+  (`display_layer`, `windowDidBecomeKey`) clears it. `tick()` only pumps: it draws no frame of its own. After every tick, `startFrameLoop` (`runtime.ts`) schedules one
+  `setImmediate` (never a second while one is queued) that asks `renderer.startedLinksPending()`
+  (`gpui_macos::started_display_links_pending()`: some listed window still has the flag, a frame request and a running
+  link, the test `step_started_display_links` applies) and, if so, calls `renderer.stepStartedLinks()`. The question is
+  asked inside the immediate, not after the tick: a link only one of the tick's microtasks starts (Lexical's commit after a
+  prevented edit, `queueMicrotask(() => flushSync(...))`) does not exist when `tick()` returns. That is a browser's order:
+  the input task, its microtasks (an editor that commits its update in one, Lexical, has done it by then), then the frame,
+  whose `requestAnimationFrame` callbacks see the committed change. Drawn inside `tick()`, the frame and its rAF callbacks
+  ran before those microtasks and painted the change a frame later. The call is an outermost native call
+  (`sync_dispatch::native_call`) and throws when made from a handler (it draws; it is not in `handler-calls.test.tsx`'s
+  list because that file covers the test renderer's methods and only the live renderer has it). It calls
+  `gpui_macos::step_started_display_links()`, which gives each listed window with the flag still set, a frame request and a
+  running link the step the link would run, in an autorelease pool of its own: a real frame request, so frame steps, rAF and
+  scroll settle run, and the frame is presented when gpui presents (`needs_present`, `require_presentation`). It returns
+  whether it stepped. The link's next vsync finds the window clean and counts toward the idle stop as before. A vsync that
+  merged while the input frame drew has its step queued right behind it, and a link step less than half the period of the
+  screen's `maximumFramesPerSecond` (4 ms when it reports none) after the input frame is let go by, without a frame and
+  without counting: the frame request stays and the next vsync draws it, so an animation's next frame is not drawn unpaced.
+  A link that is already running is never listed, so continuous input keeps vsync pacing. A window whose first step the pump already ran
+  no longer has the flag (a step clears it), so the call cannot draw it twice, and it steps whenever some window is still owed
+  its first step, even after a pump that stepped a link. `GPUIX_INPUT_FRAME_OFF=1` (read once, at the first call) makes the call discard the list, which leaves the first
+  step to the vsync. Both methods are optional on the renderer `startFrameLoop` drives (its fakes lack them), no-ops
+  returning `false` off macOS, and neither adds a tick or a wake: the frame call is not a tick, does not run from the wake
+  callback, and `pending` is still cleared only by `tick_finished`, after the tick (#56). A tick from a sync handler is
+  a nested pump and no longer draws either; the frame loop's call after the outermost tick covers it. The automation
+  client's `afterInput` (`liveRendererAsTest`) does the same as the loop: `tick()`, a `setImmediate`, `stepStartedLinks()` if
+  `startedLinksPending()` then, and `setTimeout(0)`; `tick()` draws nothing there either.
+  A window whose link was started between ticks draws on gpui's pre-dispatch draw of the key and again in the input frame:
+  the same total number of draws, moved earlier. It is the cold-first-key case the tests exclude.
+  **`selectionchange`** is a coalesced `setTimeout(0)` (`dom/selection.ts`) a handler's selection change queues, and the
+  input frame is a `setImmediate` queued after the tick, so which runs first is up to the 1 ms timer: after a slow tick the
+  timers phase comes first and it runs between the microtasks and the frame, after a fast one the frame runs first (both
+  orders happen in one run of the test). Chrome dispatches `selectionchange` as a task of its own as well, and a frame
+  before it is a valid order there. What holds is that it runs once per change, after the key's microtasks, and never
+  between the frame's `requestAnimationFrame` callbacks and its draw.
 
 **Measured** (75 Hz display, one-text window, live window with the release addon):
 
@@ -649,6 +689,34 @@ drew.
 - react `events.test.tsx` "wakes JS once per mouse move, not again when the frame boundary comes" opens a visible window
   with `focus: false`, posts 240 mouse moves from NSEventThread at random points of 120 Hz periods and allows 1.15 wakes
   per move. Without the flush after `sendEvent:` it saw 352 and 339 wakes for 240 moves (1.47 and 1.41).
+- react `events.test.tsx` "the frame of a key for an idle window" opens a visible window with `focus: false` and posts 12 keys
+  from NSEventThread, each to an idle window, with a handler that changes the text. With the input frame, every key's frame was
+  painted by the end of the frame call that follows the key's tick and the link's later steps painted nothing; with
+  `GPUIX_INPUT_FRAME_OFF=1` 11 of 12 were painted by a later step (the first key's tick is long enough for a vsync to step the
+  window inside it, which is why one key proves nothing). The test drives `startFrameLoop` with a wrapper that forwards
+  `startedLinksPending` and `stepStartedLinks` and counts frames with the test-support `GpuixRenderer.getPaintedFrameCount()`,
+  read at the end of the tick (when no link waits) and of the frame call. No present is counted: a painted frame is presented
+  only when gpui presents (`needs_present`), which the test does not observe. The same script records the most frames any one
+  tick or frame call painted after the first key's tick (which paints twice, with the switch off as well) and asks for at
+  most 1 of each, and that most keys' frames were drawn by the frame call. The test reports `isWindowVisible()` and skips
+  itself while the window is occluded, since no link starts then. A third test starts a `requestAnimationFrame` loop of 5
+  frames from the key handler and asks that no two callbacks run less than 3 ms apart (half a 120 Hz period less clock
+  slack), which a link step queued behind the input frame would break.
+- react `events.test.tsx` "the frame of a key that types into an input" posts 10 keys to a focused controlled `<input>` whose
+  `onInput` sets the value, and asks that `input` runs in the same tick as the `keydown` (the editor's events are delivered
+  synchronously, see [events-and-input.md](events-and-input.md#synchronous-dispatch)) and that each key after the first
+  paints exactly one frame: the input frame already holds what `input` rendered. Queued, `input` came a tick later and a
+  second frame painted its change.
+- react `events.test.tsx` "the frame of a key whose handler queues a microtask": the window's `keydown` handler queues a
+  `requestAnimationFrame` callback and a microtask that commits a state change (the way Lexical updates). Per key, the
+  order is `keydown`, the tick's end, the microtask, the frame's rAF callback (which sees the committed change), the frame
+  call; the tick painted nothing, the first frame's painted text is the committed one, and each key after the first paints
+  one frame. A second test has the handler change the selection: `selectionchange` arrives once per change, after the
+  microtask, and either before the frame's rAF callbacks or after the frame call (both occur in a run), never between them.
+- native `frame-loop.test.ts`: the frame call runs from one `setImmediate` after the tick and its microtasks, not twice
+  while one is queued, not when no link waits (no extra tick or immediate), not after `stop()`, ahead of the timer path's
+  key re-tick, and a throw from it goes to `onError`; `live-automation.test.ts`: `afterInput` ticks, makes the frame call
+  after the microtasks when a link waits, then turns the loop.
 - zed `gpui_macos` `tests/pump_window_updates.rs` (`harness = false`): 100 mouse moves posted to a window through
   `pump_app_nonblocking` make 100 `NSApplicationDidUpdateNotification`, not 260 as with a `updateWindows` call in the pump.
 - zed `gpui_macos` `run_loop_wake` lib (1: the set is found twice alike, is not the main queue's port and has members)

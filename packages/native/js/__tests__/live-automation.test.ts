@@ -119,6 +119,63 @@ describe("liveRendererAsTest", () => {
     expect(live.heard).toEqual(["committed:m", "committed:i", "committed:d"])
   })
 
+  it("an input draws the frame a started link owes after the tick and the microtasks, before the loop turn", async () => {
+    const live = fakeLiveRenderer()
+    let pending = true
+    live.renderer.tick = () => live.heard.push("tick")
+    live.renderer.simulateKeystrokes = () => {
+      queueMicrotask(() => live.heard.push("microtask"))
+    }
+    live.renderer.startedLinksPending = () => pending
+    live.renderer.stepStartedLinks = () => {
+      live.heard.push("frame")
+      pending = false
+      return true
+    }
+    setTimeout(() => live.heard.push("timer"), 0)
+
+    await liveRendererAsTest(live.renderer).simulateKeystrokes("a")
+
+    expect(live.heard).toEqual(["tick", "microtask", "frame", "timer"])
+  })
+
+  it("an input draws the frame of a link only a microtask started", async () => {
+    const live = fakeLiveRenderer()
+    let pending = false
+    live.renderer.tick = () => live.heard.push("tick")
+    live.renderer.simulateKeystrokes = () => {
+      queueMicrotask(() => {
+        live.heard.push("microtask starts the link")
+        pending = true
+      })
+    }
+    live.renderer.startedLinksPending = () => pending
+    live.renderer.stepStartedLinks = () => {
+      live.heard.push("frame")
+      pending = false
+      return true
+    }
+
+    await liveRendererAsTest(live.renderer).simulateKeystrokes("a")
+
+    expect(live.heard).toEqual(["tick", "microtask starts the link", "frame"])
+  })
+
+  it("an input with no link waiting makes no frame call", async () => {
+    const live = fakeLiveRenderer()
+    let calls = 0
+    live.renderer.tick = () => {}
+    live.renderer.startedLinksPending = () => false
+    live.renderer.stepStartedLinks = () => {
+      calls += 1
+      return false
+    }
+
+    await liveRendererAsTest(live.renderer).nativeSimulateClick(1, 1)
+
+    expect(calls).toBe(0)
+  })
+
   it("an empty sequence is left to native to refuse", async () => {
     const live = fakeLiveRenderer()
     live.renderer.simulateKeystrokes = (press) => {

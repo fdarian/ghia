@@ -322,7 +322,7 @@ pub(crate) fn invalidate_root_view(dirty: crate::retained_tree::Dirty) -> Result
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub(crate) use backend::{native_call, register, SyncDispatchResult, SyncHandlerOwner};
+pub(crate) use backend::{native_call, outermost_native_call, register, SyncDispatchResult, SyncHandlerOwner};
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod backend {
@@ -483,6 +483,12 @@ mod backend {
         PENDING_ERROR.with(|slot| {
             slot.borrow_mut().get_or_insert(Error::from_reason(message));
         });
+    }
+
+    /// Whether the call being run by `native_call` is the only one on this thread's stack: not
+    /// inside the handler of another call from JS.
+    pub(crate) fn outermost_native_call() -> bool {
+        NATIVE_DEPTH.with(|depth| depth.get() == 1)
     }
 
     /// Marks `f` as running inside a call from JS, which is what lets `emit`
