@@ -215,6 +215,8 @@ struct VisualTestState {
     owner: u64,
     view: gpui::Entity<GpuixView>,
     window: gpui::AnyWindowHandle,
+    /// False only for `dispose_leaving_main_queue_for_test`.
+    run_main_queue: bool,
     cx: gpui::VisualTestAppContext,
 }
 
@@ -269,14 +271,18 @@ impl Drop for VisualTestState {
             // `displayLayer:` (the window's frame request) runs in a Core Animation commit,
             // and one that ran after the removal would find no window and log
             // `window not found`.
-            unsafe { crate::native_event::run_main_queue() };
+            if self.run_main_queue {
+                unsafe { crate::native_event::run_main_queue() };
+            }
             self.cx.run_until_parked();
             self.cx
                 .update_window(self.window, |_, window, _| window.remove_window())
                 .ok();
             self.cx.run_until_parked();
             // SAFETY: as above.
-            unsafe { crate::native_event::run_main_queue() };
+            if self.run_main_queue {
+                unsafe { crate::native_event::run_main_queue() };
+            }
         }
     }
 }
@@ -292,7 +298,7 @@ static NEXT_RENDERER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 
 /// Tears down the state of `owner`, if it is still the current one. Called with no borrow of
 /// `TEST_STATE` held, since the teardown runs a frame.
-fn dispose_test_state(owner: Option<u64>) -> Result<()> {
+fn dispose_test_state(owner: Option<u64>, run_main_queue: bool) -> Result<()> {
     let state = TEST_STATE.with(|cell| -> Result<Option<VisualTestState>> {
         let mut borrow = cell.try_borrow_mut().map_err(|_| {
             Error::from_reason(
@@ -304,6 +310,10 @@ fn dispose_test_state(owner: Option<u64>) -> Result<()> {
         }
         Ok(borrow.take())
     })?;
+    let state = state.map(|mut state| {
+        state.run_main_queue = run_main_queue;
+        state
+    });
     drop(state);
     Ok(())
 }
@@ -864,11 +874,11 @@ impl TestGpuixRenderer {
 
         // One window per thread: the renderer this replaces is torn down now, while every
         // thread-local is alive.
-        dispose_test_state(None)?;
+        dispose_test_state(None, true)?;
         let id = NEXT_RENDERER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Store !Send types on the JS main thread.
         TEST_STATE.with(|cell| {
-            **cell.borrow_mut() = Some(VisualTestState { owner: id, cx, window, view });
+            **cell.borrow_mut() = Some(VisualTestState { owner: id, run_main_queue: true, cx, window, view });
         });
 
         let sync_handler = crate::events::sync_dispatch::SyncHandlerOwner::new();
@@ -901,7 +911,18 @@ impl TestGpuixRenderer {
     pub fn dispose(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
         self.frame_wake.clear();
-        dispose_test_state(Some(self.id))
+        dispose_test_state(Some(self.id), true)
+    }
+
+    /// `dispose`, except that the teardown does not run the main run loop, so the block that
+    /// closes the window is still queued when the app is released. For the test that a queued
+    /// close finds no app to panic on; it is the state that a run loop pass which did not reach
+    /// the block leaves.
+    #[napi]
+    pub fn dispose_leaving_main_queue_for_test(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        self.frame_wake.clear();
+        dispose_test_state(Some(self.id), false)
     }
 
     /// Wake JavaScript when the main run loop has work, like `GpuixRenderer.setFrameWakeCallback`:
