@@ -3,6 +3,8 @@
 //! input stream: the events are made in-process and handed to `NSApplication`'s own queue.
 
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use napi::{Error, Result};
 use objc::rc::autoreleasepool;
@@ -153,6 +155,46 @@ pub(crate) unsafe fn run_main_queue() {
             break;
         }
     }
+}
+
+#[link(name = "System", kind = "dylib")]
+unsafe extern "C" {
+    static _dispatch_main_q: c_void;
+    fn dispatch_async_f(queue: *const c_void, context: *mut c_void, work: extern "C" fn(*mut c_void));
+}
+
+extern "C" fn mark_ran(context: *mut c_void) {
+    // SAFETY: `context` is the leaked `AtomicBool` that `run_main_queue_to_marker` made.
+    unsafe { &*context.cast::<AtomicBool>() }.store(true, Ordering::SeqCst);
+}
+
+/// Queues a block on the main dispatch queue and runs the main run loop until it has run. The
+/// queue is FIFO, so every block queued before this call has run by then. Fails if it has not
+/// run within `timeout`.
+///
+/// # Safety
+///
+/// This must run on the main thread.
+pub(crate) unsafe fn run_main_queue_to_marker(timeout: Duration) -> Result<()> {
+    // Leaked: on a timeout the block is still queued and would write to it later.
+    let ran: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+    unsafe {
+        dispatch_async_f(
+            std::ptr::addr_of!(_dispatch_main_q),
+            std::ptr::from_ref(ran).cast_mut().cast(),
+            mark_ran,
+        )
+    };
+    let deadline = Instant::now() + timeout;
+    while !ran.load(Ordering::SeqCst) {
+        if Instant::now() >= deadline {
+            return Err(Error::from_reason(format!(
+                "The main dispatch queue did not reach the marker block within {timeout:?}"
+            )));
+        }
+        unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, 1) };
+    }
+    Ok(())
 }
 
 /// Closes the window that holds `ns_view`, as `-[NSWindow close]` does: gpui's `close_window`

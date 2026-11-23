@@ -791,5 +791,6 @@ module.exports.hasTestGpuixRenderer = nativeBinding.hasTestGpuixRenderer
 module.exports.measureMotionAnimation = nativeBinding.measureMotionAnimation
 module.exports.readClipboardFrom = nativeBinding.readClipboardFrom
 module.exports.releaseTestPasteboard = nativeBinding.releaseTestPasteboard
+module.exports.runMainQueueToMarkerForTest = nativeBinding.runMainQueueToMarkerForTest
 module.exports.validateKeyframes = nativeBinding.validateKeyframes
 module.exports.writeClipboardTo = nativeBinding.writeClipboardTo

@@ -216,6 +216,7 @@ struct VisualTestState {
     view: gpui::Entity<GpuixView>,
     window: gpui::AnyWindowHandle,
     /// False only for `dispose_leaving_main_queue_for_test`.
+    #[cfg(target_os = "macos")]
     run_main_queue: bool,
     cx: gpui::VisualTestAppContext,
 }
@@ -259,45 +260,52 @@ impl Drop for VisualTestState {
             .update_window(self.window, |_, window, _| window.refresh())
             .ok();
         self.cx.run_until_parked();
-        // Dropping a macOS window queues a block on the main dispatch queue that closes the
-        // NSWindow, and that close calls the window's `on_close`, which updates the app. A block
-        // that is still queued when the app is released (a run loop pass that did not reach it,
-        // or a window dropped with the app) runs in the next renderer's teardown and panics in
-        // `AsyncApp::update`, which aborts the process. So the window is closed here, while the
-        // app lives, and not left to that block: `close_window` takes the `on_close` callback
-        // out, so the block's own close has nothing left to call.
         #[cfg(target_os = "macos")]
-        {
-            // SAFETY: napi calls run on the main thread, and the test platform has made
-            // NSApplication.
-            //
-            // Spin the run loop once before the window is closed: the layer's pending
-            // `displayLayer:` (the window's frame request) runs in a Core Animation commit,
-            // and one that ran after the removal would find no window and log
-            // `window not found`.
-            if self.run_main_queue {
-                unsafe { crate::native_event::run_main_queue() };
-            }
-            self.cx.run_until_parked();
-            // Err only means the window is already gone, which is the state this is trying to
-            // reach.
-            if let Ok(Ok(ns_view)) = self
-                .cx
-                .update_window(self.window, |_, window, _| appkit::ns_view(window))
-            {
-                // SAFETY: the view is the live content view of the test window, no borrow of the
-                // app is held here, and napi calls run on the main thread.
-                unsafe { crate::native_event::close_window(ns_view) };
-            }
-            self.cx
-                .update_window(self.window, |_, window, _| window.remove_window())
-                .ok();
-            self.cx.run_until_parked();
-            // SAFETY: as above.
-            if self.run_main_queue {
-                unsafe { crate::native_event::run_main_queue() };
-            }
-        }
+        close_test_window(&mut self.cx, self.window, self.run_main_queue);
+    }
+}
+
+/// Closes the macOS window of a test context while its app is alive.
+///
+/// Dropping a macOS window queues a block on the main dispatch queue that closes the NSWindow,
+/// and that close calls the window's `on_close`, which updates the app. A block that is still
+/// queued when the app is released (a run loop pass that did not reach it, or a window dropped
+/// with the app) runs later, in some other renderer's teardown, and panics in `AsyncApp::update`,
+/// which aborts the process. So the window is closed here and not left to that block:
+/// `close_window` takes the `on_close` callback out, so the block's own close has nothing left to
+/// call. Both `TestGpuixRenderer` and `RowOracle` tear their windows down through this.
+///
+/// `run_main_queue` is false only for `dispose_leaving_main_queue_for_test`.
+#[cfg(target_os = "macos")]
+pub(crate) fn close_test_window(
+    cx: &mut gpui::VisualTestAppContext,
+    window: gpui::AnyWindowHandle,
+    run_main_queue: bool,
+) {
+    // SAFETY: napi calls run on the main thread, and the test platform has made NSApplication.
+    //
+    // Spin the run loop once before the window is closed: the layer's pending `displayLayer:`
+    // (the window's frame request) runs in a Core Animation commit, and one that ran after the
+    // removal would find no window and log `window not found`.
+    if run_main_queue {
+        unsafe { crate::native_event::run_main_queue() };
+    }
+    cx.run_until_parked();
+    // Err is not always "the window is already gone, nothing left to close". A window that was
+    // removed earlier through `Window::remove_window()` is gone from the app while the block that
+    // closes its NSWindow, and so calls its `on_close`, may still be queued, and nothing here can
+    // close it: it is not reachable through the app any more. Nothing in the test renderer
+    // removes a window before its teardown today.
+    if let Ok(Ok(ns_view)) = cx.update_window(window, |_, window, _| appkit::ns_view(window)) {
+        // SAFETY: the view is the live content view of the test window, no borrow of the app is
+        // held here, and napi calls run on the main thread.
+        unsafe { crate::native_event::close_window(ns_view) };
+    }
+    cx.update_window(window, |_, window, _| window.remove_window()).ok();
+    cx.run_until_parked();
+    // SAFETY: as above.
+    if run_main_queue {
+        unsafe { crate::native_event::run_main_queue() };
     }
 }
 
@@ -306,6 +314,22 @@ thread_local! {
     /// running its `Drop`; see `VisualTestState`. Take it out to tear it down.
     static TEST_STATE: RefCell<std::mem::ManuallyDrop<Option<VisualTestState>>> =
         const { RefCell::new(std::mem::ManuallyDrop::new(None)) };
+}
+
+/// Runs the main run loop until a block queued now on the main dispatch queue has run, which is
+/// after every block queued before it: the close block of a window that was dropped open, for
+/// the test that such a block finds no app to panic on. Throws if the queue does not reach it
+/// within 5 seconds.
+#[napi]
+pub fn run_main_queue_to_marker_for_test() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: napi calls run on the main thread.
+        unsafe { crate::native_event::run_main_queue_to_marker(std::time::Duration::from_secs(5)) }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    Err(Error::from_reason("runMainQueueToMarkerForTest needs macOS"))
 }
 
 static NEXT_RENDERER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -324,10 +348,13 @@ fn dispose_test_state(owner: Option<u64>, run_main_queue: bool) -> Result<()> {
         }
         Ok(borrow.take())
     })?;
+    #[cfg(target_os = "macos")]
     let state = state.map(|mut state| {
         state.run_main_queue = run_main_queue;
         state
     });
+    #[cfg(not(target_os = "macos"))]
+    let _ = run_main_queue;
     drop(state);
     Ok(())
 }
@@ -892,7 +919,14 @@ impl TestGpuixRenderer {
         let id = NEXT_RENDERER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Store !Send types on the JS main thread.
         TEST_STATE.with(|cell| {
-            **cell.borrow_mut() = Some(VisualTestState { owner: id, run_main_queue: true, cx, window, view });
+            **cell.borrow_mut() = Some(VisualTestState {
+                owner: id,
+                #[cfg(target_os = "macos")]
+                run_main_queue: true,
+                cx,
+                window,
+                view,
+            });
         });
 
         let sync_handler = crate::events::sync_dispatch::SyncHandlerOwner::new();

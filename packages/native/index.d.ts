@@ -2904,6 +2904,14 @@ export interface RowOracleOptions {
 }
 
 /**
+ * Runs the main run loop until a block queued now on the main dispatch queue has run, which is
+ * after every block queued before it: the close block of a window that was dropped open, for
+ * the test that such a block finds no app to panic on. Throws if the queue does not reach it
+ * within 5 seconds.
+ */
+export declare function runMainQueueToMarkerForTest(): void
+
+/**
  * The frames drawn after a list scroll that could be a pure translate of the rows, those that
  * were (`patched`), and the first reason the others could not (`gpui::ScrollPatchReason`).
  */
