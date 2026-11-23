@@ -259,15 +259,19 @@ impl Drop for VisualTestState {
             .update_window(self.window, |_, window, _| window.refresh())
             .ok();
         self.cx.run_until_parked();
-        // Dropping a macOS window queues its close on the main dispatch queue, and that close
-        // updates the app: closed here, while the app lives, a later pump of the run loop
-        // (`pumpNativeEvents` of the next renderer) does not find the block with no app to run it.
+        // Dropping a macOS window queues a block on the main dispatch queue that closes the
+        // NSWindow, and that close calls the window's `on_close`, which updates the app. A block
+        // that is still queued when the app is released (a run loop pass that did not reach it,
+        // or a window dropped with the app) runs in the next renderer's teardown and panics in
+        // `AsyncApp::update`, which aborts the process. So the window is closed here, while the
+        // app lives, and not left to that block: `close_window` takes the `on_close` callback
+        // out, so the block's own close has nothing left to call.
         #[cfg(target_os = "macos")]
         {
             // SAFETY: napi calls run on the main thread, and the test platform has made
             // NSApplication.
             //
-            // Spin the run loop once before the window is removed: the layer's pending
+            // Spin the run loop once before the window is closed: the layer's pending
             // `displayLayer:` (the window's frame request) runs in a Core Animation commit,
             // and one that ran after the removal would find no window and log
             // `window not found`.
@@ -275,6 +279,16 @@ impl Drop for VisualTestState {
                 unsafe { crate::native_event::run_main_queue() };
             }
             self.cx.run_until_parked();
+            // Err only means the window is already gone, which is the state this is trying to
+            // reach.
+            if let Ok(Ok(ns_view)) = self
+                .cx
+                .update_window(self.window, |_, window, _| appkit::ns_view(window))
+            {
+                // SAFETY: the view is the live content view of the test window, no borrow of the
+                // app is held here, and napi calls run on the main thread.
+                unsafe { crate::native_event::close_window(ns_view) };
+            }
             self.cx
                 .update_window(self.window, |_, window, _| window.remove_window())
                 .ok();

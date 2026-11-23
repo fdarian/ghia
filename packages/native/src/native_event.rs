@@ -155,6 +155,20 @@ pub(crate) unsafe fn run_main_queue() {
     }
 }
 
+/// Closes the window that holds `ns_view`, as `-[NSWindow close]` does: gpui's `close_window`
+/// runs the window's `on_close` before the call returns.
+///
+/// # Safety
+///
+/// `ns_view` must be the live content view of an AppKit window, and this must run on the main
+/// thread.
+pub(crate) unsafe fn close_window(ns_view: Id) {
+    autoreleasepool(|| unsafe {
+        let window: Id = msg_send![ns_view, window];
+        let _: () = msg_send![window, close];
+    })
+}
+
 /// Posts the events of `kind` for the window that holds `ns_view`. `x` and `y` are in the
 /// window's logical pixels, from its top left, like the `simulate*` methods.
 ///
