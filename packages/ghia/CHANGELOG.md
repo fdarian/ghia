@@ -1,5 +1,55 @@
 # ghia
 
+## 0.14.0
+
+### Patch Changes
+
+- Updated dependencies [efdc58a]
+- Updated dependencies [32cb7c2]
+- Updated dependencies [dbd63d6]
+- Updated dependencies [698580c]
+- Updated dependencies [5493465]
+- Updated dependencies [08786e0]
+- Updated dependencies [1ab5788]
+- Updated dependencies [c8a846d]
+- Updated dependencies [76853dd]
+- Updated dependencies [5340a15]
+- Updated dependencies [40e4657]
+- Updated dependencies [d5d8a2c]
+- Updated dependencies [3ecd502]
+- Updated dependencies [f610c70]
+- Updated dependencies [c126e2d]
+- Updated dependencies [a6a5504]
+- Updated dependencies [d402189]
+- Updated dependencies [bb0bcaf]
+- Updated dependencies [7b8e480]
+- Updated dependencies [2e41294]
+- Updated dependencies [f926534]
+- Updated dependencies [b3097eb]
+- Updated dependencies [88ba15f]
+- Updated dependencies [b0e1a44]
+- Updated dependencies [08ab88f]
+- Updated dependencies [4a289c4]
+- Updated dependencies [7080a6a]
+- Updated dependencies [a0347c3]
+- Updated dependencies [7f27601]
+- Updated dependencies [ed5fd5a]
+- Updated dependencies [c8a846d]
+- Updated dependencies [fe19c6a]
+- Updated dependencies [7c06a8a]
+- Updated dependencies [11ad59a]
+- Updated dependencies [8d56654]
+- Updated dependencies [3fce838]
+- Updated dependencies [97d4d8e]
+- Updated dependencies [fcc869d]
+- Updated dependencies [f807bac]
+- Updated dependencies [ad6380d]
+- Updated dependencies [8fdb2e6]
+- Updated dependencies [866fd8c]
+- Updated dependencies [ed8e9ad]
+- Updated dependencies [75882f5]
+  - @ghia/native@0.14.0
+
 ## 0.13.0
 
 ### Breaking changes
