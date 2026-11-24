@@ -820,6 +820,13 @@ export declare class TestGpuixRenderer {
    */
   dispose(): void
   /**
+   * `dispose`, except that the teardown does not run the main run loop, so the block that
+   * closes the window is still queued when the app is released. For the test that a queued
+   * close finds no app to panic on; it is the state that a run loop pass which did not reach
+   * the block leaves.
+   */
+  disposeLeavingMainQueueForTest(): void
+  /**
    * Wake JavaScript when the main run loop has work, like `GpuixRenderer.setFrameWakeCallback`:
    * input that AppKit receives for the test window (`postNativeEvent`) is the usual wake, since
    * the test window draws no frames. Returns true on macOS, false elsewhere. Pass null to clear.
@@ -2895,6 +2902,14 @@ export interface RowOracleOptions {
   /** `Window::set_active_for_tests`: the test window is made key. */
   windowActive?: boolean
 }
+
+/**
+ * Runs the main run loop until a block queued now on the main dispatch queue has run, which is
+ * after every block queued before it: the close block of a window that was dropped open, for
+ * the test that such a block finds no app to panic on. Throws if the queue does not reach it
+ * within 5 seconds.
+ */
+export declare function runMainQueueToMarkerForTest(): void
 
 /**
  * The frames drawn after a list scroll that could be a pure translate of the rows, those that

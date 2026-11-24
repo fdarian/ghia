@@ -57,6 +57,14 @@ thread_local! {
         const { RefCell::new(std::mem::ManuallyDrop::new(None)) };
 }
 
+/// Closes the window while the app is alive, then drops the state; see `close_test_window` for
+/// why a window dropped open aborts a later renderer's teardown.
+fn tear_down(state: Option<OracleState>) {
+    let Some(mut state) = state else { return };
+    crate::test_renderer::close_test_window(&mut state.cx, state.window, true);
+    drop(state);
+}
+
 fn with_oracle<R>(
     f: impl FnOnce(&mut gpui::VisualTestAppContext, gpui::AnyWindowHandle, &gpui::Entity<RawRows>) -> Result<R>,
 ) -> Result<R> {
@@ -135,8 +143,7 @@ impl RowOracle {
         cx.run_until_parked();
 
         // One oracle per thread.
-        let previous = ORACLE.with(|cell| cell.borrow_mut().take());
-        drop(previous);
+        tear_down(ORACLE.with(|cell| cell.borrow_mut().take()));
         ORACLE.with(|cell| **cell.borrow_mut() = Some(OracleState { view, window, cx }));
         Ok(Self { _private: () })
     }
@@ -144,8 +151,7 @@ impl RowOracle {
     /// Tears the window down. Every other call throws afterwards.
     #[napi]
     pub fn dispose(&self) {
-        let state = ORACLE.with(|cell| cell.borrow_mut().take());
-        drop(state);
+        tear_down(ORACLE.with(|cell| cell.borrow_mut().take()));
     }
 
     /// The rows to draw: JSON `[{fromName, subject, snippet, time, unread}]`, with the row at
