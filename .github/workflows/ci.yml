@@ -20,8 +20,6 @@ jobs:
     if: github.event_name != 'pull_request' || github.head_ref == 'changeset-release/main'
     runs-on: macos-latest
     timeout-minutes: 180
-    env:
-      GHIA_TEST_ARTIFACTS: ${{ runner.temp }}/test-artifacts
     outputs:
       build-react: ${{ steps.build-react.outcome }}
     steps:
@@ -86,10 +84,12 @@ jobs:
       - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
         run: bun run test
         working-directory: packages/solid
+        env:
+          GHIA_TEST_ARTIFACTS: ${{ runner.temp }}/test-artifacts
       - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
         run: bun run test
         working-directory: examples
-      - if: failure()
+      - if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-artifacts
@@ -124,9 +124,9 @@ jobs:
         working-directory: packages/react
         timeout-minutes: 30
 
-  # The one status the ruleset on main requires. It lists what passes, not what fails: in run 45588018035 (attempt 2)
-  # check never got a runner and the old check for failures still let the gate go green. Skipped needs pass where check
-  # was not meant to run, so ordinary PRs are not blocked.
+  # The one status the ruleset on main requires. The step below carries its own `always()`: a step `if` without a status
+  # function gets an implicit `success()`, which skipped it when check was cancelled without ever getting a runner.
+  # It accepts only success, or skipped where check is not meant to run (ordinary PRs), so they are not blocked.
   ci-passed:
     if: always()
     needs: [check, react-tests]
