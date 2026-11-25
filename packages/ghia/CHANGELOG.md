@@ -2,7 +2,17 @@
 
 ## 0.14.0
 
-### Patch Changes
+### Performance
+
+- The HTML parser (parse5) loads on the first `DOMParser.parseFromString`, `innerHTML`, `outerHTML`, `insertAdjacentHTML` or HTML paste and not at startup, so a plain app starts with 0.4 MB less JS heap and, run from the bundle, 12 to 17 ms and about 2.5 MB less footprint. The web (wasm) build no longer bundles parse5.
+- The frame of a key, click or other input that reaches an idle window is drawn and presented by the frame loop right after the tick that dispatched it and the microtasks that tick's handlers queued (as a browser paints after an input task and its microtasks), where it waited for the display link's first vsync (7 to 10 ms at 120 Hz) before. The renderer has two new methods for it, `startedLinksPending()` and `stepStartedLinks()`; `tick()` itself draws nothing. `GPUIX_INPUT_FRAME_OFF=1` restores the wait.
+
+### Fixes
+
+- A scroll no longer freezes while frames take longer than a vsync. The macOS pump ran display-link frame steps back to back in one tick for as long as the link had another one queued, so wheel events were not read and JS did not run for 0.1 to 2 s at a time, and the page kept presenting a frozen scroll. A tick now runs at most one frame step, and the next tick reads the events first.
+- Each key event from the keyboard gets its own microtask checkpoint on both sides: `tick()` ends its pump before a `keydown`, `keyup` or modifier change when an event or a frame step came first, and after sending it, and the frame loop ticks again at once, so an editor that commits its update in a microtask (Lexical) applies every key that was waiting, where it used to keep the first and lose the rest. With `frameMs` set the timer path ticks again on the next turn of the event loop (`keyEventPending()`) instead of waiting out the frame. There is still no checkpoint between the listeners of one event or between a key's `keydown` and its `input`, and mouse events handled in one pump share one. The test renderer gets `postNativeKeys`, `pumpNativeEvents`, `setYieldAfterKeyEvent` and `keyEventPending` to drive that pump.
+
+### Dependencies
 
 - Updated dependencies [efdc58a]
 - Updated dependencies [32cb7c2]
