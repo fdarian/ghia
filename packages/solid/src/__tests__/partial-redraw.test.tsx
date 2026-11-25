@@ -85,18 +85,18 @@ function tick(renderer: TestRenderer) {
   renderer.presentFrame()
 }
 
-function read(file: string): string {
+function read(file: string, keep: boolean): string {
   const bytes = fs.readFileSync(file)
-  fs.rmSync(file, { force: true })
+  if (!keep) fs.rmSync(file, { force: true })
   return bytes.toString("base64")
 }
 
 /** The picture of the scene the window holds, and the picture the frames drawn in part left (null when it keeps none). */
-function pictures(renderer: TestRenderer, name: string): { whole: string; kept: string | null } {
-  const whole = path.join(shots, `${process.pid}-${name}-whole.png`)
-  const kept = path.join(shots, `${process.pid}-${name}-kept.png`)
+function pictures(renderer: TestRenderer, name: string, dump?: string): { whole: string; kept: string | null } {
+  const whole = dump === undefined ? path.join(shots, `${process.pid}-${name}-whole.png`) : path.join(dump, `${name}-whole.png`)
+  const kept = dump === undefined ? path.join(shots, `${process.pid}-${name}-kept.png`) : path.join(dump, `${name}-kept.png`)
   renderer.captureShownFrame(whole)
-  return { whole: read(whole), kept: renderer.capturePartialPicture(kept) ? read(kept) : null }
+  return { whole: read(whole, dump !== undefined), kept: renderer.capturePartialPicture(kept) ? read(kept, dump !== undefined) : null }
 }
 
 /** The hover and wheel sequence: a patch of two rows per crossing, a translate per wheel step, a pointer that leaves. */
@@ -167,9 +167,19 @@ describe("partial redraw", () => {
         settle(renderer)
         const before = renderer.getPatchCounters().scrollPatch
 
+        // Temporary CI diagnostic: with PARTIAL_REDRAW_DUMP set, every step is written out and the test fails at the end naming all mismatches.
+        const dump = process.env.PARTIAL_REDRAW_DUMP
+        if (dump !== undefined) fs.mkdirSync(dump, { recursive: true })
+        const mismatches: string[] = []
         let compared = 0
         const check = (name: string) => {
-          const { whole, kept } = pictures(renderer, name)
+          const { whole, kept } = pictures(renderer, name, dump)
+          if (dump !== undefined) {
+            fs.writeFileSync(path.join(dump, `${name}-counters.json`), JSON.stringify(renderer.getPatchCounters(), null, 2))
+            if (kept !== whole) mismatches.push(name)
+            compared++
+            return
+          }
           expect(kept, `${name}: the window keeps a picture`).not.toBeNull()
           expect(kept === whole, `${name}: the picture kept is the frame drawn whole`).toBe(true)
           compared++
@@ -182,6 +192,7 @@ describe("partial redraw", () => {
           tick(renderer)
           check(`wheel-${step}`)
         }
+        expect(mismatches, "steps whose picture kept is not the frame drawn whole").toEqual([])
         const after = renderer.getPatchCounters().scrollPatch
         expect(compared).toBeGreaterThan(10)
         expect(after.membershipFrames - before.membershipFrames, "rows came in").toBeGreaterThan(0)
