@@ -99,6 +99,20 @@ function pictures(renderer: TestRenderer, name: string): { whole: string; kept: 
   return { whole: read(whole), kept: renderer.capturePartialPicture(kept) ? read(kept) : null }
 }
 
+/** Keeps the pictures and the counters of a comparison that failed, where CI uploads them (`GHIA_TEST_ARTIFACTS`) or in the temp directory of the run. */
+function expectKeptIsWhole(renderer: TestRenderer, label: string, name: string, shown: { whole: string; kept: string | null }) {
+  if (shown.kept === shown.whole) return
+  const slug = (expect.getState().currentTestName ?? name).replace(/[^a-z0-9]+/gi, "-").slice(0, 80)
+  const artifacts = process.env.GHIA_TEST_ARTIFACTS
+  const dir = artifacts === undefined ? path.join(shots, slug) : path.join(artifacts, "partial-redraw", slug)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, `${name}-whole.png`), Buffer.from(shown.whole, "base64"))
+  if (shown.kept !== null) fs.writeFileSync(path.join(dir, `${name}-kept.png`), Buffer.from(shown.kept, "base64"))
+  fs.writeFileSync(path.join(dir, `${name}-counters.json`), JSON.stringify(renderer.getPatchCounters(), null, 2))
+  const what = shown.kept === null ? "the window keeps a picture" : "the picture kept is the frame drawn whole"
+  expect.fail(`${label}: ${what} (pictures and counters in ${dir})`)
+}
+
 /** The hover and wheel sequence: a patch of two rows per crossing, a translate per wheel step, a pointer that leaves. */
 function drive(renderer: TestRenderer, check: (name: string) => void) {
   for (let y = 80; y < 440; y += 17) {
@@ -138,9 +152,7 @@ describe("partial redraw", () => {
 
         let compared = 0
         const check = (name: string) => {
-          const { whole, kept } = pictures(renderer, name)
-          expect(kept, `${name}: the window keeps a picture`).not.toBeNull()
-          expect(kept === whole, `${name}: the picture kept is the frame drawn whole`).toBe(true)
+          expectKeptIsWhole(renderer, name, name, pictures(renderer, name))
           compared++
         }
 
@@ -169,9 +181,7 @@ describe("partial redraw", () => {
 
         let compared = 0
         const check = (name: string) => {
-          const { whole, kept } = pictures(renderer, name)
-          expect(kept, `${name}: the window keeps a picture`).not.toBeNull()
-          expect(kept === whole, `${name}: the picture kept is the frame drawn whole`).toBe(true)
+          expectKeptIsWhole(renderer, name, name, pictures(renderer, name))
           compared++
         }
 
@@ -205,9 +215,9 @@ describe("partial redraw", () => {
 
           let compared = 0
           const check = (name: string) => {
-            const { whole, kept } = pictures(renderer, name)
+            const shown = pictures(renderer, name)
             // A frame with a group is drawn whole and the window keeps no picture; one it keeps is the frame's.
-            if (kept !== null) expect(kept === whole, `${kind} ${name}: the picture kept is the frame drawn whole`).toBe(true)
+            if (shown.kept !== null) expectKeptIsWhole(renderer, `${kind} ${name}`, name, shown)
             compared++
           }
 
@@ -223,7 +233,7 @@ describe("partial redraw", () => {
           const afterwards = (name: string) => {
             const shown = pictures(renderer, name)
             if (shown.kept !== null) {
-              expect(shown.kept === shown.whole, `${kind} ${name}: the picture kept is the frame drawn whole`).toBe(true)
+              expectKeptIsWhole(renderer, `${kind} ${name}`, name, shown)
               kept++
             }
           }

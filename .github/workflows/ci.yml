@@ -20,6 +20,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.head_ref == 'changeset-release/main'
     runs-on: macos-latest
     timeout-minutes: 180
+    env:
+      GHIA_TEST_ARTIFACTS: ${{ runner.temp }}/test-artifacts
     outputs:
       build-react: ${{ steps.build-react.outcome }}
     steps:
@@ -87,6 +89,13 @@ jobs:
       - if: ${{ !cancelled() && steps.build-react.outcome == 'success' }}
         run: bun run test
         working-directory: examples
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-artifacts
+          path: ${{ runner.temp }}/test-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
 
   # The React suite is the slowest part, so it gets its own runners.
   # A runner has 3 vCPUs and fits two test files at a time; three shards split the suite across runners.
