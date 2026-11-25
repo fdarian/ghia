@@ -15,12 +15,8 @@ permissions:
 
 jobs:
   diag:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, macos-15]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    runs-on: macos-latest
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,35 +45,69 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dump"
           { sw_vers; system_profiler SPDisplaysDataType; } 2>&1 | tee "$RUNNER_TEMP/dump/machine.txt"
 
-      # GPUI_GPU_TIMES names a file the Metal renderer appends one line per presented frame to (damage, shift, rects).
-      - name: Run 1 (patch on)
+# GPUI_GPU_TIMES names a file the Metal renderer appends one line per presented frame to (damage, shift, rects).
+      - name: Whole suite 1
         continue-on-error: true
         working-directory: packages/solid
         env:
-          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/on-1
-          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/on-1/gpu-times.txt
+          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/suite-1
+          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/suite-1/gpu-times.txt
         run: |
           mkdir -p "$PARTIAL_REDRAW_DUMP"
-          bun --bun vitest run src/__tests__/partial-redraw.test.tsx -t "copies the pixels" 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
-      - name: Run 2 (patch on)
+          bun --bun vitest run 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
+      - name: Whole suite 2
         continue-on-error: true
         working-directory: packages/solid
         env:
-          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/on-2
-          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/on-2/gpu-times.txt
+          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/suite-2
+          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/suite-2/gpu-times.txt
         run: |
           mkdir -p "$PARTIAL_REDRAW_DUMP"
-          bun --bun vitest run src/__tests__/partial-redraw.test.tsx -t "copies the pixels" 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
-      - name: Run 3 (scroll patch off)
+          bun --bun vitest run 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
+      - name: File only 1
         continue-on-error: true
         working-directory: packages/solid
         env:
-          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/off
-          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/off/gpu-times.txt
-          GPUIX_SCROLL_PATCH_OFF: '1'
+          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/file-1
+          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/file-1/gpu-times.txt
         run: |
           mkdir -p "$PARTIAL_REDRAW_DUMP"
-          bun --bun vitest run src/__tests__/partial-redraw.test.tsx -t "copies the pixels" 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
+          bun --bun vitest run src/__tests__/partial-redraw.test.tsx 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
+      - name: File only 2
+        continue-on-error: true
+        working-directory: packages/solid
+        env:
+          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/file-2
+          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/file-2/gpu-times.txt
+        run: |
+          mkdir -p "$PARTIAL_REDRAW_DUMP"
+          bun --bun vitest run src/__tests__/partial-redraw.test.tsx 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
+      - name: File only 3
+        continue-on-error: true
+        working-directory: packages/solid
+        env:
+          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/file-3
+          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/file-3/gpu-times.txt
+        run: |
+          mkdir -p "$PARTIAL_REDRAW_DUMP"
+          bun --bun vitest run src/__tests__/partial-redraw.test.tsx 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
+      - name: File only under load
+        continue-on-error: true
+        working-directory: packages/solid
+        env:
+          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/file-load
+          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/file-load/gpu-times.txt
+        run: |
+          mkdir -p "$PARTIAL_REDRAW_DUMP"
+          pids=""
+          for i in 1 2 3; do
+            yes > /dev/null &
+            pids="$pids $!"
+          done
+          status=0
+          bun --bun vitest run src/__tests__/partial-redraw.test.tsx 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt" || status=$?
+          kill $pids
+          exit $status
 
       - uses: actions/upload-artifact@v7
         if: always()
