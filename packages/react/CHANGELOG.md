@@ -9,6 +9,7 @@
 - **`<code code=... language=...>` is now `<code-block ...>`, and `<code>` is HTML's inline element.** The syntax-highlighted block keeps its props (`code`, `language`, `path`, `showLineNumbers`, `theme`) under the new name, so rename the tag (`<code-block code={source} language="ts" />`), the JSX type `CodeProps` to `CodeBlockProps`, and `findByType("code")` to `findByType("code-block")`. A `<code>` now lays out as `<span>` with the user agent style of Chrome's `code`: the generic `monospace` family, drawn at 13px beside 16px text by Chrome's monospace size rule (see `docs/reference.md`, "Monospace size"), so code that renders text inline in a paragraph (Lexical's Code format) works unchanged.
 - **`pre`, `kbd` and `samp` use the generic `monospace` at Chrome's size**, not `Menlo` at the inherited size: they are 13px where the text around them is 16px, unless an absolute `font-size` is inherited or the `font-family` is a longer list (`monospace, monospace`). `tt` is a tag too.
 - **`writeClipboardText` and `readClipboardText` on the renderer are `writeClipboard(items)` and `readClipboard()`.** Renderer code that called the old pair moves to the new one, which carries several types (see Clipboard below); `navigator.clipboard.writeText` and `readText` run on top of it.
+- **A scroll no longer moves the hover under a pointer that stays, as in Chrome.** `:hover`, `style.hover` and `pointerover`/`pointerenter`/`mouseover`/`mouseenter` (and their out and leave twins) stay on the element the pointer last moved onto while a wheel runs, and follow to what is under it 500 ms after the last tick of a mouse wheel, 100 ms after a trackpad lift (momentum that follows runs the 500 ms again), at the next frame after code scrolls an element by any path (`scrollTop = n`, `scrollTo`, `scrollIntoView`, `scrollToItem`, a key, a scrollbar; a smooth scroll when it ends), or at the next frame after a frame that changed the page (a commit, a restyle, a resize) or ran an animation of the layout (a transition or animation of a size, a margin, a position or the like, or a `layout` glide; a color, an opacity or a transform does not count, so `transition-colors` on rows and a spinner leave the hover where the wheel put it). A pointer that moves follows at once. `getPatchCounters().scrollPatch` loses `hoverAsked` and `hoverMatters` and its `held` loses `HitboxChain`; `Hover` holds a frame for a pointer that moved only. A test that wheels and expects the row under the pointer to be hovered calls `advanceTime(500)` and draws the frames the follow asks for.
 
 ### Features
 
@@ -62,7 +63,6 @@
 - Each key event from the keyboard gets its own microtask checkpoint on both sides: `tick()` ends its pump before a `keydown`, `keyup` or modifier change when an event or a frame step came first, and after sending it, and the frame loop ticks again at once, so an editor that commits its update in a microtask (Lexical) applies every key that was waiting, where it used to keep the first and lose the rest. With `frameMs` set the timer path ticks again on the next turn of the event loop (`keyEventPending()`) instead of waiting out the frame. There is still no checkpoint between the listeners of one event or between a key's `keydown` and its `input`, and mouse events handled in one pump share one. The test renderer gets `postNativeKeys`, `pumpNativeEvents`, `setYieldAfterKeyEvent` and `keyEventPending` to drive that pump.
 - The live automation client presses a `keystrokes` sequence one key at a time with a turn of the event loop after each, so an editor that commits its update in a microtask (Lexical) takes every key of "m i d" and not only the first. A synchronous `simulateKeystrokes` on the test renderer still runs a sequence inside one call; the limit is in `docs/fork/deviations.md`.
 - The text editor's events (`input`, `compositionstart`, `compositionupdate`, `compositionend` and the number stepper's `change`) reach JS synchronously on macOS, in the test renderer and in the web (wasm) renderer, as `keydown` does: after the edit and before the key's `keyup`, in order, in the same tick as the key. A controlled input's echo is drawn by the frame of the key that typed it, where it waited for the next tick before. They are still queued on Windows and Linux.
-- A scroll no longer moves the hover under a pointer that stays, as in Chrome. `:hover`, `style.hover` and `pointerover`/`pointerenter`/`mouseover`/`mouseenter` (and their out and leave twins) stay on the element the pointer last moved onto while a wheel runs, and follow to what is under it 500 ms after the last tick of a mouse wheel, 100 ms after a trackpad lift (momentum that follows runs the 500 ms again), at the next frame after code scrolls an element by any path (`scrollTop = n`, `scrollTo`, `scrollIntoView`, `scrollToItem`, a key, a scrollbar; a smooth scroll when it ends), or at the next frame after a frame that changed the page (a commit, a restyle, a resize) or ran an animation of the layout (a transition or animation of a size, a margin, a position or the like, or a `layout` glide; a color, an opacity or a transform does not count, so `transition-colors` on rows and a spinner leave the hover where the wheel put it). A pointer that moves follows at once. `getPatchCounters().scrollPatch` loses `hoverAsked` and `hoverMatters` and its `held` loses `HitboxChain`; `Hover` holds a frame for a pointer that moved only. A test that wheels and expects the row under the pointer to be hovered calls `advanceTime(500)` and draws the frames the follow asks for.
 - A block whose only content is a line break (`<div><br></div>`, `<p><br></p>`, or a lone `"\n"` under `white-space: pre`) is one line tall, as in Chrome, and not zero. `a<br>` stays one line and `<br><br>` is two.
 - `xlink:href` and `xlinkHref` on an SVG `<use>` are written as `href`, and the `marker` shorthand no longer writes a marker twice beside a longhand.
 - `TestRenderer.dispose()` closes the window itself, while its app is alive, and no longer leaves that to a block on the main queue. A block still queued when the app was released ran in the next renderer's `dispose()` and aborted the process with "app was released before async operation completed". `RowOracle.dispose()`, and a `RowOracle` that a newer one replaces, close their window the same way.
@@ -190,9 +190,16 @@ The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`,
 
 ## 0.12.1
 
-### Patch Changes
+### Breaking changes
 
-- 9100adc: The mutation batch is one binary byte array instead of JSON text. `createMutationQueue` writes each op as it is enqueued through `WireWriter` (internal to `@ghia/native`, `js/wire.ts`; not exported) into reused buffers, with no tuple per op and no `JSON.stringify` of the batch, and `applyBatch(bytes: Uint8Array)` on the live, test and wasm renderers decodes it in place (`batch::wire`), so the napi call transcodes no string and the decoder allocates nothing per op beyond what it keeps. The format is specified in `docs/reference.md` ("Wire format"). **Breaking for anything that calls `applyBatch` itself**: it takes the bytes, not a JSON string; tests that built or parsed a batch use `encodeWireBatchForTest` and `decodeWireBatchForTest` from `@ghia/native/testing`. `MutationRenderer.setStyle` takes the style's JSON text as an optional third argument, which Solid passes from the text its write comparison already made, so a written style is stringified once. A failed batch is put back in front of what was enqueued since, and a style native rejects is cut out of the batch by its byte range, as before.
+- **`applyBatch` takes the bytes of the mutation batch, not a JSON string.** This breaks anything that calls `applyBatch` itself on the live, test or wasm renderer; tests that built or parsed a batch use `encodeWireBatchForTest` and `decodeWireBatchForTest` from `@ghia/native/testing`. `MutationRenderer.setStyle` takes the style's JSON text as an optional third argument, which Solid passes from the text its write comparison already made, so a written style is stringified once.
+
+### Performance
+
+- The mutation batch is one binary byte array instead of JSON text. `createMutationQueue` writes each op as it is enqueued through `WireWriter` (internal to `@ghia/native`, `js/wire.ts`; not exported) into reused buffers, with no tuple per op and no `JSON.stringify` of the batch, and `applyBatch(bytes: Uint8Array)` on the live, test and wasm renderers decodes it in place (`batch::wire`), so the napi call transcodes no string and the decoder allocates nothing per op beyond what it keeps. The format is specified in `docs/reference.md` ("Wire format"). A failed batch is put back in front of what was enqueued since, and a style native rejects is cut out of the batch by its byte range, as before.
+
+### Dependencies
+
 - Updated dependencies [9100adc]
 - Updated dependencies [9100adc]
 - Updated dependencies [a1ba92a]
@@ -223,14 +230,17 @@ The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`,
 
 ## 0.12.0
 
-### Minor Changes
+### Features
 
-- 4c7d9c6: A React app has the `window`, `document` and no-op `scrollTo` globals in the native build, because the renderer imports `@ghia/native/host`, and `@ghia/react` re-exports `isWebBuild` from it. The renderer tells the wasm build from the native one with `isWebBuild` instead of `typeof window`.
-- 9d68f3b: `@ghia/react/vite` exports `react()`: @vitejs/plugin-react's JSX transform with the automatic runtime and `jsxImportSource: "@ghia/react"`, and React Fast Refresh in `ghia dev`. An edit to a component module updates the tree in place and keeps the `useState` of the components around it, and the entry does not run again; any other edit re-runs the entry, and refresh still works after it. Use it next to `ghia()` in the Vite config, and run React apps with `ghia dev` and `ghia build` instead of `bun --hot`. `react({ include, exclude })` scopes it to some files, for an app that also uses `solid()`. `ghia` and `vite` are optional peer dependencies, as for `@ghia/solid`.
+- A React app has the `window`, `document` and no-op `scrollTo` globals in the native build, because the renderer imports `@ghia/native/host`, and `@ghia/react` re-exports `isWebBuild` from it. The renderer tells the wasm build from the native one with `isWebBuild` instead of `typeof window`.
+- `@ghia/react/vite` exports `react()`: @vitejs/plugin-react's JSX transform with the automatic runtime and `jsxImportSource: "@ghia/react"`, and React Fast Refresh in `ghia dev`. An edit to a component module updates the tree in place and keeps the `useState` of the components around it, and the entry does not run again; any other edit re-runs the entry, and refresh still works after it. Use it next to `ghia()` in the Vite config, and run React apps with `ghia dev` and `ghia build` instead of `bun --hot`. `react({ include, exclude })` scopes it to some files, for an app that also uses `solid()`. `ghia` and `vite` are optional peer dependencies, as for `@ghia/solid`.
 
-### Patch Changes
+### Fixes
 
-- 751f7e2: After the entry is evaluated again, runtime errors from the native renderer, the frame loop and the process handlers are reported by the latest `render()` call's module, so the error overlay no longer mounts through the first run's copy of the reconciler.
+- After the entry is evaluated again, runtime errors from the native renderer, the frame loop and the process handlers are reported by the latest `render()` call's module, so the error overlay no longer mounts through the first run's copy of the reconciler.
+
+### Dependencies
+
 - Updated dependencies [8fcd806]
 - Updated dependencies [7528529]
 - Updated dependencies [8fe6300]
@@ -284,11 +294,17 @@ The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`,
 
 ## 0.11.1
 
-### Patch Changes
+### Features
 
-- a2d57e7: A window opened with `GPUIX_BACKGROUND=1` in the environment emulates focus, as Chrome does with CDP's `Emulation.setFocusEmulationEnabled`: it behaves as active for `onFocus`, `onBlur`, `:focus-visible`, the caret and `focusElement`, without becoming the key window or activating the app. Until now a window opened behind other apps (`focus: false`) fired no focus event and drew no caret while typed text still arrived. A window without the variable is unchanged: a window that is not active fires no focus events, as in Chrome, and they fire once it is activated. The library reads the variable once, when the window opens; apps that map it to `focus: false` keep doing that.
-- 05f72cd: `dragBy`, `dragTo` and `mouse.drag` drive a drag on a live window when the app drives its own renderer in-process (`connectTest(liveRendererAsTest(renderer))`). The live renderer delivers a press and a release to the page at once but a move only on a later turn of the event loop, so a drag stepped in one synchronous burst reached the page as press, release, then the moves, and a handle that ends its drag on `pointerup` never moved. `liveRendererAsTest` now waits one event-loop turn after every input it simulates, and `TestAutomationRenderer`'s input methods may return a promise.
-- 6a78fe8: `kind: 'panel'` in the window options opens the window as a non-activating panel: a normal window (titlebar, resizing, buttons, appearance, background, normal window level) that can be the key window without activating the app. With `focus: true` it is key while the frontmost app stays frontmost, so a capture can show the key look (glass tints, accent colours, traffic lights) that a `focus: false` window never has. `renderer.isWindowKey()` reads whether AppKit reports the window as key. An unknown `kind` throws; `'normal'` is the default, and on Windows and Linux a panel is a normal window. A panel takes the keyboard like any key window, so open one only for a capture and close it right after.
+- A window opened with `GPUIX_BACKGROUND=1` in the environment emulates focus, as Chrome does with CDP's `Emulation.setFocusEmulationEnabled`: it behaves as active for `onFocus`, `onBlur`, `:focus-visible`, the caret and `focusElement`, without becoming the key window or activating the app. Until now a window opened behind other apps (`focus: false`) fired no focus event and drew no caret while typed text still arrived. A window without the variable is unchanged: a window that is not active fires no focus events, as in Chrome, and they fire once it is activated. The library reads the variable once, when the window opens; apps that map it to `focus: false` keep doing that.
+- `kind: 'panel'` in the window options opens the window as a non-activating panel: a normal window (titlebar, resizing, buttons, appearance, background, normal window level) that can be the key window without activating the app. With `focus: true` it is key while the frontmost app stays frontmost, so a capture can show the key look (glass tints, accent colours, traffic lights) that a `focus: false` window never has. `renderer.isWindowKey()` reads whether AppKit reports the window as key. An unknown `kind` throws; `'normal'` is the default, and on Windows and Linux a panel is a normal window. A panel takes the keyboard like any key window, so open one only for a capture and close it right after.
+
+### Fixes
+
+- `dragBy`, `dragTo` and `mouse.drag` drive a drag on a live window when the app drives its own renderer in-process (`connectTest(liveRendererAsTest(renderer))`). The live renderer delivers a press and a release to the page at once but a move only on a later turn of the event loop, so a drag stepped in one synchronous burst reached the page as press, release, then the moves, and a handle that ends its drag on `pointerup` never moved. `liveRendererAsTest` now waits one event-loop turn after every input it simulates, and `TestAutomationRenderer`'s input methods may return a promise.
+
+### Dependencies
+
 - Updated dependencies [52fd03d]
 - Updated dependencies [a2d57e7]
 - Updated dependencies [d70feb5]
@@ -302,11 +318,9 @@ The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`,
 
 ## 0.11.0
 
-### Minor Changes
+First Ghia release, forked from gpuix 0.10.0. See docs/fork/index.md for what changed.
 
-- c4437f3: First Ghia release, forked from gpuix 0.10.0. See docs/fork/index.md for what changed.
-
-### Patch Changes
+### Dependencies
 
 - Updated dependencies [c4437f3]
   - @ghia/native@0.11.0
