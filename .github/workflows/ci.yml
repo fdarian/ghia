@@ -115,8 +115,8 @@ jobs:
         working-directory: packages/react
         timeout-minutes: 30
 
-  # The one status the ruleset on main requires. It lists what passes, not what fails: a job that never got a runner
-  # is neither failed nor cancelled, and a check for failures let the gate go green. Skipped needs pass where check
+  # The one status the ruleset on main requires. It lists what passes, not what fails: in run 45588018035 (attempt 2)
+  # check never got a runner and the old check for failures still let the gate go green. Skipped needs pass where check
   # was not meant to run, so ordinary PRs are not blocked.
   ci-passed:
     if: always()
