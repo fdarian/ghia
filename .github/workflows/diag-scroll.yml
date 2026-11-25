@@ -45,69 +45,46 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dump"
           { sw_vers; system_profiler SPDisplaysDataType; } 2>&1 | tee "$RUNNER_TEMP/dump/machine.txt"
 
-# GPUI_GPU_TIMES names a file the Metal renderer appends one line per presented frame to (damage, shift, rects).
-      - name: Whole suite 1
+      # GPUI_GPU_TIMES names a file the Metal renderer appends one line per presented frame to (damage, shift, rects).
+      # An iteration that passes deletes its dump dir, so only failures are uploaded.
+      - name: Wheel test x60
         continue-on-error: true
         working-directory: packages/solid
-        env:
-          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/suite-1
-          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/suite-1/gpu-times.txt
+        shell: bash
         run: |
-          mkdir -p "$PARTIAL_REDRAW_DUMP"
-          bun --bun vitest run 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
-      - name: Whole suite 2
-        continue-on-error: true
-        working-directory: packages/solid
-        env:
-          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/suite-2
-          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/suite-2/gpu-times.txt
-        run: |
-          mkdir -p "$PARTIAL_REDRAW_DUMP"
-          bun --bun vitest run 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
-      - name: File only 1
-        continue-on-error: true
-        working-directory: packages/solid
-        env:
-          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/file-1
-          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/file-1/gpu-times.txt
-        run: |
-          mkdir -p "$PARTIAL_REDRAW_DUMP"
-          bun --bun vitest run src/__tests__/partial-redraw.test.tsx 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
-      - name: File only 2
-        continue-on-error: true
-        working-directory: packages/solid
-        env:
-          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/file-2
-          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/file-2/gpu-times.txt
-        run: |
-          mkdir -p "$PARTIAL_REDRAW_DUMP"
-          bun --bun vitest run src/__tests__/partial-redraw.test.tsx 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
-      - name: File only 3
-        continue-on-error: true
-        working-directory: packages/solid
-        env:
-          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/file-3
-          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/file-3/gpu-times.txt
-        run: |
-          mkdir -p "$PARTIAL_REDRAW_DUMP"
-          bun --bun vitest run src/__tests__/partial-redraw.test.tsx 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
-      - name: File only under load
-        continue-on-error: true
-        working-directory: packages/solid
-        env:
-          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/file-load
-          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/file-load/gpu-times.txt
-        run: |
-          mkdir -p "$PARTIAL_REDRAW_DUMP"
-          pids=""
-          for i in 1 2 3; do
-            yes > /dev/null &
-            pids="$pids $!"
+          failed=0
+          for i in $(seq 1 60); do
+            dir="$RUNNER_TEMP/dump/wheel-$i"
+            mkdir -p "$dir"
+            PARTIAL_REDRAW_DUMP="$dir" GPUI_GPU_TIMES="$dir/gpu-times.txt" \
+              bun --bun vitest run src/__tests__/partial-redraw.test.tsx -t "copies the pixels" 2>&1 | tee "$dir/log.txt"
+            code=${PIPESTATUS[0]}
+            if [ "$code" -eq 0 ]; then
+              rm -rf "$dir"
+            else
+              failed=$((failed + 1))
+            fi
           done
-          status=0
-          bun --bun vitest run src/__tests__/partial-redraw.test.tsx 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt" || status=$?
-          kill $pids
-          exit $status
+          echo "failed iterations: $failed"
+      - name: Whole file x6
+        continue-on-error: true
+        working-directory: packages/solid
+        shell: bash
+        run: |
+          failed=0
+          for i in $(seq 1 6); do
+            dir="$RUNNER_TEMP/dump/file-$i"
+            mkdir -p "$dir"
+            PARTIAL_REDRAW_DUMP="$dir" GPUI_GPU_TIMES="$dir/gpu-times.txt" \
+              bun --bun vitest run src/__tests__/partial-redraw.test.tsx 2>&1 | tee "$dir/log.txt"
+            code=${PIPESTATUS[0]}
+            if [ "$code" -eq 0 ]; then
+              rm -rf "$dir"
+            else
+              failed=$((failed + 1))
+            fi
+          done
+          echo "failed iterations: $failed"
 
       - uses: actions/upload-artifact@v7
         if: always()
