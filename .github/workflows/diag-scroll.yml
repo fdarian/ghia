@@ -1,0 +1,87 @@
+# Temporary diagnostic for the wheel-translate partial redraw failing on the macOS 26 runner. Revert before any PR.
+name: Diag scroll
+
+on:
+  push:
+    branches: [claude/project-thread-1vhrog]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup
+        with: { cache: true }
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-apple-darwin
+          cache: false
+          rustflags: ''
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/native
+      - run: xcodebuild -downloadComponent MetalToolchain
+
+      - run: bun run build
+        working-directory: packages/native
+      - run: bun run build
+        working-directory: packages/ghia
+      - run: bun run build
+        working-directory: packages/solid
+
+      - continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/dump"
+          { sw_vers; system_profiler SPDisplaysDataType; } 2>&1 | tee "$RUNNER_TEMP/dump/machine.txt"
+
+      # GPUI_GPU_TIMES names a file the Metal renderer appends one line per presented frame to (damage, shift, rects).
+      - name: Run 1 (patch on)
+        continue-on-error: true
+        working-directory: packages/solid
+        env:
+          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/on-1
+          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/on-1/gpu-times.txt
+        run: |
+          mkdir -p "$PARTIAL_REDRAW_DUMP"
+          bun --bun vitest run src/__tests__/partial-redraw.test.tsx -t "copies the pixels" 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
+      - name: Run 2 (patch on)
+        continue-on-error: true
+        working-directory: packages/solid
+        env:
+          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/on-2
+          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/on-2/gpu-times.txt
+        run: |
+          mkdir -p "$PARTIAL_REDRAW_DUMP"
+          bun --bun vitest run src/__tests__/partial-redraw.test.tsx -t "copies the pixels" 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
+      - name: Run 3 (scroll patch off)
+        continue-on-error: true
+        working-directory: packages/solid
+        env:
+          PARTIAL_REDRAW_DUMP: ${{ runner.temp }}/dump/off
+          GPUI_GPU_TIMES: ${{ runner.temp }}/dump/off/gpu-times.txt
+          GPUIX_SCROLL_PATCH_OFF: '1'
+        run: |
+          mkdir -p "$PARTIAL_REDRAW_DUMP"
+          bun --bun vitest run src/__tests__/partial-redraw.test.tsx -t "copies the pixels" 2>&1 | tee "$PARTIAL_REDRAW_DUMP/log.txt"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dump-${{ matrix.os }}
+          path: ${{ runner.temp }}/dump
+          if-no-files-found: warn
