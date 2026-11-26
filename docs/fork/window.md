@@ -219,6 +219,26 @@ control that follows the key state would show there too. The key period measured
   osascript -e 'tell application "System Events" to tell (first process whose unix id is PID) to get name of every menu bar item of menu bar 1'
   ```
 
+## Quitting
+
+The host, not AppKit, ends the process. In embedded mode (the JS thread pumps the run loop) AppKit's own termination
+path is `terminate:` and ends in `exit()` inside the pump, so `onTerminated` never ran and a process with other work (a
+`Bun.serve`) could outlive its window or ignore a quit. Every way of quitting now marks the platform `Terminated` and runs
+GPUI's quit callback (`MacPlatform::begin_termination`), the next `tick()` returns `false`, and `startFrameLoop` runs
+`onTerminated`, which the adapters set to `process.exit(0)`:
+
+- **Quit** (⌘Q, the app menu's Quit item, or `cx.quit()`), dispatched to the main queue.
+- **The last window closing** (GPUI's `LastWindowClosed` policy, which the macOS run uses).
+- **The quit Apple Event**, which is what the Dock's Quit, logout, restart and `-[NSRunningApplication terminate]` send.
+  A handler for `aevt`/`quit` is installed in `applicationDidFinishLaunching:`; it marks the platform and returns, so the
+  event is answered with success and a logout or restart is not cancelled.
+- **Any other `terminate:`**: `applicationShouldTerminate:` marks the platform and answers `NSTerminateCancel`, so AppKit
+  never calls `exit()`; the host does.
+
+A quit from another thread (the Apple Event) wakes an idle host through the run-loop watch:
+[frames-and-wakes.md](frames-and-wakes.md#off-thread-wakes-an-apple-event-quit). The paths are checked by
+[the quit e2e](testing.md#the-quit-e2e). The blocking `run()` mode is unchanged.
+
 ## Window placement and displays
 
 An app can put a window on a second monitor and learn where the monitors are. Electron's answer is `x` / `y` in the window

@@ -880,6 +880,12 @@ render(<App />, {
 The red traffic-light button quits the process. Start the app again from the
 terminal.
 
+The app ends, and `render()`'s frame loop runs `onTerminated` (`process.exit(0)` in
+both adapters), on every way macOS asks it to quit: ⌘Q and the `Quit <appName>` menu
+item, the last window closing, and the Dock's Quit, logout and restart. The host exits
+the process, not AppKit, so it ends even when the app has other work keeping the event
+loop alive (a `Bun.serve`).
+
 | Option | Values | Purpose |
 |---|---|---|
 | `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights. The window then drags only from the boxes that set [`appRegion: "drag"`](#window-drag-regions) |
@@ -11160,7 +11166,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] macOS menu bar with the standard shortcuts (`appName`)
 - [ ] App-declared menus and menu callbacks
 - [x] Background launch (`focus`, `show`, `activateWindow`)
-- [x] Last window close quits the process
+- [x] Last window close, ⌘Q, and the Dock's Quit, logout and restart quit the process
 - [x] Runtime errors keep the macOS window alive and show a stack overlay
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element
