@@ -120,7 +120,7 @@ An HTML tag ([docs/reference.md](../reference.md#html-tags)) is the user agent s
 
 **What is not there**
 
-- **`<a href>` does not navigate.** Enter and a click fire `click` and stop.
+- **`<a href>` follows only a fragment link.** An unprevented click or Enter on an `<a href>` (or `<area href>`) whose URL differs from the document's in its fragment only is a fragment navigation, as in a browser; any other URL, another origin included, is not opened: a `console.warn` names it once per URL (`openLinkExternally`). `target`, `download` and the modifier keys change nothing.
 - **An inline `<a>` has no accessibility node,** and no other inline box has one: only an `a` with `display: block` or `inline-block` is a `link`.
 - **The tab stop of an inline `<a>` follows paint order.** It comes after the `inline-block` elements (a `button`) beside it in the paragraph, not in the order of the tree.
 - **`th scope` is not forwarded,** so a `th` is always a `columnheader`, never a row header.
@@ -415,7 +415,7 @@ How sheets work is in [stylesheets.md](stylesheets.md); the behaviour is in [ref
 
 ### Location, history and storage
 
-- **There is no document navigation.** A navigation that would load another document throws a `DOMException` named `NotSupportedError` instead of doing nothing: assigning a URL with another path, query or origin, setting `pathname`, `search`, `host` and the like, and `reload()`. Ghia has one document and cannot replace it, and a silent no-op would leave code on a URL it did not move to. A navigation to a URL that differs in its fragment only is a fragment navigation, as in a browser; `history.pushState` and `replaceState` change the URL without loading anything. `<a href>` does not navigate (see [HTML tags](#html-tags)), and `@solidjs/router`'s click handling on a link does not navigate either yet.
+- **There is no document navigation.** A navigation that would load another document throws a `DOMException` named `NotSupportedError` instead of doing nothing: assigning a URL with another path, query or origin, setting `pathname`, `search`, `host` and the like, and `reload()`. Ghia has one document and cannot replace it, and a silent no-op would leave code on a URL it did not move to. A navigation to a URL that differs in its fragment only is a fragment navigation, as in a browser; `history.pushState` and `replaceState` change the URL without loading anything. A click on an `<a href>` follows a fragment link and warns for any other URL (see above), and `@solidjs/router` navigates on a click on a link, since it handles the click itself.
 - **`history.go(0)` does nothing.** A browser reloads the page, which Ghia cannot; frameworks do not call it, and throwing would break one that does for no gain.
 - **There is no `storage` event.** It fires in the other documents of an origin, and a Ghia app has one. Two processes with the same app id do not see each other's writes: each reads the file once and rewrites it whole, so the last writer wins.
 - **`localStorage` is a file in `~/Library/Application Support/<appId>/`, and in memory without an app id.** A browser keeps it per origin in its profile. With no `appId` option and no `name` in the project's `package.json` (a script, a test) nothing persists.
