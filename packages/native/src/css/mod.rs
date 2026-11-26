@@ -42,6 +42,7 @@ pub(crate) mod outline;
 pub(crate) mod overflow_anchor;
 pub(crate) mod place;
 pub(crate) mod position;
+pub(crate) mod registered_properties;
 pub(crate) mod shorthand;
 pub(crate) mod sheet;
 pub(crate) mod style_cache;

@@ -4,8 +4,8 @@
 //! `!important`, `@layer`, source order). Declarations come out as `(camelCase key, JSON value)`,
 //! the shape of the style prop, so [`render_declarations`] gives the text `StyleTable::intern`
 //! parses and every value goes through the parser inline styles use. What this engine does not
-//! implement (at-rules other than `@layer`, `@media` and `@supports`, selectors with other
-//! pseudo-classes) is skipped and listed in
+//! implement (at-rules other than `@layer`, `@media`, `@supports`, `@keyframes` and `@property`,
+//! selectors with other pseudo-classes) is skipped and listed in
 //! [`StyleSheet::unsupported`] rather than failing the sheet.
 //!
 //! The atoms and layers belong to the document, so every sheet of one document is parsed with the
@@ -18,17 +18,20 @@ mod atoms;
 mod cascade;
 mod conditions;
 mod declarations;
+mod definitions;
 mod document;
 mod has;
 mod index;
 mod initial;
 mod invalidation;
+mod keyframes;
 mod layers;
 mod matching;
 mod nth;
 mod parse_cache;
 mod parser;
 mod positions;
+mod property_rules;
 mod reload;
 mod selector;
 mod selector_parse;
@@ -51,6 +54,8 @@ pub use atoms::{Atom, Atoms};
 pub use cascade::{CascadeCache, MatchedRules};
 pub use document::{ClassAtoms, ElementCss, StyleSheets};
 pub use declarations::render_declarations;
+pub use definitions::Defined;
+pub use keyframes::{KeyframeBlock, KeyframesRule, SheetKeyframes};
 pub use has::{HasArguments, HasInvalidation, HasRead, RelativeSelector};
 pub use invalidation::{Invalidation, Reach};
 pub use layers::{LayerId, LayerOrder, Layers};
@@ -66,12 +71,17 @@ pub use selector::{
 };
 
 use crate::css::lenient::Declaration;
+use crate::css::registered_properties::Registration;
 
 pub struct StyleSheet {
     pub rules: Vec<Rule>,
-    /// The name of each skipped at-rule (`keyframes`, without the `@`), the head of each `@media`
-    /// and `@supports` that was malformed, and the text of each selector list that was invalid, in
-    /// source order.
+    /// The `@keyframes` of the sheet, in source order.
+    pub keyframes: Vec<Defined<KeyframesRule>>,
+    /// The valid `@property` rules of the sheet, in source order.
+    pub properties: Vec<Defined<Registration>>,
+    /// The name of each skipped at-rule (`font-face`, without the `@`), the head of each `@media`
+    /// and `@supports` that was malformed, the head and the reason of each `@property` that makes
+    /// no registration, and the text of each selector list that was invalid, in source order.
     pub unsupported: Vec<String>,
 }
 

@@ -4,8 +4,9 @@
 //! removed, the ends trimmed, a trailing `!important` dropped. The text inside is not touched, so
 //! two values are equal when their text is, which is how `style(--x: v)` compares them in a browser.
 //!
-//! They inherit. [`CustomProperties::descend`] lays an element's declarations over its parent's
-//! computed map, substituting the `var()` in a value where it is declared. Two things read them:
+//! They inherit, except a registered property (`@property`) that says otherwise
+//! (`registered_properties`). [`CustomProperties::descend`] lays an element's declarations over its
+//! parent's computed map, substituting the `var()` in a value where it is declared. Two things read them:
 //! `style()` container queries, and [`substitute`], which puts them into the text of a value:
 //! the transform properties keep it in their field, and every other property holds its declaration
 //! until it is built (`css::var_substitution`).
@@ -17,8 +18,26 @@ use std::sync::Arc;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct CustomProperties(Arc<BTreeMap<String, String>>);
+use super::registered_properties::Registered;
+
+/// What an element computes its custom properties to. The map holds the values of the properties
+/// that have one, the initial value of a registered property included: it is put there where the
+/// document's registrations enter the tree (`CustomProperties::with_registered`).
+#[derive(Debug, Clone, Default)]
+pub struct CustomProperties {
+    values: Arc<BTreeMap<String, String>>,
+    /// The registrations of the document, handed down with the values.
+    registered: Option<Arc<Registered>>,
+    /// Some property that does not inherit has a value other than its initial one here, which the
+    /// next element has to reset. False for nearly every element, so the reset costs nothing.
+    sets_non_inherited: bool,
+}
+
+impl PartialEq for CustomProperties {
+    fn eq(&self, other: &Self) -> bool {
+        self.values == other.values
+    }
+}
 
 /// Whether `name` is a custom property name: `--` and at least one more character, and a CSS
 /// identifier after it.
@@ -219,24 +238,26 @@ fn closing_paren(text: &str) -> Option<usize> {
 
 impl CustomProperties {
     pub(crate) fn fingerprint(&self, fp: &mut crate::retain::Fingerprint) {
-        for (name, value) in self.0.iter() {
+        for (name, value) in self.values.iter() {
             fp.str(name);
             fp.str(value);
         }
-        fp.word(0);
+        // Registrations change what an element below computes without changing this map: a
+        // property that stops inheriting.
+        fp.word(self.registered.as_ref().map_or(0, |registered| registered.fingerprint()));
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.values.is_empty()
     }
 
     pub(crate) fn get(&self, name: &str) -> Option<&str> {
-        self.0.get(name).map(String::as_str)
+        self.values.get(name).map(String::as_str)
     }
 
     /// Every property with its value, names in order, `--` included.
     pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().map(|(name, value)| (name.as_str(), value.as_str()))
+        self.values.iter().map(|(name, value)| (name.as_str(), value.as_str()))
     }
 
     /// The declarations of one style object, in written order, a later one winning. Values are
@@ -248,7 +269,41 @@ impl CustomProperties {
             .map(|(name, value)| (name, normalise(&value)))
             .filter(|(_, value)| !value.is_empty())
             .collect();
-        (!map.is_empty()).then(|| Self(Arc::new(map)))
+        (!map.is_empty()).then(|| Self { values: Arc::new(map), ..Self::default() })
+    }
+
+    /// The custom properties at the top of a tree whose document registered `registered`: every
+    /// registered property that has an initial value holds it.
+    pub(crate) fn with_registered(registered: Option<Arc<Registered>>) -> Self {
+        let Some(held) = &registered else {
+            return Self::default();
+        };
+        let values: BTreeMap<String, String> =
+            held.initial_values().map(|(name, value)| (name.to_owned(), value.to_owned())).collect();
+        Self { values: Arc::new(values), registered, sets_non_inherited: false }
+    }
+
+    /// What an element that declares no custom property computes to below `self`: what `self` has,
+    /// except that a property that does not inherit goes back to its initial value.
+    pub(crate) fn inherit(&self) -> Self {
+        if !self.sets_non_inherited {
+            return self.clone();
+        }
+        let mut computed = (*self.values).clone();
+        self.reset_non_inherited(&mut computed);
+        Self { values: Arc::new(computed), registered: self.registered.clone(), sets_non_inherited: false }
+    }
+
+    fn reset_non_inherited(&self, computed: &mut BTreeMap<String, String>) {
+        let Some(registered) = &self.registered else {
+            return;
+        };
+        for name in registered.non_inheriting() {
+            match registered.initial_of(name) {
+                Some(initial) => computed.insert(name.clone(), initial.to_owned()),
+                None => computed.remove(name),
+            };
+        }
     }
 
     /// What an element computes to: `declared` laid over what it inherits (`self`). `inherit`
@@ -257,19 +312,46 @@ impl CustomProperties {
     /// declarations and what it inherits: its readers below get the text, not the call. One that
     /// cannot be (a name that is missing, a cycle) is guaranteed-invalid, which removes the
     /// property whatever it inherited.
+    ///
+    /// A registered property differs in three ways. One that does not inherit starts from its
+    /// initial value and not from the parent's, unless the element says `inherit`. `initial`, and a
+    /// value that cannot be computed, are its initial value and not nothing. And `unset` is the
+    /// initial value for one that does not inherit.
     pub(crate) fn descend(&self, declared: &Self) -> Self {
         if declared.is_empty() {
-            return self.clone();
+            return self.inherit();
         }
-        let mut computed = (*self.0).clone();
+        let registered = self.registered.as_deref();
+        let mut computed = (*self.values).clone();
+        if self.sets_non_inherited {
+            self.reset_non_inherited(&mut computed);
+        }
+        let mut sets_non_inherited = false;
         let mut pending = Pending::new();
-        for (name, value) in declared.0.iter() {
+        for (name, value) in declared.values.iter() {
+            let registration = registered.and_then(|registered| registered.get(name));
+            sets_non_inherited |= registration.is_some_and(|registration| !registration.inherits);
+            let initial = registration.and_then(|registration| registration.initial.as_deref());
+            let inherits = registration.is_none_or(|registration| registration.inherits);
             if is_initial(value) {
-                computed.remove(name);
+                match initial {
+                    Some(initial) => computed.insert(name.clone(), initial.to_owned()),
+                    None => computed.remove(name),
+                };
             } else if has_var(value) {
                 computed.remove(name);
                 pending.insert(name.as_str(), value.as_str());
-            } else if !is_inherit(value) {
+            } else if is_inherit(value) {
+                if inherits {
+                    continue;
+                }
+                // `inherit` takes the parent's value; `unset` and the rest are the initial one.
+                let parent = value.eq_ignore_ascii_case("inherit").then(|| self.values.get(name)).flatten();
+                match parent.map(String::as_str).or(initial) {
+                    Some(text) => computed.insert(name.clone(), text.to_owned()),
+                    None => computed.remove(name),
+                };
+            } else {
                 computed.insert(name.clone(), value.clone());
             }
         }
@@ -280,8 +362,16 @@ impl CustomProperties {
                 compute_pending(name, &pending, &cyclic, &computed, &mut done);
             }
             computed.extend(done.into_iter().filter_map(|(name, value)| Some((name, value?))));
+            // Invalid at computed-value time is the initial value of a registered property.
+            if let Some(registered) = registered {
+                for name in pending.keys() {
+                    if let (false, Some(initial)) = (computed.contains_key(*name), registered.initial_of(name)) {
+                        computed.insert((*name).to_owned(), initial.to_owned());
+                    }
+                }
+            }
         }
-        Self(Arc::new(computed))
+        Self { values: Arc::new(computed), registered: self.registered.clone(), sets_non_inherited }
     }
 
     /// `over`'s declarations on top of `base`'s, keywords kept as written: a state style or an
@@ -289,9 +379,9 @@ impl CustomProperties {
     pub(crate) fn layered(base: Option<&Self>, over: Option<&Self>) -> Option<Self> {
         match (base, over) {
             (Some(base), Some(over)) => {
-                let mut map = (*base.0).clone();
-                map.extend(over.0.iter().map(|(name, value)| (name.clone(), value.clone())));
-                Some(Self(Arc::new(map)))
+                let mut map = (*base.values).clone();
+                map.extend(over.values.iter().map(|(name, value)| (name.clone(), value.clone())));
+                Some(Self { values: Arc::new(map), ..Self::default() })
             }
             (Some(only), None) | (None, Some(only)) => Some(only.clone()),
             (None, None) => None,
@@ -301,8 +391,8 @@ impl CustomProperties {
 
 impl Serialize for CustomProperties {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(self.0.len()))?;
-        for (name, value) in self.0.iter() {
+        let mut map = serializer.serialize_map(Some(self.values.len()))?;
+        for (name, value) in self.values.iter() {
             map.serialize_entry(name, value)?;
         }
         map.end()
@@ -461,5 +551,97 @@ mod tests {
         assert!(!has_var("myvar(--a)"));
         assert!(!has_var("translateX(10px)"));
         assert!(!has_var("var"));
+    }
+
+    mod registered {
+        use super::*;
+        use crate::css::registered_properties::{Registered, Registration};
+
+        fn registry(entries: &[(&str, &str, bool, Option<&str>)]) -> Option<Arc<Registered>> {
+            let registrations = entries
+                .iter()
+                .map(|(name, syntax, inherits, initial)| {
+                    Registration::new(name, Some(syntax), Some(if *inherits { "true" } else { "false" }), *initial).unwrap()
+                })
+                .collect();
+            Registered::new(registrations).map(Arc::new)
+        }
+
+        fn at_root(entries: &[(&str, &str, bool, Option<&str>)]) -> CustomProperties {
+            CustomProperties::with_registered(registry(entries))
+        }
+
+        #[test]
+        fn an_initial_value_is_there_until_something_sets_the_property() {
+            let root = at_root(&[("--a", "*", true, Some("0 0 #0000")), ("--none", "*", true, None)]);
+            assert_eq!(root.get("--a"), Some("0 0 #0000"));
+            assert_eq!(root.get("--none"), None);
+            let child = root.descend(&declared(&[("--a", "1")]));
+            assert_eq!(child.get("--a"), Some("1"));
+            assert_eq!(child.descend(&declared(&[("--x", "2")])).get("--a"), Some("1"), "an inheriting property is handed down");
+            assert_eq!(child.descend(&declared(&[("--a", "initial")])).get("--a"), Some("0 0 #0000"));
+            assert_eq!(root.inherit().get("--a"), Some("0 0 #0000"));
+        }
+
+        #[test]
+        fn a_property_that_does_not_inherit_goes_back_to_its_initial_value_below() {
+            let root = at_root(&[("--a", "*", false, Some("0")), ("--b", "*", false, None), ("--c", "*", true, Some("c"))]);
+            let set = root.descend(&declared(&[("--a", "5"), ("--b", "6"), ("--c", "7")]));
+            assert_eq!((set.get("--a"), set.get("--b"), set.get("--c")), (Some("5"), Some("6"), Some("7")));
+            let below = set.inherit();
+            assert_eq!((below.get("--a"), below.get("--b"), below.get("--c")), (Some("0"), None, Some("7")));
+            let below_declaring = set.descend(&declared(&[("--x", "1")]));
+            assert_eq!((below_declaring.get("--a"), below_declaring.get("--b"), below_declaring.get("--c")), (Some("0"), None, Some("7")));
+            // The reset is done once: what is below that holds nothing is as it was.
+            assert!(!below.sets_non_inherited);
+        }
+
+        #[test]
+        fn inherit_takes_the_parents_value_and_unset_is_the_initial_one_for_a_property_that_does_not_inherit() {
+            let root = at_root(&[("--a", "*", false, Some("0"))]);
+            let parent = root.descend(&declared(&[("--a", "5")]));
+            assert_eq!(parent.descend(&declared(&[("--a", "inherit")])).get("--a"), Some("5"));
+            assert_eq!(parent.descend(&declared(&[("--a", "unset")])).get("--a"), Some("0"));
+            assert_eq!(parent.descend(&declared(&[("--a", "initial")])).get("--a"), Some("0"));
+        }
+
+        #[test]
+        fn a_value_that_cannot_be_computed_is_the_initial_value_of_a_registered_property() {
+            let root = at_root(&[("--a", "*", true, Some("fallback"))]);
+            let invalid = root.descend(&declared(&[("--a", "var(--missing)"), ("--b", "var(--missing)")]));
+            assert_eq!(invalid.get("--a"), Some("fallback"));
+            assert_eq!(invalid.get("--b"), None);
+            let valid = root.descend(&declared(&[("--x", "3"), ("--a", "var(--x)")]));
+            assert_eq!(valid.get("--a"), Some("3"));
+        }
+
+        #[test]
+        fn a_var_reads_the_initial_value_of_a_property_nothing_set() {
+            let root = at_root(&[("--tw-shadow", "*", false, Some("0 0 #0000"))]);
+            assert_eq!(substitute("var(--tw-shadow)", &root).as_deref(), Some(" 0 0 #0000 "));
+            let set = root.descend(&declared(&[("--tw-shadow", "1px 1px red")]));
+            assert_eq!(substitute("var(--tw-shadow)", &set.inherit()).as_deref(), Some(" 0 0 #0000 "));
+        }
+
+        #[test]
+        fn the_registrations_are_in_the_fingerprint() {
+            let hash = |custom: &CustomProperties| {
+                let mut fp = crate::retain::Fingerprint::new();
+                custom.fingerprint(&mut fp);
+                fp.finish()
+            };
+            let none = CustomProperties::default();
+            let inheriting = at_root(&[("--a", "*", true, None)]);
+            let not = at_root(&[("--a", "*", false, None)]);
+            assert_ne!(hash(&none), hash(&inheriting));
+            assert_ne!(hash(&inheriting), hash(&not));
+        }
+
+        #[test]
+        fn no_registrations_is_no_change() {
+            assert_eq!(CustomProperties::with_registered(None), CustomProperties::default());
+            let plain = CustomProperties::default().descend(&declared(&[("--a", "1")]));
+            assert_eq!(plain.inherit(), plain);
+        }
     }
 }

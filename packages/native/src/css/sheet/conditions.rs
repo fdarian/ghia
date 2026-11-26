@@ -13,7 +13,6 @@ use rustc_hash::FxHashSet;
 
 use crate::css::media_query::{MediaEnvironment, MediaQueryList};
 
-use super::index::DocRule;
 
 /// The media queries that all have to match for a rule to apply, the outermost first.
 pub struct Conditions {
@@ -54,11 +53,12 @@ pub(super) struct Watched {
 }
 
 impl Watched {
-    pub(super) fn of(rules: &[DocRule], environment: Option<&MediaEnvironment>) -> Watched {
+    /// `all` is the conditions of every rule and definition of the loaded sheets.
+    pub(super) fn of<'a>(all: impl Iterator<Item = &'a Option<Arc<Conditions>>>, environment: Option<&MediaEnvironment>) -> Watched {
         let mut seen: FxHashSet<&str> = FxHashSet::default();
         let mut queries = Vec::new();
-        for rule in rules {
-            let Some(conditions) = &rule.conditions else {
+        for conditions in all {
+            let Some(conditions) = conditions else {
                 continue;
             };
             for list in &conditions.lists {

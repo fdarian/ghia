@@ -6873,6 +6873,7 @@ fn sync_motions(
 ) -> (Vec<u64>, Vec<(u64, u64)>) {
     let painted = measurements.painted_frames();
     let mut root_font = crate::motion::ParentValues::initial();
+    root_font.custom = crate::css::custom_properties::CustomProperties::with_registered(tree.sheets.registered.clone());
     root_font.lengths = LengthContext::initial(
         f64::from(f32::from(viewport.width)),
         f64::from(f32::from(viewport.height)),
@@ -8729,6 +8730,13 @@ impl Inherited {
         GroupState::default()
     }
 
+    /// The tree's `@property` registrations in force at the top of it: what an element computes its
+    /// custom properties to starts from their initial values.
+    pub(crate) fn with_registered_properties(mut self, tree: &crate::retained_tree::RetainedTree) -> Self {
+        self.custom = crate::css::custom_properties::CustomProperties::with_registered(tree.sheets.registered.clone());
+        self
+    }
+
     pub(crate) fn root(
         theme: &Theme,
         appearance: gpui::WindowAppearance,
@@ -8805,7 +8813,7 @@ impl Inherited {
     fn custom_of(&self, style: Option<&StyleDesc>) -> crate::css::custom_properties::CustomProperties {
         match style.and_then(|style| style.custom_properties.as_ref()) {
             Some(declared) => self.custom.descend(declared),
-            None => self.custom.clone(),
+            None => self.custom.inherit(),
         }
     }
 
@@ -9674,6 +9682,8 @@ impl GpuixView {
         fonts: Fonts,
         start: BuildStart,
     ) -> BuildCtx<'a> {
+        // A build outside `render` (a read that forces layout) sees the sheets' keyframes too.
+        self.keyframes.set_sheet(&tree.sheets.keyframes);
         BuildCtx {
             tree,
             inside_marker: None,
@@ -9747,7 +9757,8 @@ impl GpuixView {
         let pointer = pointer_state.borrow();
         let mut highlight_events = Vec::new();
         let start = BuildStart {
-            inherited: Inherited::root(&Theme::dark(), window.appearance(), self.frameless, window.viewport_size()),
+            inherited: Inherited::root(&Theme::dark(), window.appearance(), self.frameless, window.viewport_size())
+                .with_registered_properties(&tree),
             doc_path: Vec::new(),
             doc_hosts: Arc::from([]),
             now: self.read_instant().unwrap_or_else(|| self.clock.now()),
@@ -10268,6 +10279,8 @@ impl GpuixView {
 
         let mut hasher = rustc_hash::FxHasher::default();
         self.keyframes.epoch().hash(&mut hasher);
+        // The registry takes the sheets' keyframes when a frame builds; until then this says they moved.
+        tree.sheets.keyframes.epoch().hash(&mut hasher);
         tree.reparents().hash(&mut hasher);
         let viewport = window.viewport_size();
         f32::from(viewport.width).to_bits().hash(&mut hasher);
@@ -10686,6 +10699,7 @@ impl gpui::Render for GpuixView {
         // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
+        self.keyframes.set_sheet(&tree.sheets.keyframes);
         let callback = self.event_callback.clone();
         // What this build reports of the elements is read from the tree as it stands.
         tree.relevance.note_transforms_captured();
@@ -10895,7 +10909,8 @@ impl gpui::Render for GpuixView {
                             window.appearance(),
                             self.frameless,
                             window.viewport_size(),
-                        ),
+                        )
+                        .with_registered_properties(&tree),
                         doc_path: Vec::new(),
                         doc_hosts: Arc::from([]),
                         now,

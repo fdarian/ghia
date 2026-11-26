@@ -156,7 +156,7 @@ impl FocusStyles {
         }
         match declared.as_ref() {
             Some(declared) => parent.descend(declared),
-            None => parent.clone(),
+            None => parent.inherit(),
         }
     }
 

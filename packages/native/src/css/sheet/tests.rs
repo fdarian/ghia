@@ -314,11 +314,132 @@ fn unknown_at_rules_are_skipped_whole_and_recorded() {
     let sheet = doc.parse(
         "@charset \"utf-8\"; @import url(a.css) layer(x); a { color: red } \
          @keyframes k { from { top: 0 } to { top: 1px } } @font-face { font-family: x; } \
-         @property --p { syntax: '<length>'; } @container (min-width: 1px) { b { top: 2px } } e { top: 1px }",
+         @property --p { syntax: '<length>'; inherits: false; initial-value: 0px } \
+         @namespace svg url(x); @container (min-width: 1px) { b { top: 2px } } e { top: 1px }",
     );
-    assert_eq!(sheet.unsupported, ["charset", "import", "keyframes", "font-face", "property", "container"]);
+    assert_eq!(sheet.unsupported, ["charset", "import", "font-face", "namespace", "container"]);
+    assert_eq!(sheet.keyframes.len(), 1);
+    assert_eq!(sheet.properties.len(), 1);
     let colors: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].0).collect();
     assert_eq!(colors, ["color", "top"]);
+}
+
+fn keyframes_of(sheet: &StyleSheet) -> Vec<(&str, Vec<(Vec<f64>, Vec<(&str, &str)>)>)> {
+    sheet
+        .keyframes
+        .iter()
+        .map(|rule| {
+            let blocks = rule.body.blocks.iter().map(|block| (block.offsets.clone(), pairs(&block.declarations))).collect();
+            (rule.body.name.as_str(), blocks)
+        })
+        .collect()
+}
+
+#[test]
+fn keyframes_have_a_name_and_blocks_of_declarations() {
+    let sheet = Doc::new().parse(
+        "@keyframes spin { to { transform: rotate(360deg) } } \
+         @-webkit-keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .5; animation-timing-function: ease-in } } \
+         @keyframes \"quoted name\" { from { top: 0 } }",
+    );
+    assert!(sheet.unsupported.is_empty(), "{:?}", sheet.unsupported);
+    assert_eq!(
+        keyframes_of(&sheet),
+        [
+            ("spin", vec![(vec![1.0], vec![("transform", r#""rotate(360deg)""#)])]),
+            (
+                "pulse",
+                vec![
+                    (vec![0.0, 1.0], vec![("opacity", "1")]),
+                    (vec![0.5], vec![("opacity", "0.5"), ("animationTimingFunction", r#""ease-in""#)]),
+                ]
+            ),
+            ("quoted name", vec![(vec![0.0], vec![("top", r#""0""#)])]),
+        ]
+    );
+}
+
+#[test]
+fn a_keyframe_with_a_bad_selector_is_dropped_and_the_others_stay() {
+    let sheet = Doc::new().parse(
+        "@keyframes k { from { top: 1px } middle { top: 2px } 150% { top: 3px } -5% { top: 4px } 10%, wat { top: 5px } 20% 30% { top: 6px } 40% { top: 7px } }",
+    );
+    let blocks = &keyframes_of(&sheet)[0].1;
+    assert_eq!(blocks.iter().map(|(offsets, _)| offsets.clone()).collect::<Vec<_>>(), [vec![0.0], vec![0.4]]);
+}
+
+#[test]
+fn important_declarations_in_a_keyframe_are_ignored_and_a_later_declaration_replaces_an_earlier() {
+    let sheet = Doc::new().parse("@keyframes k { to { top: 1px !important; left: 2px; left: 3px; width: bogus } }");
+    assert_eq!(keyframes_of(&sheet)[0].1, [(vec![1.0], vec![("left", r#""3px""#)])]);
+}
+
+#[test]
+fn keyframes_with_an_invalid_name_or_no_block_are_dropped_and_recorded() {
+    let sheet = Doc::new().parse("@keyframes none { to { top: 1px } } @keyframes { to { top: 1px } } @keyframes a b { to { top: 1px } } @keyframes x;");
+    assert!(sheet.keyframes.is_empty());
+    assert_eq!(sheet.unsupported, ["@keyframes none", "@keyframes", "@keyframes a b", "@keyframes x"]);
+}
+
+#[test]
+fn keyframes_stand_under_the_media_and_layer_around_them() {
+    let sheet = Doc::new().parse(
+        "@layer base { @keyframes a { to { top: 1px } } } @media (min-width: 10px) { @keyframes b { to { top: 1px } } @supports (display: grid) { @keyframes c { to { top: 1px } } } } @supports (bogus: 1) { @keyframes d { to { top: 1px } } }",
+    );
+    let found: Vec<(&str, bool, Option<String>)> = sheet
+        .keyframes
+        .iter()
+        .map(|rule| (rule.body.name.as_str(), rule.layer.is_some(), rule.conditions.as_ref().map(|c| c.texts().join(" && "))))
+        .collect();
+    assert_eq!(
+        found,
+        [("a", true, None), ("b", false, Some("(min-width: 10px)".into())), ("c", false, Some("(min-width: 10px)".into()))]
+    );
+}
+
+fn registrations_of(sheet: &StyleSheet) -> Vec<(&str, bool, Option<&str>)> {
+    sheet.properties.iter().map(|rule| (rule.body.name.as_str(), rule.body.inherits, rule.body.initial.as_deref())).collect()
+}
+
+#[test]
+fn a_property_rule_registers_a_custom_property() {
+    let sheet = Doc::new().parse(
+        "@property --tw-rotate-x { syntax: \"*\"; inherits: false; } \
+         @property --tw-shadow { syntax: \"*\"; inherits: false; initial-value: 0 0 #0000; } \
+         @property --len { syntax: '<length>'; inherits: true; initial-value: 4px /* c */ }",
+    );
+    assert!(sheet.unsupported.is_empty(), "{:?}", sheet.unsupported);
+    assert_eq!(
+        registrations_of(&sheet),
+        [("--tw-rotate-x", false, None), ("--tw-shadow", false, Some("0 0 #0000")), ("--len", true, Some("4px"))]
+    );
+}
+
+#[test]
+fn a_property_rule_with_invalid_descriptors_is_ignored_and_recorded_with_the_reason() {
+    let sheet = Doc::new().parse(
+        "@property --a { syntax: '<length>'; inherits: false } \
+         @property --b { inherits: false; initial-value: 1 } \
+         @property --c { syntax: '*' } \
+         @property --d { syntax: '<length>'; inherits: true; initial-value: 2em } \
+         @property --e { syntax: '<length>'; inherits: true; initial-value: red } \
+         @property --f { syntax: '<bogus>'; inherits: true; initial-value: 1 } \
+         @property e { syntax: '*'; inherits: true } \
+         @property --g { syntax: '*'; inherits: true; initial-value: var(--x) } \
+         @property --ok { syntax: '*'; inherits: true; unknown: 1; initial-value: x }",
+    );
+    assert_eq!(registrations_of(&sheet), [("--ok", true, Some("x"))]);
+    assert_eq!(sheet.unsupported.len(), 8);
+    assert!(sheet.unsupported[0].starts_with("@property --a: the initial-value descriptor is missing"), "{:?}", sheet.unsupported);
+    assert!(sheet.unsupported[3].contains("computationally independent"));
+}
+
+#[test]
+fn a_property_rule_stands_under_its_media_and_layer() {
+    let sheet = Doc::new().parse("@media (min-width: 1px) { @property --a { syntax: '*'; inherits: true } } @layer l { @property --b { syntax: '*'; inherits: true } }");
+    assert_eq!(sheet.properties.len(), 2);
+    assert!(sheet.properties[0].conditions.is_some());
+    assert!(sheet.properties[1].layer.is_some());
 }
 
 fn conditions_of(sheet: &StyleSheet) -> Vec<Option<String>> {

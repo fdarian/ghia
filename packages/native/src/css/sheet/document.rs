@@ -12,14 +12,17 @@ use std::sync::{Arc, Weak};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::css::media_query::MediaEnvironment;
+use crate::css::registered_properties::Registered;
 use crate::retained_tree::{InternedStyle, StyleTable};
 use crate::style::StyleDesc;
 
 use super::atoms::{Atom, Atoms};
 use super::cascade::{merge, MatchedInterner, MatchedRules};
 use super::conditions::{self, Watched};
+use super::definitions::winners;
 use super::index::{DocRule, RuleIndex};
 use super::invalidation::Reach;
+use super::keyframes::SheetKeyframes;
 use super::layers::Layers;
 use super::parse_cache::{ParseCache, ParsedRule};
 use super::positions::PendingRanges;
@@ -77,6 +80,13 @@ pub struct StyleSheets {
     /// even when their text is unchanged, and the elements are matched again, since the old
     /// numbering of the rules says nothing about the new index.
     pub(crate) media_flipped: bool,
+    /// The sets of keyframes the loaded sheets define, which the animation engine reads.
+    pub(crate) keyframes: Arc<SheetKeyframes>,
+    /// What the loaded sheets register with `@property`.
+    pub(crate) registered: Option<Arc<Registered>>,
+    /// A load changed the keyframes or the registrations: what a build reads that is not an element's
+    /// style changed, and the tree has to draw again (`take_document_changed`).
+    document_changed: bool,
     /// The top-level rules `index` was built from, when every source was cut into them.
     loaded_units: Option<Vec<Arc<ParsedRule>>>,
     pub(crate) interner: MatchedInterner,
@@ -118,6 +128,9 @@ impl Default for StyleSheets {
             media: None,
             watched: Watched::default(),
             media_flipped: false,
+            keyframes: Arc::default(),
+            registered: None,
+            document_changed: false,
             loaded_units: None,
             interner: MatchedInterner::default(),
             validator: Validator::default(),
@@ -217,20 +230,61 @@ impl StyleSheets {
             self.warn_skipped(skipped);
         }
         let environment_flipped = std::mem::take(&mut self.media_flipped);
-        self.watched = Watched::of(&assembled.rules, self.media.as_ref());
+        self.watched = Watched::of(
+            assembled
+                .rules
+                .iter()
+                .map(|rule| &rule.conditions)
+                .chain(assembled.keyframes.iter().map(|rule| &rule.conditions))
+                .chain(assembled.properties.iter().map(|rule| &rule.conditions)),
+            self.media.as_ref(),
+        );
+        let order = layers.order();
+        self.settle_definitions(&assembled.keyframes, &assembled.properties, &order);
         let applying: Vec<DocRule> = if self.watched.is_empty() {
             assembled.rules
         } else {
             let environment = self.media.as_ref();
             assembled.rules.into_iter().filter(|rule| conditions::holds(rule.conditions.as_ref(), environment)).collect()
         };
-        let index = RuleIndex::build(&applying, &layers.order(), self.style);
+        let index = RuleIndex::build(&applying, &order, self.style);
         let old_units = std::mem::replace(&mut self.loaded_units, assembled.units);
         let old_index = std::mem::replace(&mut self.index, index);
         match (old_units, &self.loaded_units) {
             (Some(old), Some(new)) if !environment_flipped => Reload::between(&old, new, &old_index, &self.index, self.media.as_ref()),
             _ => None,
         }
+    }
+
+    /// Settles the `@keyframes` and `@property` rules of a load on one definition for each name.
+    fn settle_definitions(
+        &mut self,
+        keyframes: &[super::definitions::Defined<super::keyframes::KeyframesRule>],
+        properties: &[super::definitions::Defined<crate::css::registered_properties::Registration>],
+        order: &super::layers::LayerOrder,
+    ) {
+        let environment = self.media.as_ref();
+        let chosen = winners(keyframes, environment, order, |rule| &rule.name);
+        if let Some(replaced) = SheetKeyframes::replaced_by(&self.keyframes, chosen) {
+            self.keyframes = replaced;
+            self.document_changed = true;
+        }
+        let chosen = winners(properties, environment, order, |registration| &registration.name);
+        let registered = Registered::new(chosen.into_iter().map(|registration| (**registration).clone()).collect()).map(Arc::new);
+        let unchanged = match (&self.registered, &registered) {
+            (None, None) => true,
+            (Some(held), Some(new)) => **held == **new,
+            _ => false,
+        };
+        if !unchanged {
+            self.registered = registered;
+            self.document_changed = true;
+        }
+    }
+
+    /// Whether a load changed what the sheets define by name since this was last asked.
+    pub(crate) fn take_document_changed(&mut self) -> bool {
+        std::mem::take(&mut self.document_changed)
     }
 
     /// Tells the sheets what the window reports to media queries. Returns whether a query the

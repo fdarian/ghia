@@ -1,5 +1,7 @@
 //! The `@keyframes` analogue: named keyframe sets that `animation-name` refers
-//! to. A renderer holds the copy JS pushes through `defineKeyframes`.
+//! to. A renderer holds the copy JS pushes through `defineKeyframes`, and the sets the document's
+//! sheets define with `@keyframes` (`css::sheet::keyframes`), which win over a script's of the
+//! same name, as the document's own rule does on the web.
 //!
 //! A definition is the frames object as JSON: keys are `from`, `to`, `N%` or a
 //! comma list of them (`"0%, 50%"`), values are the animatable style
@@ -26,6 +28,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use crate::css::custom_properties::{self, CustomProperties};
+use crate::css::sheet::{KeyframesRule, SheetKeyframes};
 use crate::css::transform::DEFAULT_ORIGIN_TEXT;
 
 use super::css_animation::check_keyframes_name;
@@ -110,6 +113,35 @@ impl Keyframes {
         }
         frames.sort_by(|a, b| a.offset.total_cmp(&b.offset));
         Ok(Self { frames })
+    }
+
+    /// The keyframes of an `@keyframes` rule of a sheet. A declaration that cannot be animated or
+    /// whose value does not parse is left out and the rest stay, as CSS ignores what it cannot use
+    /// (a definition from script throws instead, where its author can see it). Blocks of one offset
+    /// merge, the later winning property by property.
+    pub(super) fn from_rule(rule: &KeyframesRule) -> Self {
+        let mut frames: Vec<Keyframe> = Vec::new();
+        for block in &rule.blocks {
+            let mut parsed = Keyframe { offset: 0.0, offset_written: true, values: Vec::new(), timing: None };
+            for declaration in &block.declarations {
+                let Ok(value) = serde_json::from_str::<Value>(&declaration.value) else {
+                    continue;
+                };
+                let single = Value::Object(std::iter::once((declaration.key.clone(), value)).collect());
+                match parse_block(&single) {
+                    Ok(one) => parsed.merge(&one),
+                    Err(error) => log::warn!("Stylesheet: @keyframes {}: {} ignored: {error}", rule.name, declaration.key),
+                }
+            }
+            for offset in &block.offsets {
+                match frames.iter_mut().find(|frame| frame.offset == *offset) {
+                    Some(frame) => frame.merge(&parsed),
+                    None => frames.push(Keyframe { offset: *offset, ..parsed.clone() }),
+                }
+            }
+        }
+        frames.sort_by(|a, b| a.offset.total_cmp(&b.offset));
+        Self { frames }
     }
 
     /// The keyframes of `Element.animate()`, which JS has normalised to a JSON array of
@@ -360,13 +392,19 @@ pub(crate) fn validate_keyframes(name: &str, frames_json: &str) -> Result<(), St
 #[derive(Default)]
 pub(crate) struct KeyframesRegistry {
     definitions: HashMap<String, Arc<Keyframes>>,
+    /// What the document's sheets define, with the rule each set was made from, which tells a set
+    /// that did not change when the sheets are loaded again.
+    sheet: HashMap<String, (Arc<KeyframesRule>, Arc<Keyframes>)>,
+    /// Which state of the sheets' keyframes `sheet` is of.
+    sheet_epoch: u64,
     /// Counts the definitions, for whoever kept an answer that depends on them.
     epoch: u64,
 }
 
 impl KeyframesRegistry {
     /// Defines `name`, replacing an earlier definition. An animation already
-    /// running takes the new frames from its next frame on.
+    /// running takes the new frames from its next frame on. A name the sheets define keeps
+    /// the sheets' frames.
     pub(crate) fn define(&mut self, name: &str, frames_json: &str) -> Result<(), String> {
         let keyframes = Keyframes::parse_named(name, frames_json)?;
         self.definitions.insert(name.to_string(), Arc::new(keyframes));
@@ -374,12 +412,33 @@ impl KeyframesRegistry {
         Ok(())
     }
 
+    /// Takes the sets the document's sheets define, replacing the ones of the last call. A set whose
+    /// rule is unchanged keeps its allocation, which is how a running animation tells that its frames
+    /// did not change, so a load of the sheets that did not touch a rule does not restart it.
+    pub(crate) fn set_sheet(&mut self, source: &SheetKeyframes) {
+        if source.epoch() == self.sheet_epoch {
+            return;
+        }
+        let mut next = HashMap::with_capacity(source.rules().len());
+        for rule in source.rules() {
+            let kept = self.sheet.get(&rule.name).filter(|(held, _)| Arc::ptr_eq(held, rule) || **held == **rule);
+            let entry = match kept {
+                Some(kept) => kept.clone(),
+                None => (rule.clone(), Arc::new(Keyframes::from_rule(rule))),
+            };
+            next.insert(rule.name.clone(), entry);
+        }
+        self.sheet = next;
+        self.sheet_epoch = source.epoch();
+        self.epoch += 1;
+    }
+
     pub(crate) fn epoch(&self) -> u64 {
         self.epoch
     }
 
     pub(super) fn get(&self, name: &str) -> Option<&Arc<Keyframes>> {
-        self.definitions.get(name)
+        self.sheet.get(name).map(|(_, keyframes)| keyframes).or_else(|| self.definitions.get(name))
     }
 }
 
@@ -649,5 +708,86 @@ mod tests {
         assert_eq!(list(0, None), 0, "unresolved, it is none");
         assert!(!parse(r#"{ "to": { "transform": "none" } }"#).reads_vars());
         assert!(error(r#"{ "to": { "width": "var(--w)" } }"#).contains("width"), "other properties still do not read it");
+    }
+
+    mod sheet {
+        use super::*;
+        use crate::css::lenient::Declaration;
+        use crate::css::sheet::{KeyframeBlock, KeyframesRule, SheetKeyframes};
+
+        fn rule(name: &str, blocks: &[(&[f64], &[(&str, &str)])]) -> Arc<KeyframesRule> {
+            Arc::new(KeyframesRule {
+                name: name.to_owned(),
+                blocks: blocks
+                    .iter()
+                    .map(|(offsets, declarations)| KeyframeBlock {
+                        offsets: offsets.to_vec(),
+                        declarations: declarations
+                            .iter()
+                            .map(|(key, value)| Declaration { key: (*key).to_owned(), value: (*value).to_owned() })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+        }
+
+        #[test]
+        fn a_rule_makes_keyframes_and_drops_the_declarations_that_cannot_animate() {
+            let keyframes = Keyframes::from_rule(&rule(
+                "k",
+                &[
+                    (&[1.0], &[("transform", r#""rotate(360deg)""#), ("display", r#""none""#), ("opacity", r#""wat""#)]),
+                    (&[0.0, 1.0], &[("opacity", "0.5"), ("animationTimingFunction", r#""ease-in""#)]),
+                ],
+            ));
+            assert_eq!(keyframes.frames.iter().map(|frame| frame.offset).collect::<Vec<_>>(), [0.0, 1.0]);
+            // `opacity` is kept for the style and for SVG, as a script's is.
+            assert_eq!(keyframes.frames[0].values.len(), 2);
+            assert!(keyframes.frames[0].timing.is_some());
+            let last = &keyframes.frames[1];
+            assert_eq!(last.values.len(), 3, "the transform and the opacity twice: the display and the bad opacity are gone");
+            assert!(last.written(PropKey::Style(AnimProp::Transform)).is_some());
+            assert!(last.offset_written);
+        }
+
+        #[test]
+        fn a_sheet_wins_over_a_definition_from_script_and_gives_the_name_back_when_it_goes() {
+            let mut registry = KeyframesRegistry::default();
+            registry.define("k", r#"{ "to": { "opacity": 0.25 } }"#).unwrap();
+            registry.define("scripted", r#"{ "to": { "opacity": 0.75 } }"#).unwrap();
+            let opacity = |registry: &KeyframesRegistry, name: &str| number(registry.get(name).unwrap().frames.last().unwrap(), AnimProp::Opacity);
+
+            let sheet = SheetKeyframes::for_test(1, vec![rule("k", &[(&[1.0], &[("opacity", "0.5")])])]);
+            registry.set_sheet(&sheet);
+            assert_eq!(opacity(&registry, "k"), Some(0.5));
+            assert_eq!(opacity(&registry, "scripted"), Some(0.75));
+
+            registry.define("k", r#"{ "to": { "opacity": 0.125 } }"#).unwrap();
+            assert_eq!(opacity(&registry, "k"), Some(0.5), "a later definition from script does not displace the sheet's");
+
+            registry.set_sheet(&SheetKeyframes::for_test(2, Vec::new()));
+            assert_eq!(opacity(&registry, "k"), Some(0.125));
+        }
+
+        #[test]
+        fn a_rule_that_did_not_change_keeps_its_allocation_and_the_epoch_moves_only_with_the_sheets() {
+            let mut registry = KeyframesRegistry::default();
+            let kept = rule("kept", &[(&[1.0], &[("opacity", "0.5")])]);
+            registry.set_sheet(&SheetKeyframes::for_test(1, vec![kept.clone(), rule("changed", &[(&[1.0], &[("opacity", "0.5")])])]));
+            let first = registry.get("kept").unwrap().clone();
+            let first_changed = registry.get("changed").unwrap().clone();
+            let epoch = registry.epoch();
+
+            registry.set_sheet(&SheetKeyframes::for_test(1, Vec::new()));
+            assert_eq!(registry.epoch(), epoch, "the same state of the sheets is not taken again");
+
+            registry.set_sheet(&SheetKeyframes::for_test(
+                2,
+                vec![rule("kept", &[(&[1.0], &[("opacity", "0.5")])]), rule("changed", &[(&[1.0], &[("opacity", "0.25")])])],
+            ));
+            assert!(Arc::ptr_eq(registry.get("kept").unwrap(), &first), "an equal rule is the same set");
+            assert!(!Arc::ptr_eq(registry.get("changed").unwrap(), &first_changed));
+            assert_eq!(registry.epoch(), epoch + 1);
+        }
     }
 }

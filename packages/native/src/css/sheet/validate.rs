@@ -54,6 +54,12 @@ impl Validator {
             .collect()
     }
 
+    /// The declarations of `declarations` that CSS would keep: the check a rule's declarations
+    /// go through, for the ones a rule does not hold itself (a keyframe's).
+    pub(super) fn keep(&mut self, declarations: Vec<Declaration>) -> Vec<Declaration> {
+        self.judge_all(declarations)
+    }
+
     fn judge_all(&mut self, declarations: Vec<Declaration>) -> Vec<Declaration> {
         declarations.into_iter().filter_map(|declaration| self.judge(declaration)).collect()
     }

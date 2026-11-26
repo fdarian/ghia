@@ -1,4 +1,4 @@
-//! Rules, `@layer`, `@media`, `@supports` and nesting over the token list.
+//! Rules, `@layer`, `@media`, `@supports`, `@keyframes`, `@property` and nesting over the token list.
 
 use std::sync::Arc;
 
@@ -8,6 +8,9 @@ use crate::css::media_query::MediaQueryList;
 use super::atoms::Atoms;
 use super::conditions::Conditions;
 use super::declarations::{parse_declaration, push_declaration};
+use super::definitions::Defined;
+use super::keyframes;
+use super::property_rules;
 use super::layers::{LayerId, Layers};
 use super::selector::{ComplexSelector, SelectorList, Specificity};
 use super::selector_parse::{parse_selector_list, Nesting};
@@ -25,7 +28,7 @@ pub fn parse_sheet(text: &str, atoms: &mut Atoms, layers: &mut Layers, validator
         atoms,
         layers,
         validator,
-        sheet: StyleSheet { rules: Vec::new(), unsupported: Vec::new() },
+        sheet: StyleSheet { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), unsupported: Vec::new() },
         depth: 0,
         conditions: None,
     };
@@ -179,6 +182,10 @@ impl Parser<'_> {
             self.conditional(name, prelude, |parser| parser.rule_list(stop + 1, contents_end, layer));
             return after;
         }
+        if matches!(name, "keyframes" | "-webkit-keyframes" | "property") {
+            self.definition(name, prelude, stop, contents_end, terminator, layer);
+            return after;
+        }
         if name != "layer" {
             self.sheet.unsupported.push(name.to_owned());
             return after;
@@ -208,6 +215,41 @@ impl Parser<'_> {
             }
         }
         after
+    }
+
+    /// `@keyframes` or `@property`, whose block starts at `open` and holds the tokens up to `end`.
+    /// One that is not valid is dropped, and recorded when it was a `@property`, whose reason is not
+    /// obvious from the text.
+    fn definition(&mut self, name: &str, prelude: &[Token], open: usize, end: usize, terminator: Terminator, layer: Option<LayerId>) {
+        let head = || match (prelude.first(), prelude.last()) {
+            (Some(first), Some(last)) => format!("@{name} {}", &self.src[first.start..last.end]),
+            _ => format!("@{name}"),
+        };
+        if !matches!(terminator, Terminator::Block) {
+            let head = head();
+            self.sheet.unsupported.push(head);
+            return;
+        }
+        let contents = &self.tokens[(open + 1).min(end)..end];
+        if name == "property" {
+            match property_rules::parse(self.src, prelude, contents) {
+                Ok(registration) => {
+                    self.sheet.properties.push(Defined { body: Arc::new(registration), layer, conditions: self.conditions.clone() });
+                }
+                Err(reason) => {
+                    let head = head();
+                    self.sheet.unsupported.push(format!("{head}: {reason}"));
+                }
+            }
+            return;
+        }
+        match keyframes::parse(self.src, prelude, contents, self.validator) {
+            Some(rule) => self.sheet.keyframes.push(Defined { body: Arc::new(rule), layer, conditions: self.conditions.clone() }),
+            None => {
+                let head = head();
+                self.sheet.unsupported.push(head);
+            }
+        }
     }
 
     fn declare_path(&mut self, parent: Option<LayerId>, path: &[String]) -> LayerId {

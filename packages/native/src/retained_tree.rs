@@ -1865,6 +1865,17 @@ impl RetainedTree {
         }
     }
 
+    /// The sheets' `@keyframes` or `@property` rules changed. Nothing an element declared did, but
+    /// what a build reads of them did: the keyframes of an animation, and the custom properties an
+    /// element computes to (an initial value, a property that stops inheriting). Every subtree
+    /// builds again, which is what a change of the universal style does too.
+    pub(crate) fn sheets_definitions_changed(&mut self) {
+        let revision = self.take_revision_for(Dirty::Layout, None);
+        for element in self.elements.values_mut() {
+            element.subtree_revision = revision;
+        }
+    }
+
     /// The style layer under every element's own style, as a CSS `* { ... }` rule
     /// would be, or none. Restyles every element once, as if each had been given
     /// its new effective style with `set_style`.

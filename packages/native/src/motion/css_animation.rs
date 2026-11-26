@@ -1655,13 +1655,14 @@ impl ElementState {
     }
 
     /// Whether what the animations show can change without the style or the
-    /// clock moving: a run is still going, or its keyframes were defined or
-    /// redefined since it last read them.
+    /// clock moving: a run is still going, or its keyframes were defined,
+    /// redefined or removed since it last read them.
     fn shows_something_new(&self, registry: &KeyframesRegistry) -> bool {
         self.moving
             || self.runs.iter().any(|run| {
                 registry.get(&run.name).is_some_and(|keyframes| !Arc::ptr_eq(keyframes, &run.keyframes))
             })
+            || self.runs.iter().any(|run| registry.get(&run.name).is_none())
             || self.list.0.iter().filter_map(|animation| animation.name.as_ref()).any(|name| {
                 registry.get(name).is_some() && !self.runs.iter().any(|run| run.name == *name)
             })
@@ -1698,9 +1699,11 @@ impl ElementState {
             let Some(name) = &animation.name else {
                 continue;
             };
+            // A name whose keyframes are gone (a sheet stopped defining them; script cannot remove
+            // one) stops animating, as it does in CSS, and starts again if they come back.
             let kept = unclaimed
                 .iter_mut()
-                .find(|slot| slot.as_ref().is_some_and(|run| run.name == *name))
+                .find(|slot| slot.as_ref().is_some_and(|run| run.name == *name && registry.get(name).is_some()))
                 .and_then(Option::take);
             match kept {
                 Some(mut run) => {

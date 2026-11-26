@@ -386,7 +386,7 @@ pub(crate) fn substitute_for_element(
 ) -> (Option<Box<StyleDesc>>, CustomProperties) {
     let custom = match style {
         Some(style) => focus_styles.custom_of(id, style, focusable, parent),
-        None => parent.clone(),
+        None => parent.inherit(),
     };
     let substituted = style.and_then(|style| resolve(style, &custom));
     (substituted, custom)

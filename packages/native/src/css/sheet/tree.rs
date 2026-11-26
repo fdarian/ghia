@@ -375,6 +375,9 @@ impl RetainedTree {
         }
         let names = self.sheets.atoms.len();
         let reload = self.sheets.load(texts);
+        if self.sheets.take_document_changed() {
+            self.sheets_definitions_changed();
+        }
         // Elements keep atoms only for the names a sheet had when they were read, so the elements
         // that carry a name the new sheets bring have to be read again, whatever else the load
         // changed. Until then a rule added later cannot find the elements it names.
