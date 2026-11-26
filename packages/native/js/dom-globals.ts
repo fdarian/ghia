@@ -38,6 +38,7 @@ import { document, installStandInDocument, window } from "./events/window-target
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
 import { Animation, CSSAnimation, CSSTransition, DocumentTimeline, KeyframeEffect } from "./web-animations.js"
+import { installShell } from "./shell/index.js"
 import { installWindowMembers } from "./window-members.js"
 
 type AddListener = (
@@ -154,6 +155,7 @@ function install(): void {
     scrollBy: { value: noScroll, configurable: true, writable: true },
   })
   installWindowMembers()
+  installShell()
   defineHtmlMembers(Element.prototype)
   defineInnerTextMember(Element.prototype)
   // A runtime that has its own keeps it, which is what a library that takes `window.ResizeObserver` gets elsewhere.
