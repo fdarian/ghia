@@ -95,7 +95,7 @@ pub(crate) fn dispatch_sample(
     let output = {
         let mut tree = tree.lock().unwrap();
         let mut output = dispatch(&mut pointer.borrow_mut(), &tree, sample);
-        output.restyle |= sync_live_pointer(&mut tree, &pointer.borrow());
+        output.live = sync_live_pointer(&mut tree, &pointer.borrow());
         output
     };
     if output.chain_mismatch {
@@ -108,14 +108,27 @@ pub(crate) fn dispatch_sample(
 }
 
 /// Tells the sheets where the pointer is, for the selectors that read `:hover` and `:active`
-/// outside their subject (`.card:hover .title`). Says whether that restyled an element, which asks
-/// for a frame built whole. A document with no such selector pays one check.
-pub(crate) fn sync_live_pointer(tree: &mut RetainedTree, pointer: &PointerState) -> bool {
+/// outside their subject (`.card:hover .title`). Says what that restyled, for the caller to
+/// invalidate the window with ([`invalidate_live`]). A document with no such selector pays one check.
+pub(crate) fn sync_live_pointer(tree: &mut RetainedTree, pointer: &PointerState) -> Dirty {
     if !tree.live_states_wanted() {
-        return false;
+        return Dirty::Clean;
     }
     let (hover, active) = pointer.chains();
-    tree.sync_live_states(&LiveInputs::pointer(hover, active)) != Dirty::Clean
+    tree.sync_live_states(&LiveInputs::pointer(hover, active))
+}
+
+/// Invalidates the window for what the sheets restyled when the pointer moved, as a batch that
+/// restyled the same elements does: a prepared layout patch is thrown away, and the frame asked for
+/// is the one the change calls for.
+pub(crate) fn invalidate_live(dirty: Dirty, window: &mut Window, cx: &mut App) {
+    if dirty == Dirty::Clean {
+        return;
+    }
+    match super::sync_dispatch::root_view(window) {
+        Ok(view) => crate::renderer::invalidate_after_mutation(window, cx, view.entity_id(), dirty),
+        Err(error) => super::sync_dispatch::report_deferred_error(error),
+    }
 }
 
 /// What a press or release needs to be dispatched where it is heard.
@@ -320,6 +333,7 @@ impl PointerDispatch {
     /// handler prevented its default.
     fn wheel(&self, sample: PointerSample, window: &mut Window, cx: &mut App) {
         let output = dispatch_sample(&self.pointer, &self.activation.tree, &sample);
+        invalidate_live(output.live, window, cx);
         let mut prevented = false;
         for payload in output.into_payloads() {
             let outcome = sync_dispatch::emit(window, cx, &self.activation.callback, payload);
@@ -390,11 +404,18 @@ fn submit(view: &WeakEntity<GpuixView>, sample: PointerSample, window: &Window, 
     let view = view.clone();
     let window = window.window_handle();
     cx.defer(move |cx| {
-        let repaint = view
+        let (repaint, live) = view
             .update(cx, |view, cx| view.handle_pointer(sample, cx))
-            .unwrap_or(false);
-        if repaint {
-            window.update(cx, |_, window, _| window.request_tick()).ok();
+            .unwrap_or((false, Dirty::Clean));
+        if repaint || live != Dirty::Clean {
+            window
+                .update(cx, |_, window, cx| {
+                    invalidate_live(live, window, cx);
+                    if repaint {
+                        window.request_tick();
+                    }
+                })
+                .ok();
         }
     });
 }
@@ -403,6 +424,7 @@ fn submit(view: &WeakEntity<GpuixView>, sample: PointerSample, window: &Window, 
 /// was change how elements paint, a tick, which a patch frame takes when it can and a frame built
 /// whole otherwise (`Output::paint`).
 fn restyled(view: &WeakEntity<GpuixView>, output: &Output, window: &mut Window, cx: &mut App) {
+    invalidate_live(output.live, window, cx);
     if output.restyle {
         // The view may be leased by the input being dispatched.
         if let Some(view) = view.upgrade() {

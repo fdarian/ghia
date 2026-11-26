@@ -210,4 +210,29 @@ describe.skipIf(!hasNativeTestRenderer)("pointer and focus states outside the su
     expect(renderer.getBuildCounters().elementsRematched).toBe(0)
     renderer.dispose()
   })
+  it("matches only the subtree of an element that can hold the compound, however deep the hover chain", () => {
+    // A spine of twelve plain divs with ten rows each, and a `.group` at the bottom with three `.x`.
+    const build: Op[] = []
+    let parent = 1
+    let next = 100
+    for (let level = 0; level < 12; level++) {
+      const id = next++
+      build.push(...element(id, parent, "div", "level"))
+      for (let row = 0; row < 10; row++) build.push(...element(next++, id, "div", "row", sized(next - 1, 5, 1)))
+      parent = id
+    }
+    build.push(...element(10, parent, "div", "group", sized(10, 60, 30)))
+    for (const x of [11, 12, 13]) build.push(...element(x, 10, "div", "x", sized(x, 20, 5)))
+    const renderer = mount(".group:hover .x { opacity: 0.5 }", build)
+    renderer.nativeSimulateMouseMove(...centre(renderer, 11))
+    expect([11, 12, 13].map((id) => opacity(renderer, id))).toEqual([0.5, 0.5, 0.5])
+    renderer.nativeSimulateMouseMove(...OUT)
+    renderer.resetBuildCounters()
+    renderer.nativeSimulateMouseMove(...centre(renderer, 12))
+    expect(renderer.getBuildCounters().elementsRematched, "the chain is 15 deep, and only the `.group` reaches its three").toBe(3)
+    renderer.resetBuildCounters()
+    renderer.nativeSimulateMouseMove(...centre(renderer, 13))
+    expect(renderer.getBuildCounters().elementsRematched).toBe(0)
+    renderer.dispose()
+  })
 })

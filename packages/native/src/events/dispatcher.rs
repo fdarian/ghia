@@ -154,6 +154,10 @@ pub struct Output {
     /// builds only the roots that hold them draws it. Empty when `restyle` is true, since a
     /// frame built whole draws them too.
     pub paint: Vec<u64>,
+    /// What the sheets restyled for the elements that entered or left a pointer state a selector
+    /// reads outside its subject (`listeners::sync_live_pointer`), for the window to invalidate as it
+    /// does for a batch ([`crate::renderer::invalidate_after_mutation`]).
+    pub live: crate::retained_tree::Dirty,
     /// GPUI's hit chain and the retained path disagree about the target's
     /// ancestry. The retained path is what events use; this reports the drift.
     pub chain_mismatch: bool,
@@ -174,6 +178,7 @@ impl Output {
             events,
             restyle,
             paint: Vec::new(),
+            live: crate::retained_tree::Dirty::Clean,
             chain_mismatch,
             position: sample.position,
             modifiers: sample.modifiers.clone(),
