@@ -243,11 +243,15 @@ on its next wake.
 
 `tick()` returns `false` once the platform is `Terminated`, and `startFrameLoop` then stops, clears the sync handler and
 runs `onTerminated`, which the adapters set to `process.exit(0)`. In embedded mode (the host pumps the run loop) every quit
-marks the platform `Terminated` and runs GPUI's quit callback through `MacPlatform::begin_termination`, and AppKit never
-calls `exit()` inside the pump: the Quit action and the last window closing (`cx.quit()` posts it to the main queue), the
-quit Apple Event (a custom handler for `aevt`/`quit`, because AppKit's own defers `terminate:` with `CFRunLoopPerformBlock`
-and the block stays stranded when the pump returns early; it returns success, since answering with a cancel would cancel a
-logout), and any other `terminate:` (`applicationShouldTerminate:` marks the platform and answers `NSTerminateCancel`).
+goes through `MacPlatform::request_termination`, which runs GPUI's quit callback and, when it completes, marks the platform
+`Terminated` and posts `NSApplicationWillTerminateNotification`; when the callback declines (GPUI's `App` is borrowed) the
+request retries from the main queue. AppKit never calls `exit()` inside the pump: the Quit action and the last window
+closing (`cx.quit()` posts it to the main queue), the quit Apple Event (a custom handler for `aevt`/`quit`, installed in
+`applicationWillFinishLaunching:`, because AppKit's own defers `terminate:` with `CFRunLoopPerformBlock` and the block
+stays stranded when the pump returns early; it returns success, since answering with a cancel would cancel a logout), and
+any other `terminate:` (`applicationShouldTerminate:` requests the termination and answers `NSTerminateCancel`). Once the
+platform is `Terminated` the pump (`drain_events` and the source loop of `pump_app_nonblocking`) returns within the same
+call, so no queued event, source or display-link step runs after the quit.
 Each wakes the host through the watch above (a main-queue block, or the Apple Event's wake), the next tick sees the
 terminated platform, and the process ends in 20 to 50 ms. Before this, AppKit ended the process from inside the pump
 without running `onTerminated`, or the quit waited for an unrelated wake. The e2e is in [testing.md](testing.md#the-quit-e2e).

@@ -1,6 +1,6 @@
 /** The app of one quit case: a minimal window on the real frame loop (the run-loop wake path, no
  *  `frameMs`), idle for `IDLE_MS`, then one quit request. Its folder and case come from the environment. */
-import { writeFileSync } from "node:fs"
+import { renameSync, writeFileSync } from "node:fs"
 import { dlopen, FFIType } from "bun:ffi"
 import React from "react"
 import { render } from "@ghia/react"
@@ -11,7 +11,12 @@ const folder = process.env.QUIT_E2E_DIR
 const name = process.env.QUIT_E2E_CASE as CaseName | undefined
 if (!folder || !name || !CASES.includes(name)) throw new Error("QUIT_E2E_DIR and QUIT_E2E_CASE (one of " + CASES.join(", ") + ") are required")
 
-const leave = (file: string, body: object) => writeFileSync(`${folder}/${file}`, JSON.stringify({ ...body, time: Date.now() }))
+// Written aside and renamed into place: the runner polls these files and must never parse half of one.
+const leave = (file: string, body: object) => {
+  const temporary = `${folder}/${file}.tmp`
+  writeFileSync(temporary, JSON.stringify({ ...body, time: Date.now() }))
+  renameSync(temporary, `${folder}/${file}`)
+}
 
 // The adapter's onTerminated runs process.exit(0): the marker is written by what it calls.
 const exit = process.exit.bind(process)

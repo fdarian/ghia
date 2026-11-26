@@ -14,6 +14,18 @@ const GIVE_UP_MS = 6000
 
 class NotCheckable extends Error {}
 
+let current: { app: ReturnType<typeof Bun.spawn>; folder: string } | null = null
+
+for (const [signal, status] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
+  process.on(signal, () => {
+    if (current) {
+      current.app.kill("SIGKILL")
+      rmSync(current.folder, { recursive: true, force: true })
+    }
+    process.exit(status)
+  })
+}
+
 interface Result {
   name: CaseName
   pass: boolean
@@ -55,6 +67,7 @@ async function runCase(name: CaseName): Promise<Result> {
     stdout: "inherit",
     stderr: "inherit",
   })
+  current = { app, folder }
   try {
     const ended = app.exited.then((code) => ({ code, at: Date.now() }))
     const ready = await waitForFile(folder, READY_FILE, app.exited, 30000)
@@ -84,6 +97,7 @@ async function runCase(name: CaseName): Promise<Result> {
   } finally {
     if (app.exitCode === null) app.kill("SIGKILL")
     await app.exited
+    current = null
     rmSync(folder, { recursive: true, force: true })
   }
 }
