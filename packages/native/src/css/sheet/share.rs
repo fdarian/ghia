@@ -22,6 +22,7 @@ use crate::retained_tree::RetainedElement;
 use super::atoms::Atom;
 use super::document::StyleSheets;
 use super::matching::ElementView;
+use super::pseudo::Pseudo;
 use super::states::RuleMatch;
 use super::view::TreeView;
 
@@ -108,7 +109,8 @@ impl StyleSharing {
         pays
     }
 
-    /// The rules `element` matches. `id` and `classes` are the element's atoms.
+    /// The rules `element` matches, or those of its generated box `target`. `id` and `classes` are
+    /// the element's atoms.
     pub(super) fn matching(
         &mut self,
         sheets: &StyleSheets,
@@ -116,16 +118,17 @@ impl StyleSharing {
         view: &TreeView<'_>,
         id: Option<Atom>,
         classes: &[Atom],
+        target: Option<Pseudo>,
     ) -> Found {
         let index = &sheets.index;
         if !index.shares() {
-            return Found::Own(index.matching(view, id, classes));
+            return Found::Own(index.matching(view, id, classes, target));
         }
         if self.paused > 0 {
             self.paused -= 1;
-            return Found::Own(index.matching(view, id, classes));
+            return Found::Own(index.matching(view, id, classes, target));
         }
-        self.build_key(sheets, element, view, id, classes);
+        self.build_key(sheets, element, view, id, classes, target);
         match self.slots.get(self.key.as_slice()) {
             Some(Slot::Shared(list)) => {
                 let list = *list;
@@ -137,11 +140,11 @@ impl StyleSharing {
             Some(Slot::Unshareable) => {
                 self.unshareable += 1;
                 self.judged();
-                return Found::Own(index.matching(view, id, classes));
+                return Found::Own(index.matching(view, id, classes, target));
             }
             None => {}
         }
-        let (matched, shareable) = index.matching_in_full(view, id, classes);
+        let (matched, shareable) = index.matching_in_full(view, id, classes, target);
         if !shareable {
             self.unshareable += 1;
             // A window that has just paused the memo has no use for this key either.
@@ -165,11 +168,21 @@ impl StyleSharing {
     /// Everything a self-contained selector can read of an element, and what decides which rules
     /// are candidates: the type, the id, the class set, and for each attribute name any selector
     /// mentions its value (presence only for `style`, which only an unshareable rule reads).
-    fn build_key(&mut self, sheets: &StyleSheets, element: &RetainedElement, view: &TreeView<'_>, id: Option<Atom>, classes: &[Atom]) {
+    fn build_key(
+        &mut self,
+        sheets: &StyleSheets,
+        element: &RetainedElement,
+        view: &TreeView<'_>,
+        id: Option<Atom>,
+        classes: &[Atom],
+        target: Option<Pseudo>,
+    ) {
         #[cfg(test)]
         KEY_BUILDS.with(|count| count.set(count.get() + 1));
         let key = &mut self.key;
         key.clear();
+        // The same element asks for its box's rules with the same features.
+        key.push(target.map_or(0, |pseudo| 1 + pseudo.index() as u8));
         let is_svg = element.is_svg();
         key.push(u8::from(is_svg));
         push_atom(key, view.tag());

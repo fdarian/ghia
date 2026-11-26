@@ -104,7 +104,7 @@ pub(crate) fn paint_only_difference(this: &StyleDesc, other: &StyleDesc, custom_
             text_decoration, text_decoration_line, text_decoration_style, text_decoration_thickness,
             text_underline_offset, font_variant_numeric, font_feature_settings, font_variation_settings,
             webkit_font_smoothing, overflow, overflow_x, overflow_y, scrollbar_width, overscroll_behavior,
-            overscroll_behavior_x, overscroll_behavior_y, scroll_behavior, overflow_anchor, cursor,
+            overscroll_behavior_x, overscroll_behavior_y, scroll_behavior, overflow_anchor, content, cursor,
             pointer_events, app_region, user_select, transition, transition_property, transition_duration,
             transition_timing_function, transition_delay, transition_behavior, interpolate_size,
             measure_natural_width, flex_or_grid_item, keeps_background, atomic_inline, animating_opacity,

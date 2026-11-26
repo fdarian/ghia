@@ -1156,6 +1156,12 @@ pub struct StyleDesc {
     #[serde(default, deserialize_with = "crate::css::overflow_anchor::deserialize_ignoring_invalid")]
     pub overflow_anchor: Option<crate::css::overflow_anchor::OverflowAnchor>,
 
+    /// What the `::before` or `::after` box of the element holds (`css::content`). Only the style a
+    /// sheet rule for a generated box gives reads it; on an element it has no effect. An invalid
+    /// value is ignored.
+    #[serde(default, deserialize_with = "crate::css::content::deserialize_ignoring_invalid")]
+    pub content: Option<crate::css::content::Content>,
+
     // Cursor
     pub cursor: Option<String>,
     /// `"none"` makes the element never a pointer target; it inherits and a

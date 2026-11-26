@@ -18,13 +18,15 @@ use super::conditions::Conditions;
 use super::invalidation::Invalidation;
 use super::layers::{LayerId, LayerOrder};
 use super::matching::{matches, ElementView};
+use super::pseudo::Pseudo;
 use super::selector::{AttrName, ComplexSelector, Simple, Specificity};
 use super::states::{Applies, RuleMatch};
 
 /// What a rule says, which does not depend on where it stands in a document: shared by the parse
 /// cache and every index built from it.
 pub struct RuleBody {
-    /// Without the selectors that name a pseudo-element, and never empty.
+    /// Without the selectors that name a pseudo-element other than `::before` and `::after`, and
+    /// never empty.
     pub selectors: Vec<(ComplexSelector, Specificity)>,
     pub normal: Vec<Declaration>,
     pub important: Vec<Declaration>,
@@ -71,14 +73,58 @@ struct Entry {
     self_contained: bool,
 }
 
+/// The rules of one target (an element, or one of its generated boxes) by the feature of the
+/// subject compound each is filed under.
 #[derive(Default)]
-pub struct RuleIndex {
-    pub rules: Vec<IndexedRule>,
+struct Buckets {
     by_id: FxHashMap<Atom, Vec<Entry>>,
     by_class: FxHashMap<Atom, Vec<Entry>>,
     by_attribute: FxHashMap<AttrName, Vec<Entry>>,
     by_tag: FxHashMap<Atom, Vec<Entry>>,
     universal: Vec<Entry>,
+}
+
+impl Buckets {
+    fn add(&mut self, selector: &ComplexSelector, entry: Entry) {
+        match bucket_simple(&selector.compounds[0].simples) {
+            Some(Simple::Id(id)) => self.by_id.entry(*id).or_default().push(entry),
+            Some(Simple::Class(class)) => self.by_class.entry(*class).or_default().push(entry),
+            Some(Simple::Attr(attr)) => self.by_attribute.entry(attr.name).or_default().push(entry),
+            Some(Simple::Tag(tag)) => {
+                // An HTML element looks its tag up lower-cased and an SVG one as given.
+                self.by_tag.entry(tag.lower).or_default().push(entry);
+                if tag.written != tag.lower {
+                    self.by_tag.entry(tag.written).or_default().push(entry);
+                }
+            }
+            _ => self.universal.push(entry),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+            && self.by_class.is_empty()
+            && self.by_attribute.is_empty()
+            && self.by_tag.is_empty()
+            && self.universal.is_empty()
+    }
+
+    fn may_match(&self, id: Option<Atom>, classes: &[Atom]) -> bool {
+        id.is_some()
+            || !classes.is_empty()
+            || !self.by_attribute.is_empty()
+            || !self.by_tag.is_empty()
+            || !self.universal.is_empty()
+    }
+}
+
+#[derive(Default)]
+pub struct RuleIndex {
+    pub rules: Vec<IndexedRule>,
+    /// The selectors of the rules that style an element.
+    elements: Buckets,
+    /// The selectors that end in `::before` and in `::after`, filed by their originating element.
+    pseudos: [Buckets; 2],
     unlayered_rank: u32,
     pub invalidation: Invalidation,
     /// Whether any selector is self-contained: otherwise nothing is shared and the memo is skipped.
@@ -88,6 +134,9 @@ pub struct RuleIndex {
     /// and what a self-contained selector matches on their values.
     html_attributes: Vec<Atom>,
     svg_attributes: Vec<Atom>,
+    /// The attribute names a `content: attr()` of a rule for a generated box reads, lower-cased:
+    /// the box shows the attribute of its element, so a change of one is a change of the box.
+    pub content_attributes: FxHashSet<String>,
 }
 
 impl RuleIndex {
@@ -105,7 +154,10 @@ impl RuleIndex {
                 let self_contained = is_self_contained(selector, style, &mut self_contained_lists);
                 index.shares |= self_contained;
                 let entry = Entry { rule: number, selector: position as u32, self_contained };
-                index.bucket(selector, entry);
+                index.buckets_mut(selector.pseudo).add(selector, entry);
+            }
+            if rule.body.selectors.iter().any(|(selector, _)| selector.pseudo.is_some()) {
+                super::pseudo::read_content_attributes(&rule.body, &mut index.content_attributes);
             }
             index.rules.push(IndexedRule { body: rule.body.clone(), layer_rank: layers.rank(rule.layer) });
         }
@@ -133,41 +185,50 @@ impl RuleIndex {
         }
     }
 
-    fn bucket(&mut self, selector: &ComplexSelector, entry: Entry) {
-        match bucket_simple(&selector.compounds[0].simples) {
-            Some(Simple::Id(id)) => self.by_id.entry(*id).or_default().push(entry),
-            Some(Simple::Class(class)) => self.by_class.entry(*class).or_default().push(entry),
-            Some(Simple::Attr(attr)) => self.by_attribute.entry(attr.name).or_default().push(entry),
-            Some(Simple::Tag(tag)) => {
-                // An HTML element looks its tag up lower-cased and an SVG one as given.
-                self.by_tag.entry(tag.lower).or_default().push(entry);
-                if tag.written != tag.lower {
-                    self.by_tag.entry(tag.written).or_default().push(entry);
-                }
-            }
-            _ => self.universal.push(entry),
+    fn buckets(&self, target: Option<Pseudo>) -> &Buckets {
+        match target {
+            None => &self.elements,
+            Some(pseudo) => &self.pseudos[pseudo.index()],
         }
     }
 
+    fn buckets_mut(&mut self, target: Option<Pseudo>) -> &mut Buckets {
+        match target {
+            None => &mut self.elements,
+            Some(pseudo) => &mut self.pseudos[pseudo.index()],
+        }
+    }
+
+    /// Whether any rule styles the generated box `pseudo`.
+    pub fn has_rules_for(&self, pseudo: Pseudo) -> bool {
+        !self.pseudos[pseudo.index()].is_empty()
+    }
+
+    /// Whether any rule styles a generated box.
+    pub fn has_pseudo_rules(&self) -> bool {
+        Pseudo::BOTH.into_iter().any(|pseudo| self.has_rules_for(pseudo))
+    }
+
     /// Whether any rule can match an element with this id and these classes: not when every rule
-    /// is keyed by an id or a class and the element has neither.
-    pub fn may_match(&self, id: Option<Atom>, classes: &[Atom]) -> bool {
-        id.is_some()
-            || !classes.is_empty()
-            || !self.by_attribute.is_empty()
-            || !self.by_tag.is_empty()
-            || !self.universal.is_empty()
+    /// is keyed by an id or a class and the element has neither. `target` is the element, or one
+    /// of its generated boxes.
+    pub fn may_match(&self, id: Option<Atom>, classes: &[Atom], target: Option<Pseudo>) -> bool {
+        self.buckets(target).may_match(id, classes)
     }
 
     /// The rules that match `element` with the specificity of the most specific selector of each
     /// that does, in cascade order for normal declarations: layer, then specificity, then source.
+    ///
+    /// `target` is what the rules style: the element, or one of its generated boxes, whose rules are
+    /// matched against `element`, the box's originating element.
     pub fn matching<E: ElementView>(
         &self,
         element: &E,
         id: Option<Atom>,
         classes: &[Atom],
+        target: Option<Pseudo>,
     ) -> Vec<RuleMatch> {
-        self.matching_in_full(element, id, classes).0
+        self.matching_in_full(element, id, classes, target).0
     }
 
     /// [`Self::matching`], and whether every selector it tried is self-contained, which makes the
@@ -177,8 +238,10 @@ impl RuleIndex {
         element: &E,
         id: Option<Atom>,
         classes: &[Atom],
+        target: Option<Pseudo>,
     ) -> (Vec<RuleMatch>, bool) {
         super::share::count_full_match();
+        let buckets = self.buckets(target);
         let mut found: Vec<RuleMatch> = Vec::new();
         let mut self_contained = true;
         let mut visit = |bucket: &[Entry]| {
@@ -195,25 +258,25 @@ impl RuleIndex {
                 }
             }
         };
-        if let Some(bucket) = id.and_then(|id| self.by_id.get(&id)) {
+        if let Some(bucket) = id.and_then(|id| buckets.by_id.get(&id)) {
             visit(bucket);
         }
         for class in classes {
-            if let Some(bucket) = self.by_class.get(class) {
+            if let Some(bucket) = buckets.by_class.get(class) {
                 visit(bucket);
             }
         }
-        for (attribute, bucket) in &self.by_attribute {
+        for (attribute, bucket) in &buckets.by_attribute {
             if element.attr(*attribute).is_some() {
                 visit(bucket);
             }
         }
-        if !self.by_tag.is_empty() {
-            if let Some(bucket) = element.tag().and_then(|tag| self.by_tag.get(&tag)) {
+        if !buckets.by_tag.is_empty() {
+            if let Some(bucket) = element.tag().and_then(|tag| buckets.by_tag.get(&tag)) {
                 visit(bucket);
             }
         }
-        visit(&self.universal);
+        visit(&buckets.universal);
         found.sort_by_key(|found| {
             (self.rules[found.rule as usize].layer_rank, found.specificity, found.rule, found.condition)
         });

@@ -27,6 +27,7 @@ use super::layers::Layers;
 use super::live_states::LiveStates;
 use super::parse_cache::{ParseCache, ParsedRule};
 use super::positions::PendingRanges;
+use super::pseudo::{PseudoMatches, PseudoState};
 use super::reload::Reload;
 use super::states::LoggedFolds;
 use super::validate::Validator;
@@ -45,11 +46,13 @@ pub struct ElementCss {
     pub classes: ClassAtoms,
     /// `None` for an element no rule matches, and for one that is not in the document.
     pub matched: Option<Arc<MatchedRules>>,
+    /// The rules that match its `::before` and `::after`, `None` when neither has one.
+    pub pseudo: Option<Arc<PseudoMatches>>,
 }
 
 impl ElementCss {
     pub fn is_empty(&self) -> bool {
-        self.id.is_none() && self.classes.is_empty() && self.matched.is_none()
+        self.id.is_none() && self.classes.is_empty() && self.matched.is_none() && self.pseudo.is_none()
     }
 }
 
@@ -94,6 +97,8 @@ pub struct StyleSheets {
     /// The top-level rules `index` was built from, when every source was cut into them.
     loaded_units: Option<Vec<Arc<ParsedRule>>>,
     pub(crate) interner: MatchedInterner,
+    /// What is shared between the elements that match the same rules for their generated boxes.
+    pub(super) pseudo: PseudoState,
     validator: Validator,
     parse_cache: ParseCache,
     /// The skipped rules already logged, kept across reloads (every sheet is parsed again when
@@ -138,6 +143,7 @@ impl Default for StyleSheets {
             document_changed: false,
             loaded_units: None,
             interner: MatchedInterner::default(),
+            pseudo: PseudoState::default(),
             validator: Validator::default(),
             parse_cache: ParseCache::default(),
             logged_skips: FxHashSet::default(),
@@ -398,6 +404,7 @@ impl StyleSheets {
         self.index = Default::default();
         self.live.clear();
         self.interner = Default::default();
+        self.wind_down_pseudos();
         self.atoms = Atoms::default();
         self.style = self.atoms.intern("style");
         self.style_texts.get_mut().clear();

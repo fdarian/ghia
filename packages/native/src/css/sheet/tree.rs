@@ -20,6 +20,7 @@ use super::cascade::MatchedRules;
 use super::has::Presence;
 use super::invalidation::Reach;
 use super::live_states::LiveInputs;
+use super::pseudo::Pseudo;
 use super::share::{Found, StyleSharing};
 use super::tree_states::TreeStates;
 use super::view::{count_sibling_work, SiblingPositions, TreeView};
@@ -284,6 +285,7 @@ impl RetainedTree {
         };
         self.sheets.mark(id, reach);
         self.mark_has_anchors(id, has);
+        self.pseudo_attribute_changed(id, name);
     }
 
     /// Whether `ancestor` is a `<style>` element or has one below it. Asked on every insert and
@@ -613,8 +615,10 @@ impl RetainedTree {
         let restyle = self.restyle_set(&marks, all);
 
         let mut found: Vec<(u64, Found)> = Vec::new();
+        let mut found_pseudos: Vec<(u64, [Found; 2])> = Vec::new();
         let positions = SiblingPositions::default();
         let mut sharing = StyleSharing::default();
+        let pseudos = self.sheets.index.has_pseudo_rules();
         for (id, connected) in restyle {
             crate::perf_counters::element_rematched();
             let Some(element) = self.elements.get(&id) else {
@@ -622,9 +626,10 @@ impl RetainedTree {
             };
             let css = element.css();
             let (element_id, classes) = css.map_or((None, &[][..]), |css| (css.id, &css.classes[..]));
-            let matched = if connected && element.is_matchable() && self.sheets.index.may_match(element_id, classes) {
+            let matchable = connected && element.is_matchable();
+            let matched = if matchable && self.sheets.index.may_match(element_id, classes, None) {
                 let view = TreeView::new(self, id, &positions);
-                sharing.matching(&self.sheets, element, &view, element_id, classes)
+                sharing.matching(&self.sheets, element, &view, element_id, classes, None)
             } else {
                 Found::Own(Vec::new())
             };
@@ -632,21 +637,36 @@ impl RetainedTree {
             if !sharing.is_empty(&matched) || was_matched {
                 found.push((id, matched));
             }
+            let had_boxes = css.is_some_and(|css| css.pseudo.is_some());
+            // An element that has boxes is asked again when the rules for them are gone.
+            if pseudos || had_boxes {
+                let boxes = Pseudo::BOTH.map(|pseudo| {
+                    let target = Some(pseudo);
+                    if matchable && self.sheets.index.has_rules_for(pseudo) && self.sheets.index.may_match(element_id, classes, target) {
+                        let view = TreeView::new(self, id, &positions);
+                        sharing.matching(&self.sheets, element, &view, element_id, classes, target)
+                    } else {
+                        Found::Own(Vec::new())
+                    }
+                });
+                if had_boxes || boxes.iter().any(|found| !sharing.is_empty(found)) {
+                    found_pseudos.push((id, boxes));
+                }
+            }
         }
 
         let mut shared: Vec<Option<Arc<MatchedRules>>> = vec![None; sharing.lists.len()];
+        let mut intern = |sheets: &mut super::document::StyleSheets, matched: Found| match matched {
+            Found::Own(list) if list.is_empty() => None,
+            Found::Own(list) => Some(sheets.interner.intern(&sheets.index, list)),
+            Found::Shared(list) if sharing.lists[list].is_empty() => None,
+            Found::Shared(list) => Some(
+                shared[list].get_or_insert_with(|| sheets.interner.intern(&sheets.index, sharing.lists[list].clone())).clone(),
+            ),
+        };
         let mut changes: Vec<(u64, Option<Arc<MatchedRules>>)> = Vec::new();
         for (id, matched) in found {
-            let new = match matched {
-                Found::Own(list) if list.is_empty() => None,
-                Found::Own(list) => Some(self.sheets.interner.intern(&self.sheets.index, list)),
-                Found::Shared(list) if sharing.lists[list].is_empty() => None,
-                Found::Shared(list) => Some(
-                    shared[list]
-                        .get_or_insert_with(|| self.sheets.interner.intern(&self.sheets.index, sharing.lists[list].clone()))
-                        .clone(),
-                ),
-            };
+            let new = intern(&mut self.sheets, matched);
             let old = self.elements.get(&id).and_then(|element| element.css()).and_then(|css| css.matched.as_ref());
             let same = match (old, &new) {
                 (None, None) => true,
@@ -657,7 +677,9 @@ impl RetainedTree {
                 changes.push((id, new));
             }
         }
+        let pseudo_changes = self.pseudo_changes(found_pseudos, &mut intern);
         self.apply_matched(changes);
+        self.apply_pseudo(pseudo_changes);
 
         self.sheets.release_unused();
         if self.sheets.style_elements.is_empty() && self.sheets.constructed.is_empty() {

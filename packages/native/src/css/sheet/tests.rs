@@ -923,16 +923,68 @@ fn root_and_host() {
 }
 
 #[test]
-fn pseudo_elements_parse_and_never_match() {
-    for selector in ["::backdrop", "div::before", "div:before", "p:after", "p:first-line", "p:FIRST-LETTER", "span::part(x)"] {
+fn pseudo_elements_without_a_box_parse_and_never_match() {
+    for selector in ["::backdrop", "p:first-line", "p:FIRST-LETTER", "span::part(x)", "::selection", "p::placeholder", "p::marker"] {
         let mut doc = Doc::new();
         let parsed = doc.selector(selector);
         assert!(parsed.has_pseudo_element(), "{selector}");
+        assert_eq!(parsed.pseudo, None, "{selector}");
         let tree = fixture(&mut doc.atoms);
         assert!((0..tree.nodes.len()).all(|index| !matches(&parsed, &tree.view(index))), "{selector}");
     }
-    assert_eq!(selected("*::before"), Vec::<usize>::new());
-    assert_eq!(selected(":not(.nothing)::before"), Vec::<usize>::new());
+    assert_eq!(selected(":not(.nothing)::selection"), Vec::<usize>::new());
+}
+
+#[test]
+fn before_and_after_name_the_box_of_the_element_the_compounds_match() {
+    use super::Pseudo::{After, Before};
+    for (selector, pseudo) in [
+        ("div::before", Before), ("div:before", Before), ("div::BEFORE", Before), ("div:After", After), ("div::after", After),
+    ] {
+        let parsed = Doc::new().selector(selector);
+        assert_eq!(parsed.pseudo, Some(pseudo), "{selector}");
+        assert!(!parsed.has_pseudo_element(), "{selector}");
+    }
+    assert_eq!(selected("div::before"), selected("div"));
+    assert_eq!(selected(".first::after"), [FIRST]);
+    assert_eq!(selected("#main > .first::before"), [FIRST]);
+    assert_eq!(selected("#main .first:not(.second)::before"), [FIRST]);
+    assert_eq!(selected("*::before").len(), fixture(&mut Atoms::default()).nodes.len());
+    assert_eq!(selected("::after"), selected("*"));
+    assert_eq!(Doc::new().selector("::before").compounds.len(), 1);
+    assert_eq!(Doc::new().selector("a::before").compounds[0].simples.len(), 1, "the box is not a simple selector");
+}
+
+#[test]
+fn a_generated_box_ends_the_selector_and_takes_no_state_after_it() {
+    for selector in [
+        "::before:hover", "a::before.b", "a::before b", "a::before > b", "a::before + b", "a::before::after", "a::before::marker",
+        "a::selection::before", "a::before:first-child", "a::before[x]", "::before::before", "a::before,", ":is(a::before)b::before2",
+    ] {
+        assert!(!is_valid(selector), "{selector}");
+    }
+    assert!(is_valid("a:hover::before"));
+    assert!(is_valid("a:focus-visible:not(.x)::after"));
+    assert!(is_valid("a b::before, c::after"));
+    assert_eq!(Doc::new().selector("a:hover::before").condition, Some(State::Hover));
+    assert_eq!(Doc::new().selector(".a:is(:hover)::after").condition, Some(State::Hover));
+}
+
+#[test]
+fn a_box_selector_is_no_argument_and_a_nested_rule_does_not_reach_through_one() {
+    assert_eq!(selected(":is(::before, .first)"), [FIRST]);
+    assert!(!is_valid(":not(::before)"));
+    assert!(!is_valid(":where(a)::before:hover"));
+    let mut doc = Doc::new();
+    let sheet = doc.parse(".first::before { .nested { color: red } &:hover { color: red } }");
+    let tree = fixture(&mut doc.atoms);
+    for rule in &sheet.rules {
+        for (selector, _) in &rule.selectors {
+            if selector.pseudo.is_none() {
+                assert!((0..tree.nodes.len()).all(|index| !matches(selector, &tree.view(index))), "a rule nested in a box styles nothing");
+            }
+        }
+    }
 }
 
 #[test]

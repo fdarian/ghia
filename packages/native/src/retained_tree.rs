@@ -470,6 +470,24 @@ impl RetainedElement {
         self.release_empty_markup();
     }
 
+    pub(crate) fn pseudo_matches(&self) -> Option<&Arc<crate::css::sheet::PseudoMatches>> {
+        self.css()?.pseudo.as_ref()
+    }
+
+    /// Sets the rules the sheets matched the element's generated boxes with, and returns the ones
+    /// it had.
+    pub(crate) fn set_pseudo_matches(
+        &mut self,
+        pseudo: Option<Arc<crate::css::sheet::PseudoMatches>>,
+    ) -> Option<Arc<crate::css::sheet::PseudoMatches>> {
+        if pseudo.is_none() && self.css().is_none() {
+            return None;
+        }
+        let old = std::mem::replace(&mut self.css_mut().pseudo, pseudo);
+        self.release_empty_markup();
+        old
+    }
+
     /// Replaces the class atoms and returns the ones the element had.
     pub(crate) fn replace_css_classes(&mut self, classes: crate::css::sheet::ClassAtoms) -> crate::css::sheet::ClassAtoms {
         if classes.is_empty() && self.css().is_none_or(|css| css.classes.is_empty()) {

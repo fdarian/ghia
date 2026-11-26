@@ -95,15 +95,19 @@ pub struct SiblingTest {
     compound: usize,
 }
 
+/// Whether `element` is what the compounds of the selector describe: the originating element of
+/// a selector that ends in `::before` or `::after`, which the rule index asks for the target it
+/// files the selector under.
 pub fn matches(selector: &ComplexSelector, element: &impl ElementView) -> bool {
-    matches_in(selector, element, true)
+    matches_from(selector, 0, element, true)
 }
 
 /// `lifted` is whether the subject of `selector` stands where the state of the subject is its
 /// condition: the selector of a rule, or an argument of a `:is()` of such a subject. Any other
-/// state is the element's live one.
+/// state is the element's live one. A selector of a generated box inside a list (the parent `&`
+/// stands for) styles no element.
 fn matches_in<E: ElementView>(selector: &ComplexSelector, element: &E, lifted: bool) -> bool {
-    matches_from(selector, 0, element, lifted)
+    selector.pseudo.is_none() && matches_from(selector, 0, element, lifted)
 }
 
 fn matches_from<E: ElementView>(selector: &ComplexSelector, index: usize, element: &E, lifted: bool) -> bool {
