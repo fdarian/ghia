@@ -4130,7 +4130,8 @@ mod tests {
     fn the_fingerprint_names_every_field_of_inherited() {
         // `inherited_fingerprint` lists the fields by hand. Adding one changes this size, and the
         // fingerprint has to learn it or the key will not see it change.
-        assert_eq!(std::mem::size_of::<Inherited>(), 376);
+        // `custom` carries the document's registrations beside its map, which `custom_fingerprint` hashes.
+        assert_eq!(std::mem::size_of::<Inherited>(), 392);
     }
 
     #[test]
