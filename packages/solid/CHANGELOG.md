@@ -1,5 +1,123 @@
 # @ghia/solid
 
+## 0.14.0
+
+`contenteditable` and the DOM editing model are in, so Lexical runs unchanged: editing hosts, live ranges, `Selection`, `beforeinput`, clipboard and paste events, and an Edit menu. Scrolling and text are faster (scroll pixel reuse, a per-glyph advance cache), a scroll no longer freezes when frames outlast a vsync, and stylesheets gain structural, form-state and `:has()` selectors. `<code code=... language=...>` is renamed `<code-block>`.
+
+### Breaking changes
+
+- **`<code code=... language=...>` is now `<code-block ...>`, and `<code>` is HTML's inline element.** The syntax-highlighted block keeps its props (`code`, `language`, `path`, `showLineNumbers`, `theme`) under the new name, so rename the tag (`<code-block code={source} language="ts" />`), the JSX type `CodeProps` to `CodeBlockProps`, and `findByType("code")` to `findByType("code-block")`. A `<code>` now lays out as `<span>` with the user agent style of Chrome's `code`: the generic `monospace` family, drawn at 13px beside 16px text by Chrome's monospace size rule (see `docs/reference.md`, "Monospace size"), so code that renders text inline in a paragraph (Lexical's Code format) works unchanged.
+- **`pre`, `kbd` and `samp` use the generic `monospace` at Chrome's size**, not `Menlo` at the inherited size: they are 13px where the text around them is 16px, unless an absolute `font-size` is inherited or the `font-family` is a longer list (`monospace, monospace`). `tt` is a tag too.
+- **`writeClipboardText` and `readClipboardText` on the renderer are `writeClipboard(items)` and `readClipboard()`.** Renderer code that called the old pair moves to the new one, which carries several types (see Clipboard below); `navigator.clipboard.writeText` and `readText` run on top of it.
+- **A scroll no longer moves the hover under a pointer that stays, as in Chrome.** `:hover`, `style.hover` and `pointerover`/`pointerenter`/`mouseover`/`mouseenter` (and their out and leave twins) stay on the element the pointer last moved onto while a wheel runs, and follow to what is under it 500 ms after the last tick of a mouse wheel, 100 ms after a trackpad lift (momentum that follows runs the 500 ms again), at the next frame after code scrolls an element by any path (`scrollTop = n`, `scrollTo`, `scrollIntoView`, `scrollToItem`, a key, a scrollbar; a smooth scroll when it ends), or at the next frame after a frame that changed the page (a commit, a restyle, a resize) or ran an animation of the layout (a transition or animation of a size, a margin, a position or the like, or a `layout` glide; a color, an opacity or a transform does not count, so `transition-colors` on rows and a spinner leave the hover where the wheel put it). A pointer that moves follows at once. `getPatchCounters().scrollPatch` loses `hoverAsked` and `hoverMatters` and its `held` loses `HitboxChain`; `Hover` holds a frame for a pointer that moved only. A test that wheels and expects the row under the pointer to be hovered calls `advanceTime(500)` and draws the frames the follow asks for.
+
+### Features
+
+**Editing and contenteditable**
+
+- `contentEditable` is the DOM's: it reflects the `contenteditable` attribute, `isContentEditable` reads it with inheritance, an editing host is focusable (`focus()`, Tab, `tabIndex` 0), and `:read-write` / `:read-only` count editable elements. Nothing edits yet.
+- Typing into an editing host (`<div contentEditable>`): what the keyboard types, a dead key's result, the emoji picker and dictation reach the focused host through the window's input handler, once, as `beforeinput` (an `InputEvent` that bubbles and can be canceled: `insertText`, or `insertReplacementText` for a range the platform replaces), the change to the DOM, then `input`. An unprevented Enter, Backspace or Delete `keydown` does the same, keeps the platform from typing the key as well, and an editing host always gets its `keydown`, with no listener on its path. The edit goes through `insertData` and `deleteContents` so a `MutationObserver` sees it and the selection follows. `InputEvent` has `targetRanges` and `getTargetRanges()`. The test renderer has `simulateEditingInput` and `simulateEditingComposition`.
+- An input method composes in a focused `contenteditable`: marked text, a dead key (Option+E, then E) and a commit fire `compositionstart`, `beforeinput` (`insertCompositionText`), `compositionupdate`, `input` and `compositionend` in Chrome's order, and the platform is told where the marked text is (the candidate window) and which character a point is on. The composition ends with `compositionend` when the host loses focus. `simulateComposition` now composes in an editing host through the same text input, and the test renderer has `getInputMethodBounds` and `getInputMethodIndexAtPoint`.
+- A focused `contenteditable` host moves the caret and deletes by word and line from the keyboard, as Chrome on macOS does: Left and Right by character (a range collapses to its edge), Option by word, Cmd to the row boundary; Up and Down by painted row keeping the column, Cmd to the start or end of the host; Shift extends each, and Shift+Home and Shift+End extend to the host's edges. Cmd+A selects the host's contents, the Emacs moves Ctrl+B, F, N, P extend with Shift, Ctrl+H and Ctrl+D delete, and Option+Backspace, Option+Delete and Cmd+Backspace fire `beforeinput` with `deleteWordBackward`, `deleteWordForward` and `deleteSoftLineBackward` and `targetRanges` before they change the DOM. Each is a `keydown` default, so `preventDefault()` stops it. Bindings Ghia does not do are listed in `docs/fork/deviations.md`. Home, End, Page Up and Page Down scroll the nearest scroller while a host has focus (the arrow keys and Space stay editing keys and do not scroll, and Shift+Page Up and Down scroll nothing).
+- A click in a `contenteditable` host puts the caret at the character under the pointer and focuses the host with the selection already there, Shift+click extends the focus, and a drag selects from the press to the pointer, clamped to the host. A double click selects the word, a triple click the contents of the paragraph, and a drag after either extends by words or paragraphs. The selection is a node selection, so it is painted as the caret or the wash, `selectionchange` fires and a framework editor (Lexical) reads it; a prevented `mousedown` changes nothing, and a press outside every editing host still selects painted text. No auto-scroll at the edge while dragging in a host and no `selectstart` yet: see `docs/fork/deviations.md`. A press, a drag or a double or triple click on an empty paragraph (`<p><br></p>`) puts the caret in it, as `(paragraph, 0)`.
+- Editing hosts follow the DOM at the edges: moving an editable subtree into or out of an editing host updates what takes focus (an editable element inside an editable parent is not a tab stop), and Tab or `focus()` into a host puts the caret at its start (a click focuses first, then puts it at the point). Setting the selection inside a host that does not hold focus (`setBaseAndExtent`, `collapse`, `addRange`, ...) focuses the host, as Chrome does, so Lexical's `editor.focus()` moves focus into an editor. A host matches `:focus-visible` after a click, as in Chrome, and a focused `contenteditable` host dims no other focusable element, as a text field does not.
+- The caret of an editing host is painted: a collapsed selection inside a focused `contenteditable` in a key window draws a 2px caret a row high in the theme's caret colour, solid when it moves or comes and blinking every 500 ms like an `<input>`'s. A blink is a patched frame that builds only the paragraph that holds the caret, and a host that has no focus or a window that is not key asks for no frame. `getPaintedNodeSelection()` in the test renderer now returns `{ washes, caret }`.
+- A node selection inside an editing host is painted: the text between its two points gets a selection wash in every paragraph it reaches, in the colour of a dragged selection. Changing the selection builds only the paragraphs it touches (retention skips the rest). The selection goes to native in the mutation batch (`setNodeSelection`, wire opcode 16).
+
+**Ranges, selection and the DOM from code**
+
+- `Range`, `StaticRange` and `AbstractRange` exist, with `document.createRange()`. A `Range` is live: a tree change, including a React or Solid insert, removal or text update, and a data change move its boundary points as the DOM standard says. `CharacterData` has `substringData`, `appendData`, `insertData`, `deleteData` and `replaceData`, `Text` has `splitText` and `wholeText`, and `document.hasFocus()` answers.
+- `getSelection()` holds a live `Range` of nodes once code selects them: `anchorNode`, `focusNode`, `direction`, `getRangeAt`, `addRange`, `removeRange`, `collapse`, `extend`, `setBaseAndExtent`, `selectAllChildren`, `containsNode`, `deleteFromDocument`, `getComposedRanges` and `modify` by character and word, with the DOMExceptions of the standard. A node selection and the painted text a drag selects replace each other. `document` hears one coalesced `selectionchange` per burst of changes, including a move caused by a tree or data change.
+- `Range.getClientRects()` and `getBoundingClientRect()` are the rects of the selected text, one for each painted line of each Text node and the border box of each element the range selects whole, and a collapsed range in text is the caret rect. `document.caretPositionFromPoint(x, y)` (with the `CaretPosition` global) and `document.caretRangeFromPoint(x, y)` give the text position nearest a point. `Selection.modify` takes the `line`, `lineboundary` and `documentboundary` granularities: moves by line keep the caret's x across a short line. Native has three new reads for them (`getTextRangeRects`, `caretPositionFromPoint`, `moveCaretVisually`).
+- `document.createDocumentFragment()` makes a real `DocumentFragment`: it holds children, is never mounted, and inserting it (`appendChild`, `insertBefore`, `replaceChild`, `append`, `before`, `Range.insertNode`, ...) moves its children in order. `Range.cloneContents()`, `extractContents()` and `surroundContents()` are there.
+- `DOMParser` parses `text/html` into an inert `Document` (real `Element`, `Text`, `Comment` and `DocumentFragment` nodes with `style`, `querySelector`, `<template>` content and a `styleSheets` list of `CSSStyleSheet`s built from its `<style>` elements; `CSSStyleRule.style` reads a rule's declarations), and `innerHTML`, `outerHTML` and `insertAdjacentHTML` read and write markup on an element, in its context, so the new children are drawn. HTML is parsed and serialized by parse5 through a tree adapter over Ghia's own nodes. `Comment`, `StyleSheetList` and `Element.namespaceURI` are there; `textContent` skips comments. The XML MIME types and `XMLSerializer` are not supported: `docs/fork/deviations.md`.
+
+**Clipboard**
+
+- `DataTransfer`, `DataTransferItemList`, `DataTransferItem` and `ClipboardEvent` are globals. `new DataTransfer()` is an empty read/write store with `items`, `types`, `files`, format normalisation and the DOM's read-only and protected modes, and the `dataTransfer` of a drag is an instance of it. `copy`, `cut` and `paste` are `ClipboardEvent` types with `onCopy`, `onCut` and `onPaste` props in React and Solid.
+- Cmd+C, Cmd+X, Cmd+V and Cmd+A, and a new Edit menu (Cut, Copy, Paste, Select All), run as one set of GPUI actions. Outside an `<input>` or `<textarea>` they fire the DOM `copy`, `cut` and `paste` events at the element that holds the start of the selection (the focused element with no selection), with a `DataTransfer` in the mode the Clipboard API gives it; a cancelled `copy` or `cut` writes exactly what the handler put in `clipboardData`, and an uncancelled `copy` writes `text/plain` (line breaks between blocks and at a `<br>`, as Chrome copies it) and `text/html` of the node selection (a text selected by dragging is still copied as before). A checkbox, radio, range or hidden `<input>` is not a text control: it gets the events. A `preventDefault` on the `keydown` cancels the command. Select All selects the focused editing host, or the body. In an editing host, an uncancelled Cut copies the selected range and deletes it (`beforeinput` `deleteByCut`, then `input`), and an uncancelled Paste inserts the clipboard's text (`beforeinput` `insertFromPaste` with `dataTransfer` and `targetRanges`, a `<br>` for each line break, `input`); a caret, or a selection outside a host, does nothing, and so does a clipboard with no text after the `paste` event. `Element.innerText` is new. `document.execCommand('copy' | 'cut' | 'selectAll')` run the same commands synchronously (an `execCommand` cut fires no `beforeinput`, and a call made from the event of another returns false), `'paste'` and every other command return false, and `queryCommandSupported` and `queryCommandEnabled` answer for them. `TestRenderer.simulateMenuAction(name)` chooses an Edit menu item. `<input>` and `<textarea>` fire no clipboard events: `docs/fork/deviations.md`.
+- The clipboard carries several types. `writeClipboard(items)` and `readClipboard()` on the renderer replace `writeClipboardText` and `readClipboardText`: `text/plain`, `text/html` and `text/uri-list` use their pasteboard types, and every other type, such as `application/x-lexical-editor`, goes into Chrome's `org.chromium.web-custom-data` entry, so a page here and a page in Chrome exchange them. `navigator.clipboard.writeText` and `readText` run on top, and the test renderer holds the entries in memory.
+
+**Stylesheets**
+
+- Stylesheets support the structural pseudo-classes: `:first-child`, `:last-child`, `:only-child`, `:nth-child(An+B)`, `:nth-last-child(An+B)`, `:first-of-type`, `:last-of-type`, `:only-of-type`, `:nth-of-type(An+B)`, `:nth-last-of-type(An+B)` and `:empty`, in any compound and inside `:is()`, `:where()` and `:not()`. Before, a rule that used one was dropped. A child that comes, goes or moves restyles only the siblings whose position it changes (the two neighbours for `:first-child` and `:last-child`, the siblings after it for `:nth-child()`, before it for `:nth-last-child()`, the parent for `:empty`), and a sheet that uses none of them marks nothing extra. `:nth-child(An+B of S)` is still not supported.
+- Stylesheets support the form and tree state pseudo-classes `:disabled`, `:enabled`, `:checked`, `:indeterminate`, `:required`, `:optional`, `:read-only`, `:read-write`, `:any-link` and `:link`, in any compound and inside `:is()`, `:where()` and `:not()`. Before, a rule that used one was dropped. A prop or a click that changes one of them restyles only the elements that read it (toggling `disabled` on one of a thousand buttons matches that button again; checking a radio matches it and the radio it unchecked), and a sheet that uses none marks nothing extra. `:placeholder-shown`, `:invalid`, `:valid`, `:default`, `:open`, `:autofill` and the range pseudo-classes are still not supported.
+- Stylesheets support `:has()`: `:has(> img)`, `:has(+ p)`, `:has(~ .x)` and `:has(.err)` (a relative selector list, with `>`, `+`, `~` or a descendant as the leading combinator), in any compound and inside `:is()`, `:where()` and `:not()`, so `.card:has(.err) .title`, `.btn:has(> svg)`, `h1:has(+ p)` and `.field:has(input:checked) .label` style what they name. Before, a rule that used it was dropped. A class, id, attribute, tree state or position an argument reads, and a child that comes, goes or moves, restyle only the elements that hold what the `:has()` compound requires and that are above or before the one that changed, and a sheet with no `:has()` marks nothing extra. `:has()` is not forgiving, does not nest, and takes no pointer or focus state (`:has(:hover)` is invalid; `hasHover` is the style key for that).
+
+**HTML tags**
+
+- List markers. `li` is `display: list-item` and has a marker: a bullet (`disc`, `circle`, `square`, drawn as shapes sized by the font's ascent as Chrome draws them) or a number (`decimal`, `lower-alpha`, `upper-alpha`, `lower-roman`, `upper-roman`, with Chrome's counter text `1. `). `list-style-type`, `list-style-position` and the `list-style` shorthand are inherited properties; an `outside` marker ends at the item's border box on its first line and takes no part in layout, an `inside` one takes room at the start of the first line. The number is the item's place among the list items of its parent, from `start`, down with `reversed`, and set by an item's `value`; `ol start`, `ol reversed` and `li value` reach native from React and Solid (`forwardsCustomProp`), and the DOM properties `li.value`, `ol.start` and `ol.reversed` reflect them as in the DOM (Lexical assigns `li.value`). Inserting, removing or moving an item, or changing one of those or the type, renumbers the items after it in a retained frame. A `ul`, `ol` or `dl` inside a list has no block margin and a `ul` is a `circle` inside one list and a `square` inside two, as in Chrome. An `outside` marker is the item's for the pointer (`elementFromPoint`, clicks, `:hover`), an `inside` one follows `text-align` and re-measures its text when the number gets wider, the counter's digits are tabular as in Chrome's `::marker`, and `list-style` works in `:hover` and `hover` styles. Painted against headless Chrome's ink at scale 1 and 2 (`list-markers` oracle, React and Solid), and Lexical's list commands now show their bullets and numbers. Not supported: `::marker` styling, `list-style-image`, `counter-*`, `@counter-style`; the counter's scope is the parent element (`docs/fork/deviations.md`).
+
+**Text and fonts**
+
+- `font-family` is a list, as in CSS: the first installed family draws, the installed ones after it are the fallbacks for the glyphs it lacks, and `system-ui`, `-apple-system`, `BlinkMacSystemFont`, `sans-serif`, `serif`, `monospace`, `cursive`, `fantasy` and `math` map to what Chrome uses on macOS. A web font stack no longer falls through to GPUI's fallback face. `<code>` takes the list too.
+- Chrome's monospace font-size rule: an element whose `font-family` becomes the generic `monospace` alone has its `font-size` scaled by 13/16 when that size is not an absolute length, and scaled back where the family stops being `monospace`.
+
+**SVG**
+
+- An `<svg>` child takes the kebab-case attribute names the DOM and Solid write (`stroke-width`, `stroke-linecap`, `fill-rule`) as well as React's camelCase props, and a transition or `@keyframes` on one reads the kebab-case attribute as it reads React's prop.
+
+### Fixes
+
+- A scroll no longer freezes while frames take longer than a vsync. The macOS pump ran display-link frame steps back to back in one tick for as long as the link had another one queued, so wheel events were not read and JS did not run for 0.1 to 2 s at a time, and the page kept presenting a frozen scroll. A tick now runs at most one frame step, and the next tick reads the events first.
+- Each key event from the keyboard gets its own microtask checkpoint on both sides: `tick()` ends its pump before a `keydown`, `keyup` or modifier change when an event or a frame step came first, and after sending it, and the frame loop ticks again at once, so an editor that commits its update in a microtask (Lexical) applies every key that was waiting, where it used to keep the first and lose the rest. With `frameMs` set the timer path ticks again on the next turn of the event loop (`keyEventPending()`) instead of waiting out the frame. There is still no checkpoint between the listeners of one event or between a key's `keydown` and its `input`, and mouse events handled in one pump share one. The test renderer gets `postNativeKeys`, `pumpNativeEvents`, `setYieldAfterKeyEvent` and `keyEventPending` to drive that pump.
+- The live automation client presses a `keystrokes` sequence one key at a time with a turn of the event loop after each, so an editor that commits its update in a microtask (Lexical) takes every key of "m i d" and not only the first. A synchronous `simulateKeystrokes` on the test renderer still runs a sequence inside one call; the limit is in `docs/fork/deviations.md`.
+- The text editor's events (`input`, `compositionstart`, `compositionupdate`, `compositionend` and the number stepper's `change`) reach JS synchronously on macOS, in the test renderer and in the web (wasm) renderer, as `keydown` does: after the edit and before the key's `keyup`, in order, in the same tick as the key. A controlled input's echo is drawn by the frame of the key that typed it, where it waited for the next tick before. They are still queued on Windows and Linux.
+- A block whose only content is a line break (`<div><br></div>`, `<p><br></p>`, or a lone `"\n"` under `white-space: pre`) is one line tall, as in Chrome, and not zero. `a<br>` stays one line and `<br><br>` is two.
+- `xlink:href` and `xlinkHref` on an SVG `<use>` are written as `href`, and the `marker` shorthand no longer writes a marker twice beside a longhand.
+- `TestRenderer.dispose()` closes the window itself, while its app is alive, and no longer leaves that to a block on the main queue. A block still queued when the app was released ran in the next renderer's `dispose()` and aborted the process with "app was released before async operation completed". `RowOracle.dispose()`, and a `RowOracle` that a newer one replaces, close their window the same way.
+
+  Two test-only methods: `TestRenderer.disposeLeavingMainQueueForTest()` (`dispose` without running the main queue, so the close block stays queued) and `runMainQueueToMarkerForTest()` (runs the main run loop until a block queued now on the main dispatch queue has run, so every block queued before it has; throws after 5 seconds).
+
+### Dependencies
+
+- Updated dependencies [efdc58a]
+- Updated dependencies [32cb7c2]
+- Updated dependencies [dbd63d6]
+- Updated dependencies [698580c]
+- Updated dependencies [5493465]
+- Updated dependencies [08786e0]
+- Updated dependencies [1ab5788]
+- Updated dependencies [c8a846d]
+- Updated dependencies [76853dd]
+- Updated dependencies [5340a15]
+- Updated dependencies [40e4657]
+- Updated dependencies [d5d8a2c]
+- Updated dependencies [3ecd502]
+- Updated dependencies [f610c70]
+- Updated dependencies [c126e2d]
+- Updated dependencies [a6a5504]
+- Updated dependencies [d402189]
+- Updated dependencies [bb0bcaf]
+- Updated dependencies [7b8e480]
+- Updated dependencies [2e41294]
+- Updated dependencies [f926534]
+- Updated dependencies [b3097eb]
+- Updated dependencies [88ba15f]
+- Updated dependencies [b0e1a44]
+- Updated dependencies [08ab88f]
+- Updated dependencies [4a289c4]
+- Updated dependencies [7080a6a]
+- Updated dependencies [a0347c3]
+- Updated dependencies [7f27601]
+- Updated dependencies [ed5fd5a]
+- Updated dependencies [c8a846d]
+- Updated dependencies [fe19c6a]
+- Updated dependencies [7c06a8a]
+- Updated dependencies [11ad59a]
+- Updated dependencies [8d56654]
+- Updated dependencies [3fce838]
+- Updated dependencies [97d4d8e]
+- Updated dependencies [fcc869d]
+- Updated dependencies [f807bac]
+- Updated dependencies [ad6380d]
+- Updated dependencies [8fdb2e6]
+- Updated dependencies [866fd8c]
+- Updated dependencies [ed8e9ad]
+- Updated dependencies [75882f5]
+  - @ghia/native@0.14.0
+  - ghia@0.14.0
+
 ## 0.13.0
 
 The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`, nodes are real `Node`, `Element` and `Text` objects, CSS stylesheets and HTML tags work, and code that is not the framework can build, query, style and observe the tree as it does in a browser. As a result these run unmodified: `@base-ui/react` (Checkbox, Switch, Radio, Slider, Field, Popover, Menu, Select), Kobalte and the Base UI Solid ports, the `@dnd-kit/dom` sortable (`@dnd-kit/solid` and `@dnd-kit/react` 0.5.3), floating-ui and TanStack Virtual.
@@ -76,9 +194,16 @@ The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`,
 
 ## 0.12.1
 
-### Patch Changes
+### Breaking changes
 
-- 9100adc: The mutation batch is one binary byte array instead of JSON text. `createMutationQueue` writes each op as it is enqueued through `WireWriter` (internal to `@ghia/native`, `js/wire.ts`; not exported) into reused buffers, with no tuple per op and no `JSON.stringify` of the batch, and `applyBatch(bytes: Uint8Array)` on the live, test and wasm renderers decodes it in place (`batch::wire`), so the napi call transcodes no string and the decoder allocates nothing per op beyond what it keeps. The format is specified in `docs/reference.md` ("Wire format"). **Breaking for anything that calls `applyBatch` itself**: it takes the bytes, not a JSON string; tests that built or parsed a batch use `encodeWireBatchForTest` and `decodeWireBatchForTest` from `@ghia/native/testing`. `MutationRenderer.setStyle` takes the style's JSON text as an optional third argument, which Solid passes from the text its write comparison already made, so a written style is stringified once. A failed batch is put back in front of what was enqueued since, and a style native rejects is cut out of the batch by its byte range, as before.
+- **`applyBatch` takes the bytes of the mutation batch, not a JSON string.** This breaks anything that calls `applyBatch` itself on the live, test or wasm renderer; tests that built or parsed a batch use `encodeWireBatchForTest` and `decodeWireBatchForTest` from `@ghia/native/testing`. `MutationRenderer.setStyle` takes the style's JSON text as an optional third argument, which Solid passes from the text its write comparison already made, so a written style is stringified once.
+
+### Performance
+
+- The mutation batch is one binary byte array instead of JSON text. `createMutationQueue` writes each op as it is enqueued through `WireWriter` (internal to `@ghia/native`, `js/wire.ts`; not exported) into reused buffers, with no tuple per op and no `JSON.stringify` of the batch, and `applyBatch(bytes: Uint8Array)` on the live, test and wasm renderers decodes it in place (`batch::wire`), so the napi call transcodes no string and the decoder allocates nothing per op beyond what it keeps. The format is specified in `docs/reference.md` ("Wire format"). A failed batch is put back in front of what was enqueued since, and a style native rejects is cut out of the batch by its byte range, as before.
+
+### Dependencies
+
 - Updated dependencies [9100adc]
 - Updated dependencies [9100adc]
 - Updated dependencies [a1ba92a]
@@ -109,15 +234,28 @@ The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`,
 
 ## 0.12.0
 
-### Minor Changes
+### Breaking changes
 
-- 9d68f3b: `solid({ include, exclude })` compiles only the files it names, for an app that also uses `react()` from `@ghia/react/vite`.
-- 4c7d9c6: The Bun preload and `@ghia/solid/bun-plugin` are removed, along with the compile cache and the Babel dependencies they used: run Solid apps with `ghia dev` and `ghia build` from `ghia`. `solid()` from `@ghia/solid/vite` compiles JSX for the universal renderer (`moduleName: "@ghia/solid"`) with Solid HMR in `ghia dev`, so an edited component updates without a reload, and it also compiles under vitest. `@ghia/solid` re-exports `isWebBuild`. Apps need `@ghia/native` as a direct dependency. In `ghia dev`, a full reload no longer logs `You appear to have multiple instances of Solid`: `solid()` resets the flag at the start of each run, and a real second copy of `solid-js` inside one run still warns. `render()` reports native errors to the `onUncaughtError` of its latest call instead of the first one's.
+- **The Bun preload and `@ghia/solid/bun-plugin` are removed, along with the compile cache and the Babel dependencies they used:** run Solid apps with `ghia dev` and `ghia build` from `ghia`. Apps need `@ghia/native` as a direct dependency.
 
-### Patch Changes
+### Features
 
-- 9bce77d: A node Solid removes is out of the native tree at once, as `removeChild` takes it out of the document, and a layout read in the same turn no longer lays out the removed subtree. The host used to detach it on the JS side and tell native only at the flush, so `getBoundingClientRect` or `scrollHeight` right after a keyed `<Show>` swap built and laid out the old subtree beside the new one (the mailbox navigate proxy: a detail scroller with twice its children in the pass, 56 elements built there for 40 now). `removeHostNode` now queues a new `detachChild` op, which takes the element out of its parent and keeps it, with its state, for an insertion that puts it back; the element is still destroyed at the flush if it stayed out.
-- f6b9458: Solid no longer queues a `setStyle` or `setCustomProp` for a value the element already has. An effect that ran again and built an equal style object (a row whose style reads `selected`, an `aria-label` and a style in one effect) sent the whole style to native every time: in the bench's mailbox app, 180 identical `setStyle` ops and 27 KB of JSON for a key that changed nothing. The host remembers the JSON it last wrote for each element's style and custom props and writes only what differs from it, so a style object changed in place and passed again is still written, and so is a key order that differs. A prop never written is written, and a new native element starts with nothing written. `@ghia/native/host` exports `SentWrites`.
+- `solid()` from `@ghia/solid/vite` compiles JSX for the universal renderer (`moduleName: "@ghia/solid"`) with Solid HMR in `ghia dev`, so an edited component updates without a reload, and it also compiles under vitest.
+- `solid({ include, exclude })` compiles only the files it names, for an app that also uses `react()` from `@ghia/react/vite`.
+- `@ghia/solid` re-exports `isWebBuild`.
+
+### Performance
+
+- Solid no longer queues a `setStyle` or `setCustomProp` for a value the element already has. An effect that ran again and built an equal style object (a row whose style reads `selected`, an `aria-label` and a style in one effect) sent the whole style to native every time: in the bench's mailbox app, 180 identical `setStyle` ops and 27 KB of JSON for a key that changed nothing. The host remembers the JSON it last wrote for each element's style and custom props and writes only what differs from it, so a style object changed in place and passed again is still written, and so is a key order that differs. A prop never written is written, and a new native element starts with nothing written. `@ghia/native/host` exports `SentWrites`.
+
+### Fixes
+
+- In `ghia dev`, a full reload no longer logs `You appear to have multiple instances of Solid`: `solid()` resets the flag at the start of each run, and a real second copy of `solid-js` inside one run still warns.
+- `render()` reports native errors to the `onUncaughtError` of its latest call instead of the first one's.
+- A node Solid removes is out of the native tree at once, as `removeChild` takes it out of the document, and a layout read in the same turn no longer lays out the removed subtree. The host used to detach it on the JS side and tell native only at the flush, so `getBoundingClientRect` or `scrollHeight` right after a keyed `<Show>` swap built and laid out the old subtree beside the new one (the mailbox navigate proxy: a detail scroller with twice its children in the pass, 56 elements built there for 40 now). `removeHostNode` now queues a new `detachChild` op, which takes the element out of its parent and keeps it, with its state, for an insertion that puts it back; the element is still destroyed at the flush if it stayed out.
+
+### Dependencies
+
 - Updated dependencies [8fcd806]
 - Updated dependencies [7528529]
 - Updated dependencies [8fe6300]
@@ -171,11 +309,17 @@ The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`,
 
 ## 0.11.1
 
-### Patch Changes
+### Features
 
-- a2d57e7: A window opened with `GPUIX_BACKGROUND=1` in the environment emulates focus, as Chrome does with CDP's `Emulation.setFocusEmulationEnabled`: it behaves as active for `onFocus`, `onBlur`, `:focus-visible`, the caret and `focusElement`, without becoming the key window or activating the app. Until now a window opened behind other apps (`focus: false`) fired no focus event and drew no caret while typed text still arrived. A window without the variable is unchanged: a window that is not active fires no focus events, as in Chrome, and they fire once it is activated. The library reads the variable once, when the window opens; apps that map it to `focus: false` keep doing that.
-- 05f72cd: `dragBy`, `dragTo` and `mouse.drag` drive a drag on a live window when the app drives its own renderer in-process (`connectTest(liveRendererAsTest(renderer))`). The live renderer delivers a press and a release to the page at once but a move only on a later turn of the event loop, so a drag stepped in one synchronous burst reached the page as press, release, then the moves, and a handle that ends its drag on `pointerup` never moved. `liveRendererAsTest` now waits one event-loop turn after every input it simulates, and `TestAutomationRenderer`'s input methods may return a promise.
-- 6a78fe8: `kind: 'panel'` in the window options opens the window as a non-activating panel: a normal window (titlebar, resizing, buttons, appearance, background, normal window level) that can be the key window without activating the app. With `focus: true` it is key while the frontmost app stays frontmost, so a capture can show the key look (glass tints, accent colours, traffic lights) that a `focus: false` window never has. `renderer.isWindowKey()` reads whether AppKit reports the window as key. An unknown `kind` throws; `'normal'` is the default, and on Windows and Linux a panel is a normal window. A panel takes the keyboard like any key window, so open one only for a capture and close it right after.
+- A window opened with `GPUIX_BACKGROUND=1` in the environment emulates focus, as Chrome does with CDP's `Emulation.setFocusEmulationEnabled`: it behaves as active for `onFocus`, `onBlur`, `:focus-visible`, the caret and `focusElement`, without becoming the key window or activating the app. Until now a window opened behind other apps (`focus: false`) fired no focus event and drew no caret while typed text still arrived. A window without the variable is unchanged: a window that is not active fires no focus events, as in Chrome, and they fire once it is activated. The library reads the variable once, when the window opens; apps that map it to `focus: false` keep doing that.
+- `kind: 'panel'` in the window options opens the window as a non-activating panel: a normal window (titlebar, resizing, buttons, appearance, background, normal window level) that can be the key window without activating the app. With `focus: true` it is key while the frontmost app stays frontmost, so a capture can show the key look (glass tints, accent colours, traffic lights) that a `focus: false` window never has. `renderer.isWindowKey()` reads whether AppKit reports the window as key. An unknown `kind` throws; `'normal'` is the default, and on Windows and Linux a panel is a normal window. A panel takes the keyboard like any key window, so open one only for a capture and close it right after.
+
+### Fixes
+
+- `dragBy`, `dragTo` and `mouse.drag` drive a drag on a live window when the app drives its own renderer in-process (`connectTest(liveRendererAsTest(renderer))`). The live renderer delivers a press and a release to the page at once but a move only on a later turn of the event loop, so a drag stepped in one synchronous burst reached the page as press, release, then the moves, and a handle that ends its drag on `pointerup` never moved. `liveRendererAsTest` now waits one event-loop turn after every input it simulates, and `TestAutomationRenderer`'s input methods may return a promise.
+
+### Dependencies
+
 - Updated dependencies [52fd03d]
 - Updated dependencies [a2d57e7]
 - Updated dependencies [d70feb5]
@@ -189,11 +333,9 @@ The tree is now a DOM. Every window root is `<html>` with `<head>` and `<body>`,
 
 ## 0.11.0
 
-### Minor Changes
+First Ghia release, forked from gpuix 0.10.0. See docs/fork/index.md for what changed.
 
-- c4437f3: First Ghia release, forked from gpuix 0.10.0. See docs/fork/index.md for what changed.
-
-### Patch Changes
+### Dependencies
 
 - Updated dependencies [c4437f3]
   - @ghia/native@0.11.0
