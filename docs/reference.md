@@ -733,7 +733,8 @@ Run it with `ghia dev`. A save applies a component edit as a hot update
 the edit. `ghia build` writes `dist/main.js` and compiles it into `dist/app`,
 one executable that embeds Bun and the native addon (about 128 MB). `ghia build
 --no-compile` writes `dist/main.js` plus the Worker files and chunks, which run with plain `bun`, and
-`ghia({ entry, compile: { outfile } })` moves the binary.
+`ghia({ entry, compile: { outfile } })` moves the binary, and `ghia({ appId })` names the app's data directory, `~/Library/Application Support/<appId>`, where
+`localStorage` keeps its file ([`location`, `history` and storage](#location-history-and-storage)); it defaults to the `name` in `package.json`.
 
 ```bash
 ghia dev
@@ -786,8 +787,8 @@ children; `getHydrationKey` reads Solid's hydration counter; `renderToString`, `
 `renderToStream` log "is not supported in the browser, returning undefined" and return `undefined`;
 `RequestContext` is a symbol. `delegateEvents` and `clearDelegatedEvents` do nothing, because compiled JSX attaches
 every handler to its element and never produces delegated `$$event` handlers. `hydrate` throws: there is no
-server-rendered DOM in a Ghia window. This is what lets `@solidjs/router` and `@solidjs/meta` compile from their JSX source. They do not run yet for want of DOM members
-Ghia lacks: the router reads `window.history` when it is imported, and `@solidjs/meta`'s `Title` creates a `<title>` element
+server-rendered DOM in a Ghia window. This is what lets `@solidjs/router` and `@solidjs/meta` compile from their JSX source. `@solidjs/router` runs, its `<Router>` on
+[`window.history`](#location-history-and-storage); `@solidjs/meta`'s `Title` does not yet, for want of a `<title>` element
 (see [deviations](./fork/deviations.md#solid-adapter)).
 
 A module that imports a name `@ghia/solid/web` does not export (the helpers only the DOM compiler's output calls:
@@ -5442,8 +5443,9 @@ delivery, as in the standard. With no observer alive each hook is one integer ch
 gets a field. Code that changes a host tree itself calls `queueChildListMutation`,
 `queueAttributeMutation` or `queueCharacterDataMutation` from `@ghia/native/host` (and `recordAttributeChanges` around a prop write), whether or not an observer is alive: `queueChildListMutation` and `recordAttributeChanges` also move the counter that tells a live `getElementsBy…` list to search again
 ([deviations](fork/deviations.md#observers-and-content-visibility) for what is not reported).
-Nothing else is installed: `location`, `localStorage` and the rest
-are missing, so reading them throws a `ReferenceError` or gives `undefined`. The browser (wasm) build runs in a real page and installs nothing.
+`location`, `history`, `localStorage` and `sessionStorage` are installed too
+([below](#location-history-and-storage)). Nothing else is: a missing API
+throws a `ReferenceError` or gives `undefined`. The browser (wasm) build runs in a real page and installs nothing.
 Installing twice is harmless. `isWebBuild`, exported by the adapters and
 `@ghia/native/host`, is `true` on the browser build and `false` on the native
 build; use it to tell them apart, not `typeof window`.
@@ -5494,6 +5496,51 @@ laid out first, so an element mounted in the same turn is found, and an element 
 that is not finite throws a `TypeError`, and both throw before a root is mounted.
 
 `document.caretPositionFromPoint(x, y)`, `document.caretRangeFromPoint(x, y)`, `document.getSelection()` and `window.getSelection()`, and the `selectionchange` event they fire are described under [Editable content](#editable-content): [Selection](#selection) and [Range and StaticRange](#range-and-staticrange).
+
+### `location`, `history` and storage
+
+A Ghia app has one document and no page loads, so the URL is state that code owns, as in a single-page app: `window.location`,
+`window.history`, `localStorage` and `sessionStorage` are installed with the other web globals, and a router written for the
+browser (`@solidjs/router`, TanStack Router, React Router) runs unchanged on them. `Location`, `History`, `Storage`,
+`PopStateEvent` and `HashChangeEvent` are globals too; none of the first three has a public constructor.
+
+- **`location`** has the members of a URL: `href`, `origin`, `protocol`, `host`, `hostname`, `port`, `pathname`, `search`, `hash`,
+  `toString()`, `assign()`, `replace()` and `reload()`. The URL starts at `http://localhost/`, an http origin so that
+  `new URL(link.href).origin === location.origin` holds for a link a router builds, and `history.pushState` moves it.
+  Setting `window.location` is setting `location.href`.
+- **A fragment navigation works as it does in a browser.** `location.hash = 'x'`, `assign('#x')`, `href = '#x'` and
+  `replace('#x')` (and a URL that differs from the current one in its fragment only) change the URL at once, add a history entry
+  (`replace()` replaces the current one), and fire `popstate` and then `hashchange` in a later task when the fragment changed.
+  Setting `hash` to `''` leaves an empty fragment (`http://localhost/#`), which `location.hash` reads as `''`.
+- **Any other navigation throws.** Assigning a URL with another path, query or origin, setting `pathname`, `search`, `host`
+  and the like, and `reload()` would load a document, which Ghia has not: they throw a `DOMException` named `NotSupportedError`
+  whose message says to use `history.pushState`. A URL that does not parse throws `SyntaxError`.
+  `<a href>` does not navigate either ([deviations](fork/deviations.md#location-history-and-storage)).
+- **`history`** is a session history in memory: a list of entries of `{ url, state }`, kept for the life of the process.
+  `length`, `state`, `scrollRestoration` (`'auto'` or `'manual'`, stored; other values are ignored) and
+  `pushState(state, unused, url?)` and `replaceState(state, unused, url?)`, which fire no event. `state` is cloned with
+  `structuredClone` (a value it cannot clone throws `DataCloneError`), and `history.state` is that clone. The `url` is
+  resolved against the current URL; one of another origin throws `SecurityError`. A push discards the entries after the
+  current one.
+- **`back()`, `forward()` and `go(n)` traverse in a later task**, not synchronously, and `n` counts from the entry that is
+  current when the task runs. Past either end they do nothing. A traversal fires `popstate` with the entry's `state`,
+  and then `hashchange` (`oldURL`, `newURL`) when the fragment of the URL changed. `go(0)` does nothing, where a browser reloads.
+- **`popstate` and `hashchange`** go to `window`: `addEventListener` and `onpopstate` / `onhashchange` both work. The events
+  are `PopStateEvent` (`state`) and `HashChangeEvent` (`oldURL`, `newURL`); neither bubbles nor can be cancelled, and `target` is `window`.
+- **`sessionStorage`** is a `Storage` in memory, for the life of the process. A `Storage` has `getItem`, `setItem`, `removeItem`,
+  `clear`, `key(n)` and `length`; keys and values are strings (anything else is converted, a `Symbol` throws `TypeError`),
+  and items read and write as properties (`localStorage.theme = 'dark'`, `delete localStorage.theme`, `Object.keys(localStorage)`),
+  where a name that is a member (`getItem`, `length`) reads as the member. `setItem` throws `QuotaExceededError` when the keys and values
+  would hold more than 5 MiB of UTF-16 code units (5 * 1024 * 1024).
+- **`localStorage`** is the same `Storage`, kept in `~/Library/Application Support/<appId>/Local Storage/localStorage.json`.
+  The file is read when `localStorage` is first used and written whole after every change (to a temporary file that is renamed
+  over it, synchronously, since the API is), so a crash leaves the old content or the new. A change that cannot be written
+  throws its error and is undone; a file that is not a JSON object of strings throws, naming the file. There is one file per
+  app id and no `storage` event: Ghia has one document. Two processes with the same app id overwrite each other.
+- **The app id** is the `appId` option of `ghia()` (a directory name: no slash), and by default the `name` of the
+  `package.json` in the Vite root (`@scope/app` is `scope-app`). `ghia dev` and a built app (`ghia build`, compiled or not)
+  get it from the plugin, which sets it before the app's first module runs. With no app id (a script run
+  with Bun, a test, an app with neither option nor package name) `localStorage` is in memory for the process.
 
 ### `getComputedStyle(element, pseudoElt?)`
 
