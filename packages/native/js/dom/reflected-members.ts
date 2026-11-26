@@ -1,6 +1,6 @@
 /**
  * The members of an element that are its attributes under another name or a fixed answer:
- * `hidden`, `tabIndex`, `disabled`, `htmlFor`, `type`, `contentEditable`, `isContentEditable`, `shadowRoot` and `assignedSlot`, and the `start` and `reversed` of an `<ol>` (`list-members.ts`). They read and write
+ * `hidden`, `tabIndex`, `disabled`, `htmlFor`, `type` (of `<input>`, `<button>`, `<textarea>` and `<a>`), `contentEditable`, `isContentEditable`, `shadowRoot` and `assignedSlot`, and the `start` and `reversed` of an `<ol>` (`list-members.ts`). They read and write
  * through `getAttribute` and `setAttribute`, so they follow a prop a framework committed and
  * a write reaches native as the attribute would.
  */
@@ -29,7 +29,7 @@ const DISABLEABLE_TAGS: ReadonlySet<string> = new Set(["button", "fieldset", "in
 
 const LABEL_TAG: ReadonlySet<string> = new Set(["label"])
 
-const TYPED_TAGS: ReadonlySet<string> = new Set(["button", "input", "textarea"])
+const TYPED_TAGS: ReadonlySet<string> = new Set(["a", "button", "input", "textarea"])
 
 const BUTTON_TYPES: ReadonlySet<string> = new Set(["submit", "reset", "button"])
 
@@ -116,6 +116,7 @@ export function defineReflectedMembers(target: object): void {
       TYPED_TAGS,
       (element) => {
         if (element.localName === "textarea") return "textarea"
+        if (element.localName === "a") return element.getAttribute("type") ?? ""
         if (element.localName === "input") return normalizedInputType(element.getAttribute("type"))
         const keyword = (element.getAttribute("type") ?? "").toLowerCase()
         return BUTTON_TYPES.has(keyword) ? keyword : "submit"
