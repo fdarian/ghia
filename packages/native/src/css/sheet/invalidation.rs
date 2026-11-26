@@ -246,7 +246,9 @@ impl Invalidation {
                     Simple::TreeState(state) => self.tree_states.read(*state, reach),
                     Simple::Position(position) => self.positional.read(*position, reach),
                     // The state of the subject of the rule is its condition (`states.rs`); every other is live.
-                    Simple::State(state) if position != 0 || !tail.is_empty() => self.live_states.read(*state, reach),
+                    Simple::State(state) if position != 0 || !tail.is_empty() => {
+                        self.live_states.read(*state, reach, &compound.simples, hint.filter(|_| position == 0))
+                    }
                     Simple::Tag(_) | Simple::Root | Simple::Host | Simple::PseudoElement | Simple::State(_) => {}
                 }
             }

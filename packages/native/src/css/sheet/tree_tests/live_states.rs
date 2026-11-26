@@ -87,7 +87,7 @@ fn moving_between_the_children_of_a_hovered_card_matches_nothing_again() {
     doc.flush();
     hover(&mut doc, Some(rows[0]));
     assert!(titles.iter().all(|title| red(&doc, *title)));
-    assert_eq!(hover(&mut doc, Some(rows[1])), 2, "row 0's `p` leaves, row 1's `p` enters; the card stays");
+    assert_eq!(hover(&mut doc, Some(rows[1])), 0, "the rows are no `.card`, and the card stays hovered");
     assert_eq!(hover(&mut doc, Some(titles[1])), 0, "a leaf has no descendant to reach");
 }
 
@@ -314,4 +314,63 @@ fn a_tree_change_while_hovered_matches_as_the_state_says() {
     let late = doc.classed("p", card, "title");
     doc.flush();
     assert!(red(&doc, late), "an element that mounts under a hovered card matches at once");
+}
+
+#[test]
+fn only_an_element_that_can_hold_the_compound_marks_its_reach() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".group:hover .x { color: red }");
+    // Twenty levels of plain ancestors, each with a row of siblings that a mark of everything below would match.
+    let mut parent = ROOT;
+    let mut spine = Vec::new();
+    for _ in 0..20 {
+        parent = doc.classed("div", parent, "level");
+        doc.run(10, "p", parent, "row");
+        spine.push(parent);
+    }
+    let group = doc.classed("div", parent, "group");
+    let xs = doc.run(5, "p", group, "x");
+    let other = doc.classed("div", parent, "plain");
+    let elsewhere = doc.classed("p", other, "x");
+    doc.flush();
+
+    let rematched = hover(&mut doc, Some(xs[0]));
+    assert_eq!(rematched, 5, "the chain is 22 elements deep and only the `.group` marks its descendants");
+    assert!(xs.iter().all(|x| red(&doc, *x)) && !red(&doc, elsewhere));
+
+    assert_eq!(hover(&mut doc, Some(elsewhere)), 5, "`.group` leaves: its five descendants, and nothing for the others that enter");
+    assert!(xs.iter().all(|x| !red(&doc, *x)));
+    assert_eq!(hover(&mut doc, None), 0, "no `.group` is left to leave");
+}
+
+#[test]
+fn a_compound_that_names_no_feature_is_held_by_any_element() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ":hover > .x { color: red } .peer:hover ~ .y { top: 1px }");
+    let parent = doc.classed("div", ROOT, "plain");
+    let x = doc.classed("p", parent, "x");
+    doc.flush();
+    hover(&mut doc, Some(parent));
+    assert!(red(&doc, x));
+}
+
+#[test]
+fn each_state_and_reach_keeps_its_own_holders() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, ".group:hover .x { color: red } .peer:hover + .y { top: 1px }");
+    let group = doc.classed("div", ROOT, "group");
+    let x = doc.classed("p", group, "x");
+    let peer = doc.classed("div", ROOT, "peer");
+    let y = doc.classed("p", ROOT, "y");
+    let plain = doc.classed("div", ROOT, "plain");
+    let after = doc.classed("p", ROOT, "y");
+    doc.flush();
+    hover(&mut doc, Some(peer));
+    assert_eq!(top(&doc, y), Some(1.0));
+    assert!(!red(&doc, x));
+    hover(&mut doc, Some(plain));
+    assert_eq!(top(&doc, y), None);
+    assert_eq!(top(&doc, after), None);
+    hover(&mut doc, Some(x));
+    assert!(red(&doc, x));
 }

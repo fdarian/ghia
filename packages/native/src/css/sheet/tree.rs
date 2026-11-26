@@ -215,13 +215,26 @@ impl RetainedTree {
             }
             return Dirty::Clean;
         }
-        let read = self.sheets.index.invalidation.live_states;
-        let changed = self.sheets.live.update(inputs, &read);
+        let changed = self.sheets.live.update(inputs, &self.sheets.index.invalidation.live_states);
         if changed.is_empty() {
             return Dirty::Clean;
         }
         if self.sheets.atoms_fresh {
-            for (id, reach) in changed {
+            let marks: Vec<(u64, Reach)> = changed
+                .into_iter()
+                .filter_map(|(id, state)| Some((id, self.elements.get(&id)?, state)))
+                .flat_map(|(id, element, state)| {
+                    self.sheets
+                        .index
+                        .invalidation
+                        .live_states
+                        .reads(state)
+                        .iter()
+                        .filter(|read| read.can_hold(&self.sheets, element))
+                        .map(move |read| (id, read.reach))
+                })
+                .collect();
+            for (id, reach) in marks {
                 self.sheets.mark(id, reach);
             }
         }

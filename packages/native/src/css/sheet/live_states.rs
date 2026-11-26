@@ -14,26 +14,69 @@
 
 use rustc_hash::FxHashMap;
 
+use crate::retained_tree::RetainedElement;
+
+use super::document::StyleSheets;
 use super::invalidation::Reach;
+use super::reload::Features;
+use super::selector::Simple;
 use super::states::State;
+
+/// One place a state is read live: the reach of the selectors that read it from a compound the
+/// same features describe.
+pub struct LiveRead {
+    pub reach: Reach,
+    /// What an element that holds the compound with the state has to have (an id, a class, an
+    /// attribute or a tag, as a reload finds elements by), which is how an element that enters or
+    /// leaves the state is told from the ones that cannot make a rule match: with
+    /// `.group:hover .x` only a `.group` does.
+    holders: Features,
+    /// The compound names none of them (`:hover .x`): any element can hold it.
+    any: bool,
+}
+
+impl LiveRead {
+    /// Whether the element can be the one a selector of this read has the state on.
+    pub(super) fn can_hold(&self, sheets: &StyleSheets, element: &RetainedElement) -> bool {
+        self.any || self.holders.reach(sheets, element)
+    }
+}
 
 /// Where each state is read live, by the selectors of a document: empty for a state no selector
 /// reads outside its subject.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
-pub struct LiveStateReach([Reach; State::COUNT]);
+#[derive(Default)]
+pub struct LiveStateReach([Vec<LiveRead>; State::COUNT]);
 
 impl LiveStateReach {
-    pub(super) fn read(&mut self, state: State, reach: Reach) {
-        self.0[state.index()] |= reach;
+    /// `compound` is the one that holds the state, `hint` the compound that holds the argument it
+    /// is in when it names a feature the argument's subject has too.
+    pub(super) fn read(&mut self, state: State, reach: Reach, compound: &[Simple], hint: Option<&[Simple]>) {
+        let reads = &mut self.0[state.index()];
+        let at = reads.iter().position(|read| read.reach == reach).unwrap_or_else(|| {
+            reads.push(LiveRead { reach, holders: Features::default(), any: false });
+            reads.len() - 1
+        });
+        let read = &mut reads[at];
+        if read.any {
+            return;
+        }
+        if read.holders.add_compound(compound).is_none() && hint.and_then(|hint| read.holders.add_compound(hint)).is_none() {
+            read.any = true;
+        }
     }
 
     /// Whether no selector reads any state live.
     pub fn is_empty(&self) -> bool {
-        self.0.iter().all(|reach| reach.is_empty())
+        self.0.iter().all(Vec::is_empty)
     }
 
+    pub(super) fn reads(&self, state: State) -> &[LiveRead] {
+        &self.0[state.index()]
+    }
+
+    /// Everywhere a state is read from, whoever holds it.
     pub fn state(&self, state: State) -> Reach {
-        self.0[state.index()]
+        self.reads(state).iter().fold(Reach::default(), |all, read| all | read.reach)
     }
 }
 
@@ -107,16 +150,16 @@ impl LiveStates {
 
     /// Takes `inputs` as what each state holds now, and gives the elements that entered or left each
     /// state that is `read` somewhere. A state nothing reads is not kept.
-    pub(super) fn update(&mut self, inputs: &LiveInputs<'_>, read: &LiveStateReach) -> Vec<(u64, Reach)> {
+    pub(super) fn update(&mut self, inputs: &LiveInputs<'_>, read: &LiveStateReach) -> Vec<(u64, State)> {
         let mut changed = Vec::new();
         for state in STATES {
-            let reach = read.state(state);
             let Some(now) = inputs.of(state) else {
                 continue;
             };
             let held = &mut self.held[state.index()];
-            if reach.is_empty() || held.as_slice() == now {
-                if reach.is_empty() && !held.is_empty() {
+            let unread = read.reads(state).is_empty();
+            if unread || held.as_slice() == now {
+                if unread && !held.is_empty() {
                     self.drop_state(state);
                 }
                 continue;
@@ -129,11 +172,11 @@ impl LiveStates {
                         self.bits.remove(left);
                     }
                 }
-                changed.push((*left, reach));
+                changed.push((*left, state));
             }
             for entered in now.iter().filter(|id| !held.contains(id)) {
                 *self.bits.entry(*entered).or_default() |= bit;
-                changed.push((*entered, reach));
+                changed.push((*entered, state));
             }
             *held = now.to_vec();
         }
