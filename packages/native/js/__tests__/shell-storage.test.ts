@@ -138,7 +138,8 @@ describe("localStorage of an app id", () => {
     rmSync(directory, { recursive: true, force: true })
   })
 
-  it("lives in Application Support and survives loading the module again", async () => {
+  // Bun's os.homedir() does not follow a write to process.env.HOME; the built app's path under Bun is covered by packages/ghia's app-id test.
+  it.skipIf(typeof Bun !== "undefined")("lives in Application Support and survives loading the module again", async () => {
     Reflect.set(globalThis, APP_ID_KEY, "demo-app")
     const first = await import("../shell/storage.js")
     first.getLocalStorage().setItem("token", "abc")
