@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::css::media_query::MediaEnvironment;
 use crate::retained_tree::{Dirty, RetainedElement, RetainedTree};
 
 use super::atoms::{Atom, Atoms};
@@ -96,6 +97,13 @@ impl RetainedTree {
         if self.sheets.enabled {
             self.sheets.sources_dirty = true;
         }
+    }
+
+    /// What the window reports to the media queries of the rules. Returns whether a query flipped,
+    /// in which case the next flush loads the sheets again and matches every element
+    /// (`take_dirty_restyled` does both and says what to draw).
+    pub fn set_media_environment(&mut self, environment: MediaEnvironment) -> bool {
+        self.sheets.set_media_environment(environment)
     }
 
     // Hooks. Each runs only while `sheets.enabled`, except the one for a created `<style>`.
@@ -362,7 +370,7 @@ impl RetainedTree {
             .collect();
         connected.sort();
         let texts = self.sheets.texts_with(connected.iter().map(|(_, id)| self.text_content(*id)).collect());
-        if texts == self.sheets.loaded() {
+        if texts == self.sheets.loaded() && !self.sheets.media_flipped {
             return;
         }
         let names = self.sheets.atoms.len();

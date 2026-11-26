@@ -874,6 +874,8 @@ impl TestGpuixRenderer {
                             selection_clone,
                             pointer_requests_clone,
                         );
+                        // The OS's preferences are the machine's; the test window starts with none.
+                        view.set_media_features(crate::media::MediaFeatures::default());
                         view.observe_appearance(window, cx);
                         view.observe_viewport(window, cx);
                         view.force_scroller_style(crate::scrollbar::ScrollerStyle::Overlay);
@@ -1993,15 +1995,20 @@ impl TestGpuixRenderer {
         reduced_motion: Option<bool>,
         increased_contrast: Option<bool>,
         forced_colors: Option<bool>,
-    ) {
-        let event = self
-            .media
-            .lock()
-            .unwrap()
-            .set(reduced_motion, increased_contrast, forced_colors);
+    ) -> Result<()> {
+        let (event, features) = {
+            let mut media = self.media.lock().unwrap();
+            let event = media.set(reduced_motion, increased_contrast, forced_colors);
+            (event, media.features)
+        };
         if let Some(event) = event {
             self.events.lock().unwrap().push(event);
         }
+        // The stylesheets' media queries follow the preferences whether or not JS listens.
+        update_view_or_defer(move |view, window, cx| {
+            view.set_media_features(features);
+            view.sync_sheet_media(window, cx);
+        })
     }
 
     /// Sets the macOS "Show scroll bars" setting this window reports: `"overlay"` (Automatically

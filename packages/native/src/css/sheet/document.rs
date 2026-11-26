@@ -11,12 +11,14 @@ use std::sync::{Arc, Weak};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::css::media_query::MediaEnvironment;
 use crate::retained_tree::{InternedStyle, StyleTable};
 use crate::style::StyleDesc;
 
 use super::atoms::{Atom, Atoms};
 use super::cascade::{merge, MatchedInterner, MatchedRules};
-use super::index::RuleIndex;
+use super::conditions::{self, Watched};
+use super::index::{DocRule, RuleIndex};
 use super::invalidation::Reach;
 use super::layers::Layers;
 use super::parse_cache::{ParseCache, ParsedRule};
@@ -66,6 +68,15 @@ pub struct StyleSheets {
     pub(crate) constructed: FxHashMap<u64, String>,
     pub(crate) adopted: Vec<u64>,
     pub(crate) index: RuleIndex,
+    /// What the window reports to the media queries of the rules, `None` until it has. It is the
+    /// window's and not the sheets', so it outlives them (`wind_down` keeps it).
+    pub(crate) media: Option<MediaEnvironment>,
+    /// The media queries the loaded rules stand under, with the answers the index was built on.
+    watched: Watched,
+    /// A media query answers differently than the index was built on: the sheets are loaded again
+    /// even when their text is unchanged, and the elements are matched again, since the old
+    /// numbering of the rules says nothing about the new index.
+    pub(crate) media_flipped: bool,
     /// The top-level rules `index` was built from, when every source was cut into them.
     loaded_units: Option<Vec<Arc<ParsedRule>>>,
     pub(crate) interner: MatchedInterner,
@@ -104,6 +115,9 @@ impl Default for StyleSheets {
             constructed: FxHashMap::default(),
             adopted: Vec::new(),
             index: RuleIndex::default(),
+            media: None,
+            watched: Watched::default(),
+            media_flipped: false,
             loaded_units: None,
             interner: MatchedInterner::default(),
             validator: Validator::default(),
@@ -202,13 +216,38 @@ impl StyleSheets {
         for skipped in assembled.unsupported {
             self.warn_skipped(skipped);
         }
-        let index = RuleIndex::build(&assembled.rules, &layers.order(), self.style);
+        let environment_flipped = std::mem::take(&mut self.media_flipped);
+        self.watched = Watched::of(&assembled.rules, self.media.as_ref());
+        let applying: Vec<DocRule> = if self.watched.is_empty() {
+            assembled.rules
+        } else {
+            let environment = self.media.as_ref();
+            assembled.rules.into_iter().filter(|rule| conditions::holds(rule.conditions.as_ref(), environment)).collect()
+        };
+        let index = RuleIndex::build(&applying, &layers.order(), self.style);
         let old_units = std::mem::replace(&mut self.loaded_units, assembled.units);
         let old_index = std::mem::replace(&mut self.index, index);
         match (old_units, &self.loaded_units) {
-            (Some(old), Some(new)) => Reload::between(&old, new, &old_index, &self.index),
+            (Some(old), Some(new)) if !environment_flipped => Reload::between(&old, new, &old_index, &self.index, self.media.as_ref()),
             _ => None,
         }
+    }
+
+    /// Tells the sheets what the window reports to media queries. Returns whether a query the
+    /// loaded rules stand under now answers differently, which marks the sheets to be loaded again
+    /// (a flush does it): the rules that apply changed. A change that flips nothing costs one
+    /// evaluation of each distinct query, which is what a window drag pays.
+    pub(crate) fn set_media_environment(&mut self, environment: MediaEnvironment) -> bool {
+        if self.media == Some(environment) {
+            return false;
+        }
+        self.media = Some(environment);
+        if !self.watched.update(&environment) {
+            return false;
+        }
+        self.media_flipped = true;
+        self.sources_dirty = true;
+        true
     }
 
     fn warn_skipped(&mut self, skipped: String) {
@@ -292,6 +331,8 @@ impl StyleSheets {
         self.loaded_units = None;
         // Its rules hold atoms of the interner replaced below.
         self.parse_cache.clear();
+        self.watched = Watched::default();
+        self.media_flipped = false;
         self.logged_skips.clear();
         self.logged_folds.clear();
         self.skip_log_capped = false;

@@ -14,7 +14,10 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
+use crate::css::media_query::MediaEnvironment;
+
 use super::atoms::Atoms;
+use super::conditions::{self, Conditions};
 use super::index::{DocRule, RuleBody};
 use super::layers::{LayerId, Layers};
 use super::parser::parse_sheet;
@@ -31,6 +34,7 @@ struct LocalLayer(LayerId);
 struct LocalRule {
     body: Arc<RuleBody>,
     layer: Option<LocalLayer>,
+    conditions: Option<Arc<Conditions>>,
 }
 
 /// What one top-level rule parsed to, with its declarations already judged by the validator.
@@ -43,8 +47,9 @@ pub(super) struct ParsedRule {
 }
 
 impl ParsedRule {
-    pub(super) fn len(&self) -> usize {
-        self.rules.len()
+    /// How many of the rules apply in `environment`, which is how many of them the index holds.
+    pub(super) fn active_len(&self, environment: Option<&MediaEnvironment>) -> usize {
+        self.rules.iter().filter(|rule| conditions::holds(rule.conditions.as_ref(), environment)).count()
     }
 }
 
@@ -142,6 +147,7 @@ impl ParseCache {
                 assembled.rules.extend(parsed.rules.iter().map(|rule| DocRule {
                     body: rule.body.clone(),
                     layer: rule.layer.map(|layer| mapped[layer.0.index()]),
+                    conditions: rule.conditions.clone(),
                 }));
                 assembled.unsupported.extend(parsed.unsupported.iter().cloned());
                 if let Some(units) = &mut assembled.units {
@@ -166,18 +172,18 @@ fn parse_whole(
     layers: &mut Layers,
     validator: &mut Validator,
 ) -> (Vec<DocRule>, Vec<String>) {
-    let mut sheet = parse_sheet(text, atoms, layers);
+    let mut sheet = parse_sheet(text, atoms, layers, validator);
     validator.filter(&mut sheet.rules);
     (doc_rules(sheet.rules), sheet.unsupported)
 }
 
 fn parse_rule(text: &str, atoms: &mut Atoms, validator: &mut Validator) -> ParsedRule {
     let mut layers = Layers::default();
-    let mut sheet = parse_sheet(text, atoms, &mut layers);
+    let mut sheet = parse_sheet(text, atoms, &mut layers, validator);
     validator.filter(&mut sheet.rules);
     let rules = doc_rules(sheet.rules)
         .into_iter()
-        .map(|rule| LocalRule { body: rule.body, layer: rule.layer.map(LocalLayer) })
+        .map(|rule| LocalRule { body: rule.body, layer: rule.layer.map(LocalLayer), conditions: rule.conditions })
         .collect();
     ParsedRule { rules, unsupported: sheet.unsupported, layers }
 }
@@ -197,6 +203,7 @@ fn doc_rules(mut rules: Vec<Rule>) -> Vec<DocRule> {
             Some(DocRule {
                 body: Arc::new(RuleBody { selectors, normal: rule.normal, important: rule.important }),
                 layer: rule.layer,
+                conditions: rule.conditions,
             })
         })
         .collect()

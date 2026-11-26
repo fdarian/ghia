@@ -31,6 +31,7 @@ pub(crate) mod line_height;
 pub(crate) mod list_style;
 pub(crate) mod logical;
 pub(crate) mod mask;
+pub(crate) mod media_query;
 pub(crate) mod mask_border;
 #[cfg(test)]
 mod parse_cost;

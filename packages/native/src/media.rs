@@ -3,8 +3,9 @@
 
 //! OS display preferences behind `matchMedia`.
 //!
-//! JS owns the media query language (`js/media-query.ts`). Native only answers
-//! what the OS says, and says when it changed. Only macOS has an OS read; every
+//! JS owns the media query language of `matchMedia` (`js/media-query.ts`). Native only answers
+//! what the OS says, and says when it changed. A stylesheet's `@media` is evaluated natively
+//! (`css/media_query.rs`), against the same readings (`environment`, `sync_sheets`). Only macOS has an OS read; every
 //! other platform reports no preference, which is what browsers report when
 //! the OS has none.
 
@@ -29,6 +30,39 @@ pub struct MediaFeatures {
     pub increased_contrast: bool,
     /// `forced-colors: active`. macOS has no forced colors mode.
     pub forced_colors: bool,
+}
+
+/// What a stylesheet's `@media` reads of the window, in the units `getWindowSize`, `getAppearance`
+/// and `getMediaFeatures` report to `matchMedia`.
+pub(crate) fn environment(
+    viewport: gpui::Size<gpui::Pixels>,
+    scale_factor: f32,
+    appearance: gpui::WindowAppearance,
+    features: MediaFeatures,
+) -> crate::css::media_query::MediaEnvironment {
+    crate::css::media_query::MediaEnvironment {
+        width: f64::from(f32::from(viewport.width)),
+        height: f64::from(f32::from(viewport.height)),
+        scale_factor: f64::from(scale_factor),
+        color_scheme: crate::renderer::color_scheme_of(appearance),
+        reduced_motion: features.reduced_motion,
+        increased_contrast: features.increased_contrast,
+        forced_colors: features.forced_colors,
+    }
+}
+
+/// Gives the document's stylesheets the window's environment. When a media query of theirs
+/// flips they load again and restyle, and the answer says what the window has to draw.
+pub(crate) fn sync_sheets(
+    tree: &std::sync::Mutex<crate::retained_tree::RetainedTree>,
+    environment: crate::css::media_query::MediaEnvironment,
+) -> crate::retained_tree::Dirty {
+    let mut tree = tree.lock().unwrap();
+    if tree.set_media_environment(environment) {
+        tree.take_dirty_restyled()
+    } else {
+        crate::retained_tree::Dirty::Clean
+    }
 }
 
 /// Records `now` as the window's content size and says whether it differs from

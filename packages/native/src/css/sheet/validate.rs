@@ -67,7 +67,18 @@ impl Validator {
         initial::is_initial_keyword(&declaration).then(|| Declaration { key: declaration.key, value: "\"initial\"".to_owned() })
     }
 
+    /// Whether `@supports (key: value)` holds: the check a declaration of a rule goes through, and
+    /// the same keyword that `judge` takes for the initial value. A rule's declaration that fails
+    /// is logged; this one is a question, not a mistake.
+    pub fn supports(&mut self, declaration: &Declaration) -> bool {
+        self.check(declaration, false) || initial::is_initial_keyword(declaration)
+    }
+
     fn accepts(&mut self, declaration: &Declaration) -> bool {
+        self.check(declaration, true)
+    }
+
+    fn check(&mut self, declaration: &Declaration, log_rejection: bool) -> bool {
         // Custom properties take any value, a `var()` is only known at build time, and a CSS-wide
         // keyword is the cascade's own to apply.
         if declaration.key.starts_with("--") || mentions_var(declaration.value.as_bytes()) || is_css_wide(&declaration.value) {
@@ -79,7 +90,7 @@ impl Validator {
         }
         // A key the style does not know parses and sets nothing, which CSS also ignores.
         let accepted = parse_style(alone.as_bytes()).is_ok_and(|style| style != StyleDesc::default() && is_valid(&style));
-        if !accepted && !initial::is_initial_keyword(declaration) {
+        if log_rejection && !accepted && !initial::is_initial_keyword(declaration) {
             log::warn!("Stylesheet: declaration ignored, not a valid {}: {}", declaration.key, declaration.value);
         }
         if self.verdicts.len() >= VERDICT_LIMIT {

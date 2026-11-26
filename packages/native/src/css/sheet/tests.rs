@@ -8,15 +8,16 @@ const DND_KIT: &str = include_str!("fixtures/dnd-kit.css");
 struct Doc {
     atoms: Atoms,
     layers: Layers,
+    validator: validate::Validator,
 }
 
 impl Doc {
     fn new() -> Doc {
-        Doc { atoms: Atoms::default(), layers: Layers::default() }
+        Doc { atoms: Atoms::default(), layers: Layers::default(), validator: validate::Validator::default() }
     }
 
     fn parse(&mut self, text: &str) -> StyleSheet {
-        parse_sheet(text, &mut self.atoms, &mut self.layers)
+        parse_sheet(text, &mut self.atoms, &mut self.layers, &mut self.validator)
     }
 
     /// The first selector of `selector { color: red }`.
@@ -312,13 +313,114 @@ fn unknown_at_rules_are_skipped_whole_and_recorded() {
     let mut doc = Doc::new();
     let sheet = doc.parse(
         "@charset \"utf-8\"; @import url(a.css) layer(x); a { color: red } \
-         @media (min-width: 1px) { b { color: blue } @media print { c { x: y } } } \
          @keyframes k { from { top: 0 } to { top: 1px } } @font-face { font-family: x; } \
-         @Supports (display: grid) { d { display: grid } } e { top: 1px }",
+         @property --p { syntax: '<length>'; } @container (min-width: 1px) { b { top: 2px } } e { top: 1px }",
     );
-    assert_eq!(sheet.unsupported, ["charset", "import", "media", "keyframes", "font-face", "supports"]);
+    assert_eq!(sheet.unsupported, ["charset", "import", "keyframes", "font-face", "property", "container"]);
     let colors: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].0).collect();
     assert_eq!(colors, ["color", "top"]);
+}
+
+fn conditions_of(sheet: &StyleSheet) -> Vec<Option<String>> {
+    sheet
+        .rules
+        .iter()
+        .map(|rule| rule.conditions.as_ref().map(|conditions| format!("{}", conditions.texts().join(" && "))))
+        .collect()
+}
+
+#[test]
+fn a_rule_in_media_carries_the_queries_around_it() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse(
+        "a { color: red } @media (min-width: 1px) { b { color: blue } @media print { c { top: 1px } } } \
+         @layer l { @media screen { d { top: 2px } } } e { top: 3px }",
+    );
+    assert!(sheet.unsupported.is_empty());
+    assert_eq!(
+        conditions_of(&sheet),
+        [None, Some("(min-width: 1px)".into()), Some("(min-width: 1px) && print".into()), Some("screen".into()), None]
+    );
+    assert!(sheet.rules[3].layer.is_some());
+}
+
+#[test]
+fn media_inside_a_style_rule_gates_its_declarations_and_keeps_source_order() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse(".a { color: red; @media (min-width: 1px) { color: blue; &:hover { top: 1px } } left: 2px; .b { right: 3px } }");
+    assert!(sheet.unsupported.is_empty());
+    let found: Vec<_> = sheet
+        .rules
+        .iter()
+        .map(|rule| (pairs(&rule.normal)[0].0.to_owned(), rule.conditions.is_some(), rule.order))
+        .collect();
+    assert_eq!(
+        found,
+        [("color".into(), false, 0), ("color".into(), true, 1), ("top".into(), true, 2), ("left".into(), false, 3), ("right".into(), false, 4)]
+    );
+}
+
+#[test]
+fn an_unparseable_media_query_is_kept_and_never_matches() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse("@media (bogus: 1) { a { color: red } } @media { b { color: red } }");
+    assert_eq!(conditions_of(&sheet), [Some("(bogus: 1)".into()), Some("".into())]);
+}
+
+#[test]
+fn a_media_rule_with_no_block_is_dropped_and_recorded() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse("@media screen; a { color: red }");
+    assert_eq!(sheet.unsupported, ["@media screen"]);
+    assert_eq!(sheet.rules.len(), 1);
+}
+
+#[test]
+fn supports_is_decided_at_parse_time() {
+    let cases = [
+        ("(display: grid)", true),
+        ("(color: notacolor)", false),
+        ("(bogus-property: 1)", false),
+        ("not (bogus-property: 1)", true),
+        ("(display: grid) and (color: red)", true),
+        ("(bogus-property: 1) or (color: red)", true),
+        ("(bogus-property: 1) and (color: red)", false),
+        ("selector(.a > .b)", true),
+        ("selector(:has(.a))", true),
+        ("selector(:bogus)", false),
+        ("not selector(:bogus)", true),
+        ("((display: grid) and (not (bogus-property: 1)))", true),
+        ("(--custom: anything)", true),
+        ("(z-index: auto)", true),
+    ];
+    let text: String =
+        cases.iter().enumerate().map(|(index, (condition, _))| format!("@supports {condition} {{ a {{ top: {index}px }} }} ")).collect();
+    let mut doc = Doc::new();
+    let sheet = doc.parse(&text);
+    assert!(sheet.unsupported.is_empty(), "{:?}", sheet.unsupported);
+    let kept: Vec<String> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].1.trim_matches('"').to_owned()).collect();
+    let expected: Vec<String> =
+        cases.iter().enumerate().filter(|(_, (_, holds))| *holds).map(|(index, _)| format!("{index}px")).collect();
+    assert_eq!(kept, expected);
+    assert!(sheet.rules.iter().all(|rule| rule.conditions.is_none()), "a decided condition leaves none on the rule");
+}
+
+#[test]
+fn an_invalid_supports_condition_drops_the_block_and_is_recorded() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse("@supports { a { color: red } } @supports (display: grid) and or (color: red) { b { color: red } } @supports foo { c { color: red } }");
+    assert!(sheet.rules.is_empty());
+    assert_eq!(sheet.unsupported, ["@supports", "@supports (display: grid) and or (color: red)", "@supports foo"]);
+}
+
+#[test]
+fn supports_nests_in_media_and_media_in_supports() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse(
+        "@supports (display: grid) { @media screen { a { color: red } } } \
+         @media screen { @supports (bogus: 1) { b { color: red } } @supports (color: red) { c { color: red } } }",
+    );
+    assert_eq!(conditions_of(&sheet), [Some("screen".into()), Some("screen".into())]);
 }
 
 #[test]
@@ -551,10 +653,10 @@ fn an_invalid_nested_selector_drops_only_that_rule() {
 
 #[test]
 fn at_rules_in_a_style_rule_are_skipped_and_recorded() {
-    let sheet = Doc::new().parse("a { top: 1px; @media print { top: 2px } left: 3px }");
+    let sheet = Doc::new().parse("a { top: 1px; @container (min-width: 1px) { top: 2px } left: 3px }");
     assert_eq!(sheet.rules.len(), 1);
     assert_eq!(pairs(&sheet.rules[0].normal), [("top", r#""1px""#), ("left", r#""3px""#)]);
-    assert_eq!(sheet.unsupported, ["media"]);
+    assert_eq!(sheet.unsupported, ["container"]);
 }
 
 #[test]
@@ -753,7 +855,7 @@ fn flat(atoms: &mut Atoms, tags: &[(&str, &[&str])]) -> List {
 
 fn selected_in(list: &List, atoms: &mut Atoms, selector: &str) -> Vec<usize> {
     let selector = {
-        let sheet = parse_sheet(&format!("{selector} {{ color: red }}"), atoms, &mut Layers::default());
+        let sheet = parse_sheet(&format!("{selector} {{ color: red }}"), atoms, &mut Layers::default(), &mut validate::Validator::default());
         assert_eq!(sheet.rules.len(), 1, "{selector} is valid");
         sheet.rules[0].selectors[0].0.clone()
     };

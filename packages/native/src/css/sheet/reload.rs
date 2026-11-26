@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::css::media_query::MediaEnvironment;
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::atoms::Atom;
@@ -59,12 +60,14 @@ pub(super) struct Reload {
 
 impl Reload {
     /// `None` when the change cannot be told apart from a rule that moved a layer, or the added
-    /// rules cannot be found by a feature of their subject.
+    /// rules cannot be found by a feature of their subject. `environment` is the window both loads
+    /// were indexed in: the rules of a unit that apply there are the ones the index holds.
     pub(super) fn between(
         old: &[Arc<ParsedRule>],
         new: &[Arc<ParsedRule>],
         old_index: &RuleIndex,
         new_index: &RuleIndex,
+        environment: Option<&MediaEnvironment>,
     ) -> Option<Reload> {
         let prefix_units = old.iter().zip(new).take_while(|(old, new)| Arc::ptr_eq(old, new)).count();
         let suffix_units = old[prefix_units..]
@@ -73,7 +76,7 @@ impl Reload {
             .zip(new[prefix_units..].iter().rev())
             .take_while(|(old, new)| Arc::ptr_eq(old, new))
             .count();
-        let rules = |units: &[Arc<ParsedRule>]| units.iter().map(|unit| unit.len()).sum::<usize>();
+        let rules = |units: &[Arc<ParsedRule>]| units.iter().map(|unit| unit.active_len(environment)).sum::<usize>();
         let prefix = rules(&old[..prefix_units]);
         let suffix = rules(&old[old.len() - suffix_units..]);
         let old_suffix = old_index.rules.len() - suffix;

@@ -276,7 +276,7 @@ mod tests {
 
     fn read(selector: &str) -> Read {
         let mut atoms = Atoms::default();
-        let sheet = parse_sheet(&format!("{selector} {{ color: red }}"), &mut atoms, &mut Layers::default());
+        let sheet = parse_sheet(&format!("{selector} {{ color: red }}"), &mut atoms, &mut Layers::default(), &mut super::super::validate::Validator::default());
         let mut invalidation = Invalidation::default();
         for (selector, _) in &sheet.rules[0].selectors {
             invalidation.read(selector);
@@ -359,7 +359,7 @@ mod tests {
         }
         text.push('}');
         let mut atoms = Atoms::default();
-        let sheet = parse_sheet(&text, &mut atoms, &mut Layers::default());
+        let sheet = parse_sheet(&text, &mut atoms, &mut Layers::default(), &mut super::super::validate::Validator::default());
         let mut invalidation = Invalidation::default();
         for rule in &sheet.rules {
             for (selector, _) in &rule.selectors {

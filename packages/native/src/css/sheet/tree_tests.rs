@@ -1437,13 +1437,13 @@ fn a_type_selector_ignores_case_on_an_html_element_and_not_on_an_svg_one() {
 #[test]
 fn a_skipped_rule_is_logged_once_across_reloads_and_again_after_the_sheets_are_gone() {
     let mut doc = Doc::new();
-    let (first, _) = doc.style_element(ROOT, "@media print { a { color: red } } a:invalid { color: red } .a { color: blue }");
+    let (first, _) = doc.style_element(ROOT, "@keyframes k { from { top: 0 } } a:invalid { color: red } .a { color: blue }");
     doc.flush();
     assert_eq!(doc.tree.sheets.skip_warnings, 2);
 
     let (second, text) = doc.style_element(ROOT, ".b { color: red }");
     doc.flush();
-    doc.tree.set_text(text, ".b { color: red } @media print { a { color: red } } @font-face { x: y }".into());
+    doc.tree.set_text(text, ".b { color: red } @keyframes k { from { top: 0 } } @font-face { x: y }".into());
     doc.flush();
     assert_eq!(doc.tree.sheets.skip_warnings, 3, "only @font-face is new");
 
@@ -3205,3 +3205,5 @@ mod positions;
 mod has;
 
 mod tree_states;
+
+mod media;

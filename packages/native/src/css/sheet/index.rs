@@ -14,6 +14,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::css::lenient::Declaration;
 
 use super::atoms::Atom;
+use super::conditions::Conditions;
 use super::invalidation::Invalidation;
 use super::layers::{LayerId, LayerOrder};
 use super::matching::{matches, ElementView};
@@ -34,6 +35,9 @@ pub struct RuleBody {
 pub struct DocRule {
     pub body: Arc<RuleBody>,
     pub layer: Option<LayerId>,
+    /// The media queries the rule stands under. A rule whose conditions do not hold is left out
+    /// before the index is built, so [`RuleIndex::build`] takes the rules that apply.
+    pub conditions: Option<Arc<Conditions>>,
 }
 
 pub struct IndexedRule {
