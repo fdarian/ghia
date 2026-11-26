@@ -247,13 +247,13 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     expect(widthOf("btn")).toBe(100)
   })
 
-  it("drops a rule with a state it cannot compile, and keeps the siblings in an :is() list", () => {
+  it("drops a rule with a state it cannot compile into a style block, and keeps the siblings in an :is() list", () => {
     let also: HTMLElement | undefined
     app.render(() => (
       <div>
         <style>{`
-          :is(.keep, .card:hover .title) { width: 70px; height: 20px }
-          .also, .card:hover .title { opacity: 0.5 }
+          :is(.keep, .card:hover:focus) { width: 70px; height: 20px }
+          .also, .card:hover:focus { opacity: 0.5 }
         `}</style>
         <div testId="keep" class="keep" />
         <div ref={(element: unknown) => (also = element as HTMLElement)} class="also" />
@@ -261,6 +261,39 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     ))
     expect(widthOf("keep")).toBe(70)
     expect(getComputedStyle(also!).opacity).toBe("1")
+  })
+
+  it("reads a state outside the subject live: an ancestor's :hover and :focus-within, and a peer's :focus", () => {
+    app.render(() => (
+      <div>
+        <style>{`
+          .title { width: 100px; height: 20px }
+          .card:hover .title { width: 140px }
+          .menu:focus-within .item { width: 150px }
+          .peer:focus ~ .sibling { width: 160px }
+        `}</style>
+        <div testId="card" class="card" style={{ width: 200, height: 40 }}>
+          <div testId="title" class="title" />
+        </div>
+        <div testId="menu" class="menu">
+          <input testId="field" style={{ width: 40, height: 20 }} />
+          <div testId="item" class="item title" />
+        </div>
+        <input testId="peer" class="peer" style={{ width: 40, height: 20 }} />
+        <div testId="sibling" class="sibling title" />
+      </div>
+    ))
+    expect([widthOf("title"), widthOf("item"), widthOf("sibling")]).toEqual([100, 100, 100])
+    app.renderer.nativeSimulateMouseMove(...centre("title"))
+    expect(widthOf("title")).toBe(140)
+    app.renderer.nativeSimulateMouseMove(390, 290)
+    expect(widthOf("title")).toBe(100)
+    app.renderer.focusElement(idOf("field"))
+    expect([widthOf("item"), widthOf("sibling")]).toEqual([150, 100])
+    app.renderer.focusElement(idOf("peer"))
+    expect([widthOf("item"), widthOf("sibling")]).toEqual([100, 160])
+    app.renderer.blurElement(idOf("peer"))
+    expect(widthOf("sibling")).toBe(100)
   })
 
   it("applies :popover-open while a popover is shown", () => {
