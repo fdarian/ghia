@@ -50,6 +50,8 @@ struct Node {
     attrs: Vec<(Atom, String)>,
     /// The tree states the node is in.
     states: Vec<TreeState>,
+    /// The pointer and focus states the node is in.
+    live: Vec<State>,
     parent: Option<usize>,
     prev: Option<usize>,
 }
@@ -78,6 +80,7 @@ impl Tree {
             classes: classes.iter().map(|class| atoms.intern(class)).collect(),
             attrs: attrs.iter().map(|(name, value)| (atoms.intern(name), (*value).to_owned())).collect(),
             states: Vec::new(),
+            live: Vec::new(),
             parent,
             prev,
         });
@@ -146,6 +149,9 @@ impl ElementView for View<'_> {
     }
     fn tree_state(&self, state: TreeState) -> bool {
         self.tree.nodes[self.index].states.contains(&state)
+    }
+    fn live_state(&self, state: State) -> bool {
+        self.tree.nodes[self.index].live.contains(&state)
     }
     fn child_index(&self, of_type: bool, from_end: bool) -> Option<u32> {
         let Some(parent) = self.tree.nodes[self.index].parent else {
@@ -1250,31 +1256,88 @@ fn state_pseudo_classes_parse_into_a_condition_of_the_selector() {
 }
 
 #[test]
-fn a_state_a_selector_cannot_compile_into_a_style_block_is_invalid() {
+fn a_state_the_subject_cannot_compile_into_a_style_block_is_invalid() {
     for selector in [
-        ".card:hover .title",
-        ".card:hover > .title",
-        ".a:hover + .b",
         ".a:hover:focus",
         ".a:focus-visible:focus-within",
         ".a:not(:hover)",
         ":not(.a:focus)",
         ":is(.a:hover, .b)",
         ":is(.a:hover, .b:active)",
-        ":is(.a:hover) .b",
+        ".a:hover:is(.b:focus)",
     ] {
         assert!(!is_valid(selector), "{selector}");
     }
 }
 
 #[test]
+fn a_state_outside_the_subject_is_read_live_and_is_no_condition() {
+    use super::State::Hover;
+    let mut doc = Doc::new();
+    for (selector, condition) in [
+        (".card:hover .title", None),
+        (".card:hover > .title", None),
+        (".a:hover + .b", None),
+        (".peer:focus ~ .y", None),
+        (".menu:focus-within .item", None),
+        (".a:hover:focus .b", None),
+        (":is(.a:hover) .b", None),
+        (":not(.a:hover) .b", None),
+        (".card:hover .title:hover", Some(Hover)),
+        (".x:is(:where(.group):hover *)", None),
+        (".x:not(.a:hover .b)", None),
+    ] {
+        assert_eq!(doc.selector(selector).condition, condition, "{selector}");
+    }
+}
+
+#[test]
 fn a_state_in_a_nested_rule_follows_the_same_rules() {
     let sheet = Doc::new().parse(".btn { color: red; &:hover { color: blue } &:hover .icon { top: 1px } .x { top: 2px } }");
-    assert_eq!(sheet.rules.len(), 3, "the rule, &:hover, and .x");
+    assert_eq!(sheet.rules.len(), 4, "the rule, &:hover, &:hover .icon and .x");
     assert_eq!(sheet.rules[1].selectors[0].0.condition, Some(super::State::Hover));
-    assert_eq!(sheet.unsupported, ["&:hover .icon"]);
+    assert_eq!(sheet.rules[2].selectors[0].0.condition, None, "`:hover` is live in `&:hover .icon`");
+    assert!(sheet.unsupported.is_empty());
     let under = Doc::new().parse(".btn:hover { color: red; .x { top: 2px } }");
-    assert_eq!(under.rules.len(), 1, "`.x` is `:is(.btn:hover) .x`, a state outside the subject");
+    assert_eq!(under.rules.len(), 2, "`.x` is `:is(.btn:hover) .x`, a live state outside the subject");
+    let both = Doc::new().parse(".a:hover { &:focus { top: 1px } }");
+    assert_eq!(both.unsupported, ["&:focus"], "two states in the subject");
+}
+
+#[test]
+fn a_live_state_matches_what_the_view_says_of_the_element_it_is_on() {
+    use super::State::{Focus, FocusWithin, Hover};
+    let mut doc = Doc::new();
+    let mut tree = fixture(&mut doc.atoms);
+    let all = |doc: &mut Doc, tree: &Tree, selector: &str| {
+        let selector = doc.selector(selector);
+        (0..tree.nodes.len()).filter(|index| matches(&selector, &tree.view(*index))).collect::<Vec<_>>()
+    };
+    assert_eq!(all(&mut doc, &tree, ".box:hover .first"), Vec::<usize>::new(), "nothing is hovered");
+    tree.nodes[MAIN].live.push(Hover);
+    assert_eq!(all(&mut doc, &tree, ".box:hover .first"), [FIRST]);
+    assert_eq!(all(&mut doc, &tree, ".box:hover > span"), [FIRST, SECOND]);
+    assert_eq!(all(&mut doc, &tree, ".box:hover"), [MAIN], "the subject's state is the condition, read as true");
+    assert_eq!(all(&mut doc, &tree, ".box:hover .first:hover"), [FIRST], "the subject is not asked");
+    assert_eq!(all(&mut doc, &tree, ":is(.box:hover) p"), [PARA]);
+    assert_eq!(all(&mut doc, &tree, "p:is(:where(.box):hover *)"), [PARA], "Tailwind's group-hover");
+    assert_eq!(all(&mut doc, &tree, "p:is(:where(.nothing):hover *)"), Vec::<usize>::new());
+    assert_eq!(all(&mut doc, &tree, ":not(.box:hover) > p"), Vec::<usize>::new());
+    tree.nodes[FIRST].live.push(Focus);
+    assert_eq!(all(&mut doc, &tree, ".first:focus ~ .second"), [SECOND]);
+    assert_eq!(all(&mut doc, &tree, ".first:focus + p"), Vec::<usize>::new(), "not the next sibling");
+    tree.nodes[SECOND].live.push(FocusWithin);
+    assert_eq!(all(&mut doc, &tree, ".second:focus-within + p"), [PARA]);
+}
+
+#[test]
+fn a_state_in_has_is_still_invalid_whatever_brought_it() {
+    assert!(!is_valid("div:has(.a:hover)"));
+    assert!(!is_valid("div:has(.a:hover .b)"));
+    assert!(!is_valid("div:has(:is(.a:focus-within))"));
+    let sheet = Doc::new().parse(".a:hover .b { .list:has(> &) { top: 1px } } .a:focus-within, .b { .c:has(> &) { top: 5px } } .p { .q:has(> &) { top: 6px } }");
+    assert_eq!(sheet.rules.len(), 1, "only `.q:has(> &)`, whose parent reads no state");
+    assert_eq!(sheet.unsupported, [".list:has(> &)", ".c:has(> &)"]);
 }
 
 #[test]

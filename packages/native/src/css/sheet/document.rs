@@ -24,6 +24,7 @@ use super::index::{DocRule, RuleIndex};
 use super::invalidation::Reach;
 use super::keyframes::SheetKeyframes;
 use super::layers::Layers;
+use super::live_states::LiveStates;
 use super::parse_cache::{ParseCache, ParsedRule};
 use super::positions::PendingRanges;
 use super::reload::Reload;
@@ -71,6 +72,9 @@ pub struct StyleSheets {
     pub(crate) constructed: FxHashMap<u64, String>,
     pub(crate) adopted: Vec<u64>,
     pub(crate) index: RuleIndex,
+    /// The elements the pointer and the focus hold, for the selectors that read a state outside
+    /// their subject. Empty while no rule does.
+    pub(crate) live: LiveStates,
     /// What the window reports to the media queries of the rules, `None` until it has. It is the
     /// window's and not the sheets', so it outlives them (`wind_down` keeps it).
     pub(crate) media: Option<MediaEnvironment>,
@@ -125,6 +129,7 @@ impl Default for StyleSheets {
             constructed: FxHashMap::default(),
             adopted: Vec::new(),
             index: RuleIndex::default(),
+            live: LiveStates::default(),
             media: None,
             watched: Watched::default(),
             media_flipped: false,
@@ -391,6 +396,7 @@ impl StyleSheets {
         self.logged_folds.clear();
         self.skip_log_capped = false;
         self.index = Default::default();
+        self.live.clear();
         self.interner = Default::default();
         self.atoms = Atoms::default();
         self.style = self.atoms.intern("style");

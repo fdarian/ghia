@@ -57,8 +57,9 @@ struct Parser<'a, 'n> {
     /// How many `:is(`, `:where(`, `:not(` and `:has(` the selector being parsed sits inside.
     depth: usize,
     /// Whether the selector being parsed is inside a `:has(`, where `:has()` nests no deeper and
-    /// the states of the pointer and the focus are not read (they compile into the style block of
-    /// the subject, which an element inside the argument is not).
+    /// the states of the pointer and the focus are not read (a state in the subject compiles into
+    /// the style block of the subject, which an element inside the argument is not, and the live
+    /// states a change of the pointer marks do not reach the anchors of a `:has()`).
     in_has: bool,
     /// Whether a state was met inside the `:has(` being parsed, written there or brought in by `&`.
     /// A forgiving `:is()` drops the argument that holds it, so the `:has(` checks this when it ends.
@@ -227,7 +228,7 @@ impl Parser<'_, '_> {
                     simples.push(match self.nesting {
                         Nesting::Top => Simple::Root,
                         Nesting::Parent(parent) => {
-                            if self.in_has && parent.iter().any(|selector| selector.condition.is_some()) {
+                            if self.in_has && parent.iter().any(states::reads_state) {
                                 self.state_in_has = true;
                                 return Err(InvalidSelector);
                             }

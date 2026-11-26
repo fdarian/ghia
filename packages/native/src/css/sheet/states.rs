@@ -7,6 +7,9 @@
 //! match does not depend on where the pointer is, style sharing stays valid, and the fold, the
 //! paint-only path and retention treat the block as they treat an inline one.
 //!
+//! This is for the subject only. A state in any other compound (`.card:hover .title`) decides which
+//! rules match another element, so it is read live: see [`super::live_states`].
+//!
 //! The matcher reads such a pseudo-class in the subject compound as true, and the selector
 //! carries it as its [`ComplexSelector::condition`]: the rule matches the element under that
 //! condition. The cascade then decides, per property, what is the base value and what is the
@@ -22,7 +25,7 @@ use super::cascade::{apply, MatchedRules};
 use super::declarations::render_declarations;
 use super::document::SKIP_LOG_LIMIT;
 use super::index::RuleIndex;
-use super::selector::{Compound, Simple, Specificity};
+use super::selector::{ComplexSelector, Compound, Simple, Specificity};
 
 /// A state of the pointer or the focus that a rule can be under. Declared in the order the
 /// states fold over an element (`resolve_pointer_states`, then `FocusStyles::applying`): a later
@@ -37,6 +40,12 @@ pub enum State {
 }
 
 impl State {
+    pub const COUNT: usize = 5;
+
+    pub(super) fn index(self) -> usize {
+        self as usize
+    }
+
     /// The key of the style block that holds what applies in this state.
     pub fn block_key(self) -> &'static str {
         match self {
@@ -69,36 +78,53 @@ impl State {
 #[derive(Debug, PartialEq)]
 pub(super) struct Unsupported;
 
-/// The state the subject of a selector needs, or `Unsupported` when the selector reads one the
-/// engine cannot compile into a style block: a state in a compound that is not the subject
-/// (`.card:hover .title`), two different states in one compound (`:hover:focus`), a state inside
-/// `:not()`, and a `:is()` or `:where()` whose arguments are not all under the same one.
+/// The state the subject of a selector needs, or `Unsupported` when the selector reads one of the
+/// subject that the engine cannot compile into a style block: two different states in the subject
+/// compound (`:hover:focus`), a state inside a `:not()` of the subject, and a `:is()` or `:where()`
+/// of the subject whose arguments are not all under the same one.
+///
+/// A state anywhere else is read live ([`super::live_states`]) and is no condition:
+/// `.card:hover .title`, `.peer:focus ~ .y`, `:is(.a:hover) .b`, `.x:is(:where(.group):hover *)`.
 pub(super) fn condition_of(compounds: &[Compound]) -> Result<Option<State>, Unsupported> {
+    let Some(subject) = compounds.first() else {
+        return Ok(None);
+    };
     let mut condition = None;
-    for (position, compound) in compounds.iter().enumerate() {
-        for simple in &compound.simples {
-            let found = match simple {
-                Simple::State(state) => Some(*state),
-                Simple::Is(list) => shared_condition(list.iter().map(|selector| selector.condition))?,
-                Simple::Where(list) => shared_condition(list.iter().map(|selector| selector.condition))?,
-                Simple::Not(list) => {
-                    if list.iter().any(|selector| selector.condition.is_some()) {
-                        return Err(Unsupported);
-                    }
-                    None
+    for simple in &subject.simples {
+        let found = match simple {
+            Simple::State(state) => Some(*state),
+            Simple::Is(list) => shared_condition(list.iter().map(|selector| selector.condition))?,
+            Simple::Where(list) => shared_condition(list.iter().map(|selector| selector.condition))?,
+            Simple::Not(list) => {
+                if list.iter().any(|selector| selector.condition.is_some()) {
+                    return Err(Unsupported);
                 }
-                _ => None,
-            };
-            let Some(found) = found else {
-                continue;
-            };
-            if position != 0 || condition.is_some_and(|known| known != found) {
-                return Err(Unsupported);
+                None
             }
-            condition = Some(found);
+            _ => None,
+        };
+        let Some(found) = found else {
+            continue;
+        };
+        if condition.is_some_and(|known| known != found) {
+            return Err(Unsupported);
         }
+        condition = Some(found);
     }
     Ok(condition)
+}
+
+/// Whether the selector names a pointer or focus state anywhere: in a compound, or in an argument
+/// of `:is()`, `:where()` and `:not()`.
+pub(super) fn reads_state(selector: &ComplexSelector) -> bool {
+    selector.compounds.iter().any(|compound| {
+        compound.simples.iter().any(|simple| match simple {
+            Simple::State(_) => true,
+            Simple::Is(list) => list.iter().any(reads_state),
+            Simple::Where(list) | Simple::Not(list) => list.iter().any(reads_state),
+            _ => false,
+        })
+    })
 }
 
 /// The condition every argument of a functional pseudo-class has, `None` when none has one.

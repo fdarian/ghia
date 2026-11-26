@@ -10696,6 +10696,8 @@ impl gpui::Render for GpuixView {
             self.pending_focus_element = Some(PendingFocus::new(id, window, cx));
         }
 
+        self.sync_live_states(window);
+
         // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();

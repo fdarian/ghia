@@ -45,6 +45,11 @@ fn focused_activation(
     Some((focused, keys))
 }
 
+/// A Space press sets and ends `:active`, which a selector outside its subject can read.
+fn sync_live_pointer(activation: &Activation) -> bool {
+    super::listeners::sync_live_pointer(&mut activation.tree.lock().unwrap(), &activation.pointer.borrow())
+}
+
 fn click(id: u64, modifiers: EventModifiers, window: &mut Window, cx: &mut App) {
     if let Err(error) = activation::click_element_with(id, Some(modifiers), window, cx) {
         sync_dispatch::report_deferred_error(error);
@@ -105,6 +110,7 @@ pub(crate) fn key_down(
             }
         }
     }
+    restyle |= sync_live_pointer(activation);
     if restyle {
         redraw_for_focus_visible(window, cx);
     }
@@ -125,6 +131,7 @@ pub(crate) fn key_up(
         let tree = activation.tree.lock().unwrap();
         end_space_press(&activation.routing, &activation.pointer, &tree)
     };
+    let restyle = sync_live_pointer(activation) || restyle;
     if restyle {
         redraw_for_focus_visible(window, cx);
     }

@@ -19,6 +19,7 @@ use super::document::ClassAtoms;
 use super::cascade::MatchedRules;
 use super::has::Presence;
 use super::invalidation::Reach;
+use super::live_states::LiveInputs;
 use super::share::{Found, StyleSharing};
 use super::tree_states::TreeStates;
 use super::view::{count_sibling_work, SiblingPositions, TreeView};
@@ -194,6 +195,37 @@ impl RetainedTree {
             let has = self.sheets.has_tree_state_read(changed);
             self.mark_has_anchors(id, has);
         }
+    }
+
+    /// Whether a selector reads a pointer or focus state outside its subject. While none does, a
+    /// move of the pointer or the focus is not the sheets' business: [`Self::sync_live_states`]
+    /// returns at once, and callers may skip building its inputs.
+    pub(crate) fn live_states_wanted(&self) -> bool {
+        self.sheets.enabled && !self.sheets.index.invalidation.live_states.is_empty()
+    }
+
+    /// The pointer or the focus holds what `inputs` says now. The elements that entered or left a
+    /// state a selector reads live are marked with the reach of that state and matched, which is
+    /// what the pointer or focus change leaves to draw. No batch follows such a change, so the
+    /// flush is this call's.
+    pub(crate) fn sync_live_states(&mut self, inputs: &LiveInputs<'_>) -> Dirty {
+        if !self.live_states_wanted() {
+            if !self.sheets.live.is_empty() {
+                self.sheets.live.clear();
+            }
+            return Dirty::Clean;
+        }
+        let read = self.sheets.index.invalidation.live_states;
+        let changed = self.sheets.live.update(inputs, &read);
+        if changed.is_empty() {
+            return Dirty::Clean;
+        }
+        if self.sheets.atoms_fresh {
+            for (id, reach) in changed {
+                self.sheets.mark(id, reach);
+            }
+        }
+        self.take_dirty_restyled()
     }
 
     /// A state that every element below `id` inherits changed on `id` (`contenteditable`): the

@@ -12,6 +12,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::atoms::Atom;
 use super::has::HasInvalidation;
 use super::index::bucket_simple;
+use super::live_states::LiveStateReach;
 use super::nth::Position;
 use super::selector::{Combinator, ComplexSelector, Simple};
 use super::tree_states::TreeStateReach;
@@ -180,6 +181,9 @@ pub struct Invalidation {
     /// Where each tree state (`:popover-open`, `:disabled`, `:checked`...) is read: a change of
     /// the state of an element marks these.
     pub tree_states: TreeStateReach,
+    /// Where each pointer or focus state is read live, outside the subject of a selector
+    /// (`.card:hover .title`): a change of the state of an element marks these.
+    pub live_states: LiveStateReach,
     pub positional: Positional,
     /// What the `:has()` of the selectors read, from the other side: the anchors a change reaches.
     pub has: HasInvalidation,
@@ -241,6 +245,8 @@ impl Invalidation {
                     Simple::Has(arguments) => self.has.read(arguments, &compound.simples, hint.filter(|_| position == 0), reach),
                     Simple::TreeState(state) => self.tree_states.read(*state, reach),
                     Simple::Position(position) => self.positional.read(*position, reach),
+                    // The state of the subject of the rule is its condition (`states.rs`); every other is live.
+                    Simple::State(state) if position != 0 || !tail.is_empty() => self.live_states.read(*state, reach),
                     Simple::Tag(_) | Simple::Root | Simple::Host | Simple::PseudoElement | Simple::State(_) => {}
                 }
             }
@@ -329,6 +335,23 @@ mod tests {
         assert_eq!(read(".a + .b").invalidation.structure, Reach::NEXT_SIBLING);
         assert_eq!(read(".a ~ .b .c").invalidation.structure, Reach::FOLLOWING_SIBLINGS_DESCENDANTS);
         assert!(read(".a + .b").invalidation.structure.contains(Reach::NEXT_SIBLING));
+    }
+
+    #[test]
+    fn a_state_is_read_live_where_it_is_not_the_subjects() {
+        use super::super::states::State::{FocusWithin, Hover};
+        let hover = |selector: &str| read(selector).invalidation.live_states.state(Hover);
+        assert_eq!(hover(".a:hover .b"), Reach::DESCENDANTS);
+        assert_eq!(hover(".a:hover > .b"), Reach::CHILDREN);
+        assert_eq!(hover(".a:hover + .b"), Reach::NEXT_SIBLING);
+        assert_eq!(hover(".a:hover ~ .b .c"), Reach::FOLLOWING_SIBLINGS_DESCENDANTS);
+        assert_eq!(hover(".b:is(:where(.group):hover *)"), Reach::DESCENDANTS, "Tailwind's group-hover");
+        assert_eq!(hover(":is(.a:hover) > .b"), Reach::CHILDREN);
+        assert_eq!(hover(".a:hover"), Reach::default(), "the subject's state is a condition");
+        assert_eq!(hover(".a:is(.b:hover)"), Reach::default());
+        assert!(read(".a:hover").invalidation.live_states.is_empty());
+        assert_eq!(read(".a:focus-within > .b").invalidation.live_states.state(FocusWithin), Reach::CHILDREN);
+        assert_eq!(read(".a:focus-within > .b").invalidation.live_states.state(Hover), Reach::default());
     }
 
     #[test]

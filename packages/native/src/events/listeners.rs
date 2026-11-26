@@ -34,9 +34,10 @@ use gpui::{
     WeakEntity, Window,
 };
 
+use crate::css::sheet::LiveInputs;
 use crate::element_tree::EventModifiers;
 use crate::renderer::GpuixView;
-use crate::retained_tree::RetainedTree;
+use crate::retained_tree::{Dirty, RetainedTree};
 
 use super::activation::Activation;
 use super::app_region::{self, PressOutcome, SimulatedWindowActions, WindowActions};
@@ -92,8 +93,10 @@ pub(crate) fn dispatch_sample(
     sample: &PointerSample,
 ) -> Output {
     let output = {
-        let tree = tree.lock().unwrap();
-        dispatch(&mut pointer.borrow_mut(), &tree, sample)
+        let mut tree = tree.lock().unwrap();
+        let mut output = dispatch(&mut pointer.borrow_mut(), &tree, sample);
+        output.restyle |= sync_live_pointer(&mut tree, &pointer.borrow());
+        output
     };
     if output.chain_mismatch {
         log::warn!(
@@ -102,6 +105,17 @@ pub(crate) fn dispatch_sample(
         );
     }
     output
+}
+
+/// Tells the sheets where the pointer is, for the selectors that read `:hover` and `:active`
+/// outside their subject (`.card:hover .title`). Says whether that restyled an element, which asks
+/// for a frame built whole. A document with no such selector pays one check.
+pub(crate) fn sync_live_pointer(tree: &mut RetainedTree, pointer: &PointerState) -> bool {
+    if !tree.live_states_wanted() {
+        return false;
+    }
+    let (hover, active) = pointer.chains();
+    tree.sync_live_states(&LiveInputs::pointer(hover, active)) != Dirty::Clean
 }
 
 /// What a press or release needs to be dispatched where it is heard.

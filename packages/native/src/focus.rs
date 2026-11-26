@@ -944,6 +944,29 @@ impl GpuixView {
         }
     }
 
+    /// Tells the sheets where the focus and the pointer are, for the selectors that read a state
+    /// outside their subject (`.menu:focus-within .item`, `.peer:focus ~ .y`). It runs at the start
+    /// of a build, before anything reads the tree, so the elements it restyles are drawn in this
+    /// frame; the pointer is told as it moves (`listeners::sync_live_pointer`), and the focus is only
+    /// known to have moved when the build notices it. A document with no such selector pays one check.
+    pub(crate) fn sync_live_states(&mut self, window: &gpui::Window) {
+        let tree_arc = self.tree.clone();
+        let mut tree = tree_arc.lock().unwrap();
+        if !tree.live_states_wanted() {
+            tree.sync_live_states(&crate::css::sheet::LiveInputs::default());
+            return;
+        }
+        self.observe_focus_in(&tree, window);
+        let focus = self.focus.styles(&tree, false);
+        let pointer = self.pointer.borrow();
+        let (hover, active) = pointer.chains();
+        // What a frame built whole draws, so the dirty answer has nothing to add.
+        tree.sync_live_states(&crate::css::sheet::LiveInputs {
+            pointer: Some(crate::css::sheet::PointerChains { hover, active }),
+            focus: Some(crate::css::sheet::FocusChain { within: &focus.within, visible: focus.visible }),
+        });
+    }
+
     /// Sends the focus events a frame noticed once the frame is over. They
     /// cannot go out from inside `render`, which holds the root view and is
     /// part of a draw that a handler must not re-enter.
