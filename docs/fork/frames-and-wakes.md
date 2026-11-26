@@ -227,6 +227,35 @@ Post to the wake of JS, and post to its handler:
   real input takes that path; FF's `poster.ts` Worker trials do.
 - The observer uses the private `_CFRunLoopGet0` and the thread name `com.apple.NSEventThread`.
 
+### Off-thread wakes: an Apple Event (quit)
+
+Input is not the only work another thread hands to the main run loop with `CFRunLoopWakeUp`. AE.framework delivers an
+Apple Event (the Dock's Quit, logout, restart, `-[NSRunningApplication terminate]`) by signalling a source and waking
+the main run loop from a dispatch worker, and WebKit answers the UI process the same way ([below](#waking-js-for-a-webview)).
+CoreFoundation drops such a wake while nothing runs the loop, so a quit sat unseen until an unrelated wake. The watch
+therefore takes a count on `gpui_macos::main_run_loop_wakeups` for as long as a hook is installed (`start` enables,
+`stop` disables; the two users, the watch and a page's pulse, share the byte, so enable and disable are reference
+counted), which makes every off-thread `CFRunLoopWakeUp` of the main loop send its message to the port the watch already
+holds. Where `enable` refuses (it checks the private layout), the watch logs one warning and a quit only reaches the host
+on its next wake.
+
+### A quit ends the frame loop
+
+`tick()` returns `false` once the platform is `Terminated`, and `startFrameLoop` then stops, clears the sync handler and
+runs `onTerminated`, which the adapters set to `process.exit(0)`. In embedded mode (the host pumps the run loop) every quit
+goes through `MacPlatform::request_termination`, which runs GPUI's quit callback and, when it completes, marks the platform
+`Terminated` and posts `NSApplicationWillTerminateNotification`; when the callback declines (GPUI's `App` is borrowed) the
+request retries from the main queue. AppKit never calls `exit()` inside the pump: the Quit action and the last window
+closing (`cx.quit()` posts it to the main queue), the quit Apple Event (a custom handler for `aevt`/`quit`, installed in
+`applicationWillFinishLaunching:`, because AppKit's own defers `terminate:` with `CFRunLoopPerformBlock` and the block
+stays stranded when the pump returns early; it returns success, since answering with a cancel would cancel a logout), and
+any other `terminate:` (`applicationShouldTerminate:` requests the termination and answers `NSTerminateCancel`). Once the
+platform is `Terminated` the pump (`drain_events` and the source loop of `pump_app_nonblocking`) returns within the same
+call, so no queued event, source or display-link step runs after the quit.
+Each wakes the host through the watch above (a main-queue block, or the Apple Event's wake), the next tick sees the
+terminated platform, and the process ends in 20 to 50 ms. Before this, AppKit ended the process from inside the pump
+without running `onTerminated`, or the quit waited for an unrelated wake. The e2e is in [testing.md](testing.md#the-quit-e2e).
+
 ### One wake per event: the commit of `sendEvent:`
 
 **Problem.** A stream of input woke JS about twice per event: once for the event, and once 1 to 8 ms later for a tick
@@ -418,7 +447,7 @@ visible, so a cover that matches the window's top-left edge does not occlude it;
 
 WebKit answers the UI process from its IPC thread with `CFRunLoopWakeUp(CFRunLoopGetMain())`. CoreFoundation returns from that without sending the wake message while the main run loop is not inside a run, which is always the case here (JS owns the main thread and the loop is only pumped), so the run-loop watch above never hears of it. `did-start-loading`, `did-navigate`, `did-stop-loading`, `page-title-updated`, `did-fail-load` and the result of `executeJavaScript` of a `<webview>` then wait for the next input or frame.
 
-`CFRunLoopWakeUp` reads the run depth `d` (a byte of the `__CFRunLoop` object) and sends only if the byte at `run_loop + d + 0x153` is zero. CoreFoundation sets the depth-0 byte (the loop's "ignore wake-ups") when it makes the loop and never clears it at depth 0; the byte of depth 1 is set on every run exit. `gpui_macos::main_run_loop_wakeups::enable` clears the depth-0 byte while a page exists (`webview_pulse.rs` calls it for the first page and `disable` for the last), so the wake sends its message to the loop's wake port, which the watch's knote on the default-mode port set already sees.
+`CFRunLoopWakeUp` reads the run depth `d` (a byte of the `__CFRunLoop` object) and sends only if the byte at `run_loop + d + 0x153` is zero. CoreFoundation sets the depth-0 byte (the loop's "ignore wake-ups") when it makes the loop and never clears it at depth 0; the byte of depth 1 is set on every run exit. `gpui_macos::main_run_loop_wakeups::enable` clears the depth-0 byte while a page exists (`webview_pulse.rs` calls it for the first page and `disable` for the last; the run-loop watch holds a count of its own, [above](#off-thread-wakes-an-apple-event-quit)), so the wake sends its message to the loop's wake port, which the watch's knote on the default-mode port set already sees.
 
 Memory layout that is not API, so `enable` refuses (an `Error`, and nothing is written) unless all of these hold:
 
@@ -686,6 +715,8 @@ drew.
   never, and ticks once per wake and not in between. `frame-loop-yields.test.ts` (2) runs the real loop against a hidden
   window with synthetic wakes from a Rust thread (`simulateFrameWakes`, `setTickDelay`, test-support builds only) and
   checks that timers and file reads keep running when every frame outlasts a vsync.
+- `packages/native/examples/quit-e2e` ([testing.md](testing.md#the-quit-e2e)) asks a real idle app to quit four ways and checks
+  that `onTerminated` ran and the process ended; the zed side is `gpui_macos` `tests/main_run_loop_wakeups.rs`.
 - react `events.test.tsx` "wakes JS once per mouse move, not again when the frame boundary comes" opens a visible window
   with `focus: false`, posts 240 mouse moves from NSEventThread at random points of 120 Hz periods and allows 1.15 wakes
   per move. Without the flush after `sendEvent:` it saw 352 and 339 wakes for 240 moves (1.47 and 1.41).

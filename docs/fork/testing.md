@@ -146,6 +146,26 @@ sh check-no-gpui.sh                                                           # 
 
 Groups: order (background below the view, a child and a later sibling above it, the border around it), geometry (scroll offsets, window resize, `translate` / `scale`, `display: none` and back without a second attach, `visibility: hidden`), overflow (a view drawing outside its box with `overflow` visible and hidden, the inner radius, an ancestor clip), pointer (default, `nativeEvents` with each `hitTest:` answer, a child above the view, `stopPropagation` on `pointerdown`, `pointer-events: none`), focus (the keyboard returns to the window view on a GPUI press), lifecycle (attach and detach counts and order from the addon's log, `onDetach` while the view still has a superview and before the pixels change, also inside `flushSync`, remount, two views, keyed reorder, an unmount before the queued attach arrives) and close (the app's own window is closed from a main-queue block; the process ends with the last window, so the addon appends every attach and detach to a log as it is called and `verdict.ts` reads it after the process ended). The last full run: 52 passed, 0 failed, 0 not checkable. On this machine four earlier runs of the same code lost the app's activation while running and reported 2 to 9 rows as not checkable (exit 3), with no failures; each check now first gets the window back (`ensureCheckable`) and the run reports not checkable only if it cannot.
 
+### The quit e2e
+
+`packages/native/examples/quit-e2e/` checks that an app ends when asked to quit. Each case starts a fresh app process (a
+minimal React window on the real frame loop: the run-loop wake path, no `frameMs`, `focus: false`), lets it sit idle for
+1.5 s, sends one quit request and passes when `onTerminated` ran (the app records the `process.exit(0)` the adapter's
+`onTerminated` calls), the exit status is 0 and the process is gone within 300 ms of the request. Cases: `apple-event` (the
+parent's `quit_killer`, built with clang from `quit_killer.m`, sends the quit Apple Event with
+`-[NSRunningApplication terminate]`, as the Dock's Quit, logout and restart do), `apple-event-server` (the same with a
+`Bun.serve` keeping the event loop alive), `quit-action` (the app presses `Meta+q` with `simulateKeystrokes`) and
+`last-window-close` (the app's own window gets `performClose:` from `quit_helper.m`, through bun:ffi, on the main queue).
+Measured: 41 to 47 ms for the Apple Events and 17 to 22 ms for the other two; against the zed commit before the fix
+(`68cf7ca15e`) all four fail with "onTerminated did not run" (AppKit ended the process from inside the pump).
+
+```bash
+cd packages/native && bun run build        # the release addon
+cd packages/react && bun run build
+cd packages/native/examples/quit-e2e && bun run e2e    # sh run.sh; exit 0 passed, 1 a case failed, 2 could not run, 3 not checkable (no window)
+E2E_ONLY=apple-event,last-window-close bun run e2e     # some cases
+```
+
 ## Chrome oracles
 
 An oracle is a DOM/CSS question put to headless Chrome once, with the answer committed. Tests compare gpuix against the committed answer and never start Chrome, so the suites stay offline and the expected value is Chrome's, not a number someone typed in.

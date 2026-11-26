@@ -219,6 +219,34 @@ control that follows the key state would show there too. The key period measured
   osascript -e 'tell application "System Events" to tell (first process whose unix id is PID) to get name of every menu bar item of menu bar 1'
   ```
 
+## Quitting
+
+The host, not AppKit, ends the process. In embedded mode (the JS thread pumps the run loop) AppKit's own termination
+path is `terminate:` and ends in `exit()` inside the pump, so `onTerminated` never ran and a process with other work (a
+`Bun.serve`) could outlive its window or ignore a quit. Every way of quitting now goes through
+`MacPlatform::request_termination`, which runs GPUI's quit callback and, once the callback completes, marks the platform
+`Terminated` and posts `NSApplicationWillTerminateNotification` (what `terminate:` posts before it exits, for in-process
+observers such as WebKit's website-data flush and window restoration; the delegate's `applicationWillTerminate:` receives
+it and finds the platform already `Terminated`). The callback declines (returns `false`, without shutting down) while
+GPUI's `App` is borrowed, for instance a quit requested from inside an update: the platform then stays as it is and
+retries from the main queue, and further requests during that wait do nothing. After `Terminated` the pump returns
+within the same call, handling no queued event, source or display-link step. The next `tick()` returns `false`, and
+`startFrameLoop` runs `onTerminated`, which the adapters set to `process.exit(0)`:
+
+- **Quit** (⌘Q, the app menu's Quit item, or `cx.quit()`), dispatched to the main queue.
+- **The last window closing** (GPUI's `LastWindowClosed` policy, which the macOS run uses).
+- **The quit Apple Event**, which is what the Dock's Quit, logout, restart and `-[NSRunningApplication terminate]` send.
+  A handler for `aevt`/`quit` is installed in `applicationWillFinishLaunching:` (AppKit does not replace it afterwards),
+  so a logout during launch is not answered by AppKit's own handler, which would reach `NSTerminateCancel` and cancel it.
+  The handler requests the termination and returns, so the event is answered with success and a logout or restart is not
+  cancelled.
+- **Any other `terminate:`**: `applicationShouldTerminate:` requests the termination and answers `NSTerminateCancel`, so
+  AppKit never calls `exit()`; the host does.
+
+A quit from another thread (the Apple Event) wakes an idle host through the run-loop watch:
+[frames-and-wakes.md](frames-and-wakes.md#off-thread-wakes-an-apple-event-quit). The paths are checked by
+[the quit e2e](testing.md#the-quit-e2e). The blocking `run()` mode is unchanged.
+
 ## Window placement and displays
 
 An app can put a window on a second monitor and learn where the monitors are. Electron's answer is `x` / `y` in the window
