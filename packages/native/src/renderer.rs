@@ -4291,11 +4291,12 @@ impl GpuixRenderer {
     }
 
     /// The values `getComputedStyle` reads of an element, as `[name, value, name, value, ...]`, or
-    /// null while the element is not in the document. `pseudo_element` asks for a `::before` or
-    /// `::after` the element does not have. Laid out as `getBoundingClientRect` is, never stale.
+    /// null while the element is not in the document. `pseudo_element` (`"before"` or `"after"`)
+    /// asks for that box of the element. Laid out as `getBoundingClientRect` is, never stale.
     #[napi]
-    pub fn get_computed_style(&self, element_id: f64, pseudo_element: bool) -> Result<Option<Vec<String>>> {
+    pub fn get_computed_style(&self, element_id: f64, pseudo_element: Option<String>) -> Result<Option<Vec<String>>> {
         let id = to_element_id(element_id)?;
+        let pseudo_element = crate::css::computed_style::pseudo_of(pseudo_element)?;
         #[cfg(target_os = "macos")]
         {
             if !*self.initialized.lock().unwrap() {
@@ -9746,7 +9747,7 @@ impl GpuixView {
     pub(crate) fn computed_style(
         &mut self,
         id: u64,
-        pseudo: bool,
+        pseudo: Option<crate::css::sheet::Pseudo>,
         boxes: &crate::css::computed_style::Boxes,
         window: &mut gpui::Window,
         cx: &mut gpui::App,

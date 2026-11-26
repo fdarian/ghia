@@ -60,15 +60,6 @@ impl Pseudo {
     pub fn index(self) -> usize {
         self as usize
     }
-
-    /// The name `getComputedStyle` is asked for it by.
-    pub fn of_computed_style_name(name: &str) -> Option<Pseudo> {
-        match name {
-            "before" | "::before" | ":before" => Some(Pseudo::Before),
-            "after" | "::after" | ":after" => Some(Pseudo::After),
-            _ => None,
-        }
-    }
 }
 
 /// The rules a box matched, and the style they cascade to.
@@ -119,7 +110,9 @@ impl PseudoMatches {
     }
 }
 
-/// A box that exists: the style it has and the content it holds.
+/// A box that exists: the style it has and the content it holds. What the build of the box reads;
+/// the tests are its only reader until then.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, PartialEq)]
 pub struct PseudoStyle {
     pub style: Arc<StyleDesc>,
@@ -127,6 +120,7 @@ pub struct PseudoStyle {
     pub content: Vec<ComputedItem>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl PseudoStyle {
     /// The box `style` makes for `element`, `None` when its computed `content` is `normal` or
     /// `none` or its `display` is `none`. `style` is the cascaded style of the box with the blocks
@@ -144,6 +138,7 @@ impl PseudoStyle {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl RetainedElement {
     /// The style the rules declare for the box, whether or not it has content: what
     /// `getComputedStyle` reads. `None` when no rule matched the box.

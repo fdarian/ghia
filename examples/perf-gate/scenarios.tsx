@@ -169,7 +169,7 @@ function rowBackground(session: Session, y: number): string {
     let element = renderer.getElement(id)
     while (element && element.parentId !== listId) element = element.parentId === null ? undefined : renderer.getElement(element.parentId)
     if (!element) continue
-    const style = renderer.getComputedStyle(element.id, false)
+    const style = renderer.getComputedStyle(element.id, null)
     if (!style) throw new Error('the row has no computed style')
     for (let i = 0; i < style.length; i += 2) {
       if (style[i] === 'background-color') return style[i + 1]

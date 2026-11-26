@@ -440,7 +440,7 @@ interface NativeTestRendererApi
   simulatePointerLockLost(): void
   takeSimulatedWindowActions(): string[]
   getScrollMetrics(elementId: number): number[] | null
-  getComputedStyle(elementId: number, pseudoElement: boolean): string[] | null
+  getComputedStyle(elementId: number, pseudoElement: "before" | "after" | null): string[] | null
   getAttribute(elementId: number, name: string): string | null
   scrollByKey(key: string, shift: boolean): void
   setImage(elementId: number, bytes: Buffer | Uint8Array): void
@@ -2026,7 +2026,7 @@ export class TestRenderer implements NativeRenderer {
 
   /** `[name, value, name, value, ...]` of the computed style of an element, or null while it is not in
    *  the document. See `getComputedStyle`. */
-  getComputedStyle(elementId: number, pseudoElement: boolean): string[] | null {
+  getComputedStyle(elementId: number, pseudoElement: "before" | "after" | null): string[] | null {
     return this.native.getComputedStyle(elementId, pseudoElement)
   }
 

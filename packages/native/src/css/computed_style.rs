@@ -64,7 +64,7 @@ pub(crate) fn is_connected(tree: &crate::retained_tree::RetainedTree, id: u64) -
 pub(crate) fn read_in_window(
     tree: &Mutex<RetainedTree>,
     id: u64,
-    pseudo_element: bool,
+    pseudo_element: Option<crate::css::sheet::Pseudo>,
     window: &mut gpui::Window,
     cx: &mut gpui::App,
 ) -> Result<Option<Vec<String>>> {
@@ -91,15 +91,27 @@ pub(crate) fn read_in_window(
     Ok(view.update(cx, |view, cx| view.computed_style(id, pseudo_element, &boxes, window, cx)))
 }
 
+/// The box `getComputedStyle` is asked for: `before` or `after`, or none for the element itself.
+pub(crate) fn pseudo_of(name: Option<String>) -> Result<Option<crate::css::sheet::Pseudo>> {
+    match name.as_deref() {
+        None => Ok(None),
+        Some("before") => Ok(Some(crate::css::sheet::Pseudo::Before)),
+        Some("after") => Ok(Some(crate::css::sheet::Pseudo::After)),
+        Some(other) => Err(Error::from_reason(format!("there is no generated box named {other}"))),
+    }
+}
+
 /// The values of every property of the set for element `id`, or `None` when it is not in the
-/// document. `pseudo` asks for a `::before` or `::after` the element does not have, which Chrome
-/// reports with the values it inherits and the initial value of every other property.
+/// document. `pseudo` asks for its `::before` or `::after`: the style the rules for the box declare,
+/// on what the box inherits from its element; one no rule matches has what Chrome reports for a
+/// pseudo-element the element does not have, the values it inherits and the initial value of every
+/// other property.
 pub(crate) fn read(
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     id: u64,
     boxes: &Boxes,
-    pseudo: bool,
+    pseudo: Option<crate::css::sheet::Pseudo>,
 ) -> Option<Vec<String>> {
     let tree = ctx.tree;
     if !is_connected(tree, id) {
@@ -107,15 +119,30 @@ pub(crate) fn read(
     }
     let element = tree.elements.get(&id)?;
     let chain = crate::layout::content_visibility::ancestors_of(tree, id);
-    let parent = enter_ancestors(ctx, &chain);
-    let (style, custom) = if pseudo {
-        // A pseudo-element inherits from its element, not from the element's parent.
-        let (element_style, element_custom) = style_at_read(ctx, window, element);
-        ctx.inherited =
-            ctx.inherited.clone().descend_with_custom(Some(&element_style), element.has_inert_prop(), element_custom);
-        (StyleDesc::default(), ctx.inherited.custom.clone())
-    } else {
-        style_at_read(ctx, window, element)
+    let mut parent = enter_ancestors(ctx, &chain);
+    let (style, custom, content) = match pseudo {
+        Some(which) => {
+            // A pseudo-element inherits from its element, not from the element's parent, and its
+            // parent is the element.
+            let (element_style, element_custom) = style_at_read(ctx, window, element);
+            parent.lays_out_items = crate::layout::display::lays_out_items(element_style.display.as_deref());
+            ctx.inherited =
+                ctx.inherited.clone().descend_with_custom(Some(&element_style), element.has_inert_prop(), element_custom);
+            match element.pseudo_style(which) {
+                Some(declared) => {
+                    let (style, custom) = pseudo_style_at_read(ctx, element, declared);
+                    let content = style.content.as_ref().map(|content| {
+                        content.compute(|name| element.attribute(name).map(|value| value.into_owned())).to_css()
+                    });
+                    (style, custom, content.unwrap_or_else(|| "none".to_string()))
+                }
+                None => (StyleDesc::default(), ctx.inherited.custom.clone(), "none".to_string()),
+            }
+        }
+        None => {
+            let (style, custom) = style_at_read(ctx, window, element);
+            (style, custom, "normal".to_string())
+        }
     };
     let own = ctx.inherited.clone().descend_with_custom(Some(&style), element.has_inert_prop(), custom);
     let rtl = own.direction.direction.is_rtl();
@@ -126,13 +153,32 @@ pub(crate) fn read(
         style,
         own: &own,
         boxes,
-        pseudo,
+        pseudo: pseudo.is_some(),
+        content,
         parent: &parent,
         rtl,
-        no_box: pseudo || crate::layout::box_generation::is_display_none(element) || boxes.own.is_none(),
+        no_box: pseudo.is_some() || crate::layout::box_generation::is_display_none(element) || boxes.own.is_none(),
         viewport_width: ctx.inherited.lengths.viewport_width,
     };
     Some(view.values())
+}
+
+/// The style the rules declare for a box of `element`, with the states of the element folded in
+/// and its `var()` read, as a build of the box resolves it. A box has no transitions or animations
+/// of its own yet. `ctx.inherited` is the element's.
+fn pseudo_style_at_read(
+    ctx: &BuildCtx,
+    element: &crate::retained_tree::RetainedElement,
+    declared: &StyleDesc,
+) -> (StyleDesc, CustomProperties) {
+    let id = element.id;
+    let states = ctx.pointer_states(id, declared, element.has_inert_prop());
+    let stated = states.any().then(|| crate::events::state_styles::resolve_pointer_states(declared, states));
+    let base = stated.as_ref().unwrap_or(declared);
+    let (substituted, custom) = ctx.substitute_vars(id, Some(base));
+    let base = substituted.as_deref().unwrap_or(base);
+    let folded = ctx.focus_styles.folded(id, base, ctx.focus_handles.contains_key(&id));
+    ((*folded).clone(), custom)
 }
 
 /// Takes `ctx.inherited` down the ancestors of the element, as the build of the frame does, and
@@ -219,6 +265,8 @@ struct View<'a> {
     own: &'a Inherited,
     boxes: &'a Boxes,
     pseudo: bool,
+    /// The computed `content`, as `getComputedStyle` writes it.
+    content: String,
     parent: &'a ParentFacts,
     rtl: bool,
     no_box: bool,
@@ -334,7 +382,7 @@ impl View<'_> {
         out.push("will-change", "auto".to_string());
         out.push("contain", "none".to_string());
         out.push("scrollbar-gutter", "auto".to_string());
-        out.push("content", if self.pseudo { "none" } else { "normal" }.to_string());
+        out.push("content", self.content.clone());
         out.push("z-index", self.z_index());
         out.push("filter", filter_text(self.style.filter.as_deref()));
         out.push("backdrop-filter", filter_text(self.style.backdrop_filter.as_deref()));

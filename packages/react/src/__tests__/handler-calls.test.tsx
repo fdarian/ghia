@@ -138,7 +138,7 @@ function calls(r, ids) {
     getDebugFrameOverlay: () => r.getDebugFrameOverlay(),
     getDebugFrameOverlayStats: () => r.getDebugFrameOverlayStats(),
     getElement: () => r.getElement(ids.box),
-    getComputedStyle: () => r.getComputedStyle(ids.box, false),
+    getComputedStyle: () => r.getComputedStyle(ids.box, null),
     getElementBounds: () => r.getElementBounds(ids.box),
     getAnimationTimelineTime: () => r.getAnimationTimelineTime(),
     getBuiltElementBounds: () => r.getBuiltElementBounds(ids.box),

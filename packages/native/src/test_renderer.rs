@@ -3046,8 +3046,9 @@ impl TestGpuixRenderer {
     /// The values `getComputedStyle` reads of an element, as `[name, value, name, value, ...]`, or
     /// null while the element is not in the document. See `GpuixRenderer::get_computed_style`.
     #[napi]
-    pub fn get_computed_style(&self, element_id: f64, pseudo_element: bool) -> Result<Option<Vec<String>>> {
+    pub fn get_computed_style(&self, element_id: f64, pseudo_element: Option<String>) -> Result<Option<Vec<String>>> {
         let id = to_element_id(element_id)?;
+        let pseudo_element = crate::css::computed_style::pseudo_of(pseudo_element)?;
         let unflushed = take_unflushed();
         if unflushed != Dirty::Clean {
             self.flush_for(unflushed)?;

@@ -9,7 +9,7 @@ describe.skipIf(!hasNativeTestRenderer)("@keyframes and @property in a styleshee
   let renderer: TestRenderer
 
   const computed = (id: number, property: string) => {
-    const pairs = renderer.getComputedStyle(id, false)!
+    const pairs = renderer.getComputedStyle(id, null)!
     return pairs[pairs.indexOf(property) + 1]
   }
 
