@@ -74,12 +74,12 @@ async function runCase(name: CaseName): Promise<Result> {
     const problems: string[] = []
     if (!terminated) problems.push("onTerminated did not run")
     if (result.code !== 0) problems.push(`exit status ${result.code}`)
-    if (latencyMs > QUIT_LIMIT_MS) problems.push(`it took ${latencyMs.toFixed(0)} ms to end, over the ${QUIT_LIMIT_MS} ms limit`)
+    if (latencyMs > QUIT_LIMIT_MS) problems.push(`it took over the ${QUIT_LIMIT_MS} ms limit to end`)
     return {
       name,
       pass: problems.length === 0,
       latencyMs,
-      detail: problems.length === 0 ? `onTerminated ran, exit status 0, process gone ${latencyMs.toFixed(0)} ms after the request` : problems.join("; "),
+      detail: problems.length === 0 ? `onTerminated ran, exit status 0, process gone ${latencyMs.toFixed(0)} ms after the request` : `${problems.join("; ")} (exit status ${result.code}, process gone ${latencyMs.toFixed(0)} ms after the request)`,
     }
   } finally {
     if (app.exitCode === null) app.kill("SIGKILL")
