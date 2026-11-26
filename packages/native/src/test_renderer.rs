@@ -2004,6 +2004,10 @@ impl TestGpuixRenderer {
         if let Some(event) = event {
             self.events.lock().unwrap().push(event);
         }
+        // A disposed renderer records the features and has no window to tell, as it always did.
+        if TEST_STATE.with(|cell| cell.try_borrow().is_ok_and(|state| state.is_none())) {
+            return Ok(());
+        }
         // The stylesheets' media queries follow the preferences whether or not JS listens.
         update_view_or_defer(move |view, window, cx| {
             view.set_media_features(features);
