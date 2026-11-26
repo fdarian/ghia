@@ -151,7 +151,7 @@ Groups: order (background below the view, a child and a later sibling above it, 
 `packages/native/examples/quit-e2e/` checks that an app ends when asked to quit. Each case starts a fresh app process (a
 minimal React window on the real frame loop: the run-loop wake path, no `frameMs`, `focus: false`), lets it sit idle for
 1.5 s, sends one quit request and passes when `onTerminated` ran (the app records the `process.exit(0)` the adapter's
-`onTerminated` calls), the exit status is 0 and the process is gone within 2 s of the request. Cases: `apple-event` (the
+`onTerminated` calls), the exit status is 0 and the process is gone within 300 ms of the request. Cases: `apple-event` (the
 parent's `quit_killer`, built with clang from `quit_killer.m`, sends the quit Apple Event with
 `-[NSRunningApplication terminate]`, as the Dock's Quit, logout and restart do), `apple-event-server` (the same with a
 `Bun.serve` keeping the event loop alive), `quit-action` (the app presses `Meta+q` with `simulateKeystrokes`) and

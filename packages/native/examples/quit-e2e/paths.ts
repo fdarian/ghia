@@ -15,4 +15,4 @@ export const TERMINATED_FILE = "terminated.json"
 export const IDLE_MS = 1500
 
 /** How long the app has to end once asked. */
-export const QUIT_LIMIT_MS = 2000
+export const QUIT_LIMIT_MS = 300
