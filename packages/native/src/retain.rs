@@ -1318,9 +1318,9 @@ pub(crate) struct Retain {
     /// What a build that records nothing (`suspend`: the units of a patch) found running on each element it
     /// built, for [`Self::land_patch`] when the patch is drawn. None outside such a build.
     unrecorded_dynamic: Option<FxHashMap<u64, u8>>,
-    /// The elements whose `Transition` bit in `dynamic` a patch added, in a unit that a frame had found nothing running on
-    /// ([`Self::land_patch`]): a later patch that builds them says when it ends. A frame that builds the element writes
-    /// `dynamic` again, and the element leaves.
+    /// The elements whose `Transition` bit in `dynamic` a patch added, on an element that had none before the patch
+    /// ([`Self::land_patch`]): a later patch that builds them says when it ends, a patch root or not. A frame that builds the
+    /// element writes `dynamic` again, and the element leaves.
     patch_started: FxHashSet<u64>,
     /// The elements the frames left out of `changed` because they are dormant (`Sources::dormant`),
     /// with the kinds that were running on them when they fell asleep. Their records stay as they
@@ -2212,6 +2212,7 @@ impl Retain {
         if !(self.records.is_empty() && self.dynamic.is_empty()) {
             for_each_unseen_element(&self.rows_before, &seen, tree, |id| {
                 self.dynamic.remove(&id);
+                self.patch_started.remove(&id);
                 self.records.remove(&id);
             });
         }
@@ -2231,6 +2232,7 @@ impl Retain {
         let mut gone = FxHashSet::default();
         for_each_unseen_element(&left, &FxHashSet::default(), tree, |id| {
             self.dynamic.remove(&id);
+            self.patch_started.remove(&id);
             self.records.remove(&id);
             gone.insert(id);
         });
@@ -2284,17 +2286,26 @@ impl Retain {
         const LANDED: u8 = Dynamic::Transition as u8 | Dynamic::Spliced as u8;
         for &(id, bits) in found {
             let before = self.dynamic.get(&id).copied().unwrap_or(0);
-            self.land(id, (before & !LANDED) | (bits & LANDED));
+            let now = (before & !LANDED) | (bits & LANDED);
+            self.track_patch_started(id, before, now);
+            self.land(id, now);
         }
         for &(id, bits) in started {
             let before = self.dynamic.get(&id).copied().unwrap_or(0);
             let now = if self.patch_started.contains(&id) { (before & !LANDED) | (bits & LANDED) } else { before | (bits & LANDED) };
-            if bits & Dynamic::Transition as u8 != 0 && before & Dynamic::Transition as u8 == 0 {
-                self.patch_started.insert(id);
-            } else if now & Dynamic::Transition as u8 == 0 {
-                self.patch_started.remove(&id);
-            }
+            self.track_patch_started(id, before, now);
             self.land(id, now);
+        }
+    }
+
+    /// Keeps `patch_started` as the elements whose run a patch started: one that had no transition and has one now. A later patch
+    /// that builds the element, a patch root or not, is the one that says when it ends.
+    fn track_patch_started(&mut self, id: u64, before: u8, now: u8) {
+        const TRANSITION: u8 = Dynamic::Transition as u8;
+        if now & TRANSITION == 0 {
+            self.patch_started.remove(&id);
+        } else if before & TRANSITION == 0 {
+            self.patch_started.insert(id);
         }
     }
 
@@ -2629,9 +2640,11 @@ impl Retain {
         self.plan.ids.contains(&id)
     }
 
-    /// Whether the last build that wrote `dynamic` for the element `id`, or a patch since, found a transition running on it.
+    /// Whether the last build that wrote `dynamic` for the element `id`, or a patch since, found a transition running on it. An
+    /// element asleep (`dormant`) keeps the bits it fell asleep with, and its run goes on.
     pub(crate) fn runs_a_transition(&self, id: u64) -> bool {
-        self.dynamic.get(&id).is_some_and(|bits| bits & Dynamic::Transition as u8 != 0)
+        let running = |bits: Option<&u8>| bits.is_some_and(|bits| bits & Dynamic::Transition as u8 != 0);
+        running(self.dynamic.get(&id)) || running(self.dormant.get(&id))
     }
 
     /// Whether the last frame built whole has the element `id` as an anchor.
@@ -3592,6 +3605,7 @@ impl Retain {
                 self.records.remove(&below);
             }
             self.dynamic.remove(&below);
+            self.patch_started.remove(&below);
             self.unbuilt.remove(&below);
             self.woken.remove(&below);
             if self.dormant.remove(&below).is_some() {
@@ -4105,6 +4119,7 @@ impl Retain {
             .collect();
         for id in stale {
             self.dynamic.remove(&id);
+            self.patch_started.remove(&id);
             self.records.remove(&id);
         }
     }
@@ -7023,6 +7038,29 @@ mod tests {
         retain.land_patch(&[], &[(3, TRANSITION)]);
         retain.forget();
         assert!(retain.patch_started.is_empty() && retain.dynamic.is_empty());
+    }
+
+    #[test]
+    fn a_transition_asleep_in_the_dormant_set_is_a_run_that_goes_on() {
+        const TRANSITION: u8 = Dynamic::Transition as u8;
+        let mut retain = Retain::new();
+        retain.dormant.insert(1, TRANSITION);
+        retain.dormant.insert(2, Dynamic::Blink as u8);
+        assert!(retain.runs_a_transition(1), "asleep with a run");
+        assert!(!retain.runs_a_transition(2) && !retain.runs_a_transition(3));
+    }
+
+    #[test]
+    fn a_run_that_a_patch_root_started_is_cleared_by_a_patch_of_the_root_around_it() {
+        const TRANSITION: u8 = Dynamic::Transition as u8;
+        let mut retain = Retain::new();
+        retain.land_patch(&[(1, TRANSITION)], &[]);
+        assert!(retain.runs_a_transition(1) && retain.patch_started.contains(&1));
+        retain.land_patch(&[], &[(1, TRANSITION)]);
+        assert!(retain.runs_a_transition(1), "a run that goes on is kept");
+        retain.land_patch(&[], &[(1, 0)]);
+        assert!(!retain.runs_a_transition(1) && retain.dynamic.is_empty(), "the run ended in a patch of the anchor");
+        assert!(retain.patch_started.is_empty());
     }
 
     #[test]

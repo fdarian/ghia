@@ -738,12 +738,12 @@ it built is collected by `Retain::dynamic_bits(id, bits)` and handed to `Retain:
 element is written into `Retain::dynamic`, or cleared where the build found none (a run that ended), as a frame built whole writes it
 at its end. A unit that a patch builds (a hover inside a focused editor host or a `MotionValues` element, or a restyle that a relaid
 root covers) only gains the transitions it started: its frame found what runs in it and clears a run after its end, and a patch that
-cleared one would drop what the records of that frame still follow. What it gained it keeps (`Retain::patch_started`) and treats as a
-patch root does from then on: a later patch that builds the element says when the run ends, which clears the bit, so a unit is not built
+cleared one would drop what the records of that frame still follow. What it gained it keeps (`Retain::patch_started`, which a patch root's started runs join too) and treats as a
+patch root does from then on: a later patch that builds the element, a patch root or not, says when the run ends, which clears the bit, so a unit is not built
 by ticks for a run that is over. A frame that builds the element writes `dynamic` again and the element leaves the set. An anchor or a
 box root is no unit: its ticks cannot select it (`root_holding` looks among the units and the patch roots), and the frame built whole after
 does not record one while a run is in it (`end_anchor` refuses `own.dynamic`, `box_root` needs no running). A patch that finds a
-transition in one, on an element that had none in `dynamic`, is declined (`RunInRelaidRoot`) and the frame is built whole. A tick then finds the element among the dynamic ones and
+transition in one, on an element that had none in `dynamic` or asleep in `dormant`, is declined (`RunInRelaidRoot`) and the frame is built whole. A tick then finds the element among the dynamic ones and
 builds the root that holds it: `Retain::preview` looks for the innermost unit or patch root (`root_holding`), which is a patch root
 for what a hover started. A frame built whole that finds such a run does not give up the root: a patch root may hold running
 transitions that only paint (`Node::runs_a_paint_transition`, `Below::busy`; not a run of an opacity or a transform) and is still
@@ -753,7 +753,7 @@ row of a list or a scroll container is not recorded while a run is in it. A patc
 not record one: a patch root inside a scroller (`ScratchUnit::in_scroller`, the row of a `<virtual-list>` or of a scroll container) whose
 build finds a transition running is declined (`RunningInScroller`, in `unpatchable`) and the frame is built whole, for a hover and a
 commit alike. The verifier has no recorded root to compare such a patch with, and a tick of the run would paint what a scroll moved from
-where the build left it. The decline is for patch roots only: a patch root never holds a run a frame found, so a transition it finds was started by the
+where the build left it. The decline is for patch roots only: a patch root in a scroller never holds a run a frame found, so a transition it finds was started by the
 patch, where a unit in a scroller holds the run that a frame found in it and its ticks are patches of it, as before. A patch root outside a scroller is not moved by one, so a patch of it
 needs no such rule. Where a root outside a scroller holds its run, a whole frame inside the run still records the root, so the
 run's ticks have a unit.

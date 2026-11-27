@@ -331,12 +331,11 @@ impl GpuixView {
                 return None;
             };
             let patch_root = self.retain.is_patch_root(id);
-            let starts_a_run = unit.dynamic.iter().any(|&(element, bits)| bits & TRANSITION != 0 && !self.retain.runs_a_transition(element));
             // A frame built whole records no run in a scroller (`Node::holds_only_a_run_a_patch_follows`), so a patch root there
             // that left one would be a frame the verifier finds no root to compare with, and its ticks would paint what a scroll
-            // moved from where the build left it. The frame is built whole instead. Only a patch root: a unit in a scroller
-            // holds the run a frame found in it, and its ticks patch it. A patch root never holds one a frame found, so what a
-            // patch root finds there is what the patch started.
+            // moved from where the build left it. The frame is built whole instead. Only a patch root in a scroller: a patch root
+            // there never holds a run a frame found, so what it finds is what the patch started, where a unit in a scroller holds
+            // the run a frame found in it and its ticks patch it.
             if patch_root && unit.in_scroller && unit.dynamic.iter().any(|&(_, bits)| bits & TRANSITION != 0) {
                 self.patch.decline(declining.key("RunningInScroller".to_owned()));
                 return None;
@@ -344,9 +343,12 @@ impl GpuixView {
             // An anchor or a box root is not among the roots the ticks of a run select (`Retain::root_holding`), and the frame
             // built whole after the patch does not record one while a run is in it, so a run that a patch started in one
             // would have no root to tick. The frame is built whole, which records it as the unit it is then.
-            if !patch_root && !self.retain.is_unit(id) && starts_a_run {
-                self.patch.decline(declining.key("RunInRelaidRoot".to_owned()));
-                return None;
+            if !patch_root && !self.retain.is_unit(id) {
+                let starts_a_run = unit.dynamic.iter().any(|&(element, bits)| bits & TRANSITION != 0 && !self.retain.runs_a_transition(element));
+                if starts_a_run {
+                    self.patch.decline(declining.key("RunInRelaidRoot".to_owned()));
+                    return None;
+                }
             }
             tapes.push((id, unit.tape));
             units.push((unit.id, unit.element));

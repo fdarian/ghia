@@ -45,14 +45,14 @@ const TRANSITIONS: Record<Variant, string | undefined> = {
 const REST = "#223344"
 const TINT = "#443322"
 
-function Row({ index, variant, seen, tint }: { index: number; variant: Variant; seen: string[]; tint?: boolean }) {
-  if (variant === "child") {
+function Row(props: { index: number; variant: Variant; seen: string[]; tint?: boolean }) {
+  if (props.variant === "child") {
     // The row declares nothing that runs: the child has a background of its own and a transition of it, and the row's hover changes
     // it through `groupHover`, so what starts the run is an element below the one the hover restyles.
     return (
-      <div testId={`row-${index}`} style={{ width: 150, height: ROW, flexShrink: 0, group: true }}>
+      <div testId={`row-${props.index}`} style={{ width: 150, height: ROW, flexShrink: 0, group: true }}>
         <div
-          testId={`child-${index}`}
+          testId={`child-${props.index}`}
           style={{
             width: 150,
             height: ROW,
@@ -60,14 +60,14 @@ function Row({ index, variant, seen, tint }: { index: number; variant: Variant; 
             transition: `background-color ${DURATION}ms linear`,
             groupHover: { backgroundColor: "#664422" },
           }}
-          onTransitionRun={(event) => seen.push(`run ${index} ${event.propertyName}`)}
-          onTransitionEnd={(event) => seen.push(`end ${index} ${event.propertyName}`)}
-        >{`row-${index}`}</div>
+          onTransitionRun={(event) => props.seen.push(`run ${props.index} ${event.propertyName}`)}
+          onTransitionEnd={(event) => props.seen.push(`end ${props.index} ${event.propertyName}`)}
+        >{`row-${props.index}`}</div>
       </div>
     )
   }
   const style =
-    variant === "colour"
+    props.variant === "colour"
       ? {
           width: 150,
           height: ROW,
@@ -81,28 +81,28 @@ function Row({ index, variant, seen, tint }: { index: number; variant: Variant; 
           width: 150,
           height: ROW,
           flexShrink: 0,
-          backgroundColor: tint ? TINT : REST,
+          backgroundColor: props.tint ? TINT : REST,
           borderBottom: "1px solid #112233",
-          transition: TRANSITIONS[variant],
+          transition: TRANSITIONS[props.variant],
           hover: { backgroundColor: "#664422" },
         }
   return (
     <div
-      testId={`row-${index}`}
+      testId={`row-${props.index}`}
       style={style}
-      onTransitionEnd={(event) => seen.push(`end ${index} ${event.propertyName}`)}
-      onTransitionRun={(event) => seen.push(`run ${index} ${event.propertyName}`)}
+      onTransitionEnd={(event) => props.seen.push(`end ${props.index} ${event.propertyName}`)}
+      onTransitionRun={(event) => props.seen.push(`run ${props.index} ${event.propertyName}`)}
     >
-      <div style={{ color: variant === "colour" ? undefined : "#ffffff" }}>{`row-${index}`}</div>
+      <div style={{ color: props.variant === "colour" ? undefined : "#ffffff" }}>{`row-${props.index}`}</div>
     </div>
   )
 }
 
-function Page({ variant, seen }: { variant: Variant; seen: string[] }) {
+function Page(props: { variant: Variant; seen: string[] }) {
   return (
     <div testId="column" style={{ width: 200, height: ROW * COUNT, flexDirection: "column", overflow: "hidden" }}>
       {Array.from({ length: COUNT }, (_, index) => (
-        <Row key={index} index={index} variant={variant} seen={seen} />
+        <Row key={index} index={index} variant={props.variant} seen={props.seen} />
       ))}
     </div>
   )
@@ -335,7 +335,7 @@ describeNative("a hover whose element transitions colours", { timeout: TIMEOUT }
 })
 
 /** What the pages below do with a colour transition that runs in a root a frame built whole records, or does not. */
-type Layout = "column" | "unit" | "list" | "unit-scroller" | "box" | "anchor"
+type Layout = "column" | "unit" | "list" | "unit-scroller" | "box" | "anchor" | "asleep"
 
 let tintRows!: (tinted: boolean) => void
 let editPage!: (edit: number) => void
@@ -345,10 +345,11 @@ let editPage!: (edit: number) => void
  * (`Dynamic::MotionValues`, here on a colour, which only paints), so the hover is in a unit and not in a patch root. `list`: the rows are those of a `<virtual-list>`, a scroller.
  * `unit-scroller`: the rows of `unit` in a scroll container. `box`: the rows are in a box of a definite size with a caption above them whose text `editPage`
  * changes, so the edit is a relayout of a box root. `anchor`: the same in a scroll container, whose caption is no box root, so the scroll container is
- * the anchor of the edit. `tintRows(true)` is a commit that changes the colour of row 1 (`Dirty::PaintPatchable`), and `editPage` one that edits the page, which
+ * the anchor of the edit. `asleep`: the `box` clipped to a window of three rows, and `tintRows(true)` recolours the last row, which is out of sight.
+ * `tintRows(true)` is a commit that changes the colour of row 1 (`Dirty::PaintPatchable`), and `editPage` one that edits the page, which
  * is a frame built whole.
  */
-function Layouts({ layout }: { layout: Layout }) {
+function Layouts(props: { layout: Layout }) {
   const [tinted, setTinted] = React.useState(false)
   const [edit, setEdit] = React.useState(0)
   tintRows = (next) => flushSync(() => setTinted(next))
@@ -356,7 +357,7 @@ function Layouts({ layout }: { layout: Layout }) {
   const bound = useMotionValue("#ffffff")
   const rows = Array.from({ length: COUNT }, (_, index) => {
     const row = <Row key={index} index={index} variant="background" seen={[]} tint={tinted && index === 1} />
-    return layout === "unit" || layout === "unit-scroller" ? (
+    return props.layout === "unit" || props.layout === "unit-scroller" ? (
       <div key={index} testId={`unit-${index}`} style={{ width: 150, height: ROW, flexShrink: 0, color: bound }}>
         {row}
       </div>
@@ -364,7 +365,7 @@ function Layouts({ layout }: { layout: Layout }) {
       row
     )
   })
-  if (layout === "unit-scroller") {
+  if (props.layout === "unit-scroller") {
     return (
       <>
         <div testId="scroller" style={{ width: 200, height: ROW * 3, flexDirection: "column", overflow: "scroll", scrollbarWidth: "none" }}>
@@ -376,29 +377,31 @@ function Layouts({ layout }: { layout: Layout }) {
       </>
     )
   }
-  if (layout === "box" || layout === "anchor") {
+  if (props.layout === "box" || props.layout === "anchor" || props.layout === "asleep") {
     // Rows with no hover style: a root that holds a row that has one is no box root.
     const plain = Array.from({ length: COUNT }, (_, index) => (
       <div
         key={index}
         testId={`row-${index}`}
-        style={{ width: 150, height: ROW, flexShrink: 0, backgroundColor: tinted && index === 1 ? TINT : REST, transition: TRANSITIONS.background }}
+        style={{ width: 150, height: ROW, flexShrink: 0, backgroundColor: tinted && index === (props.layout === "asleep" ? COUNT - 1 : 1) ? TINT : REST, transition: TRANSITIONS.background }}
       >{`row-${index}`}</div>
     ))
     const style =
-      layout === "box"
+      props.layout === "box"
         ? { width: 200, height: ROW * (COUNT + 1), flexDirection: "column" }
-        : { width: 200, height: ROW * (COUNT + 2), flexDirection: "column", overflow: "scroll", scrollbarWidth: "none" }
+        : props.layout === "asleep"
+          ? { width: 200, height: ROW * 3, flexDirection: "column", overflow: "hidden" }
+          : { width: 200, height: ROW * (COUNT + 2), flexDirection: "column", overflow: "scroll", scrollbarWidth: "none" }
     return (
-      <div testId={layout} style={style}>
-        <div testId="caption" style={layout === "box" ? { width: 200, height: ROW, flexShrink: 0 } : { flexShrink: 0 }}>{`caption ${edit}`}</div>
+      <div testId={props.layout} style={style}>
+        <div testId="caption" style={props.layout === "box" || props.layout === "asleep" ? { width: 200, height: ROW, flexShrink: 0 } : { flexShrink: 0 }}>{`caption ${edit}`}</div>
         {plain}
       </div>
     )
   }
   return (
     <>
-      {layout === "list" ? (
+      {props.layout === "list" ? (
         <virtual-list testId="list" itemCount={COUNT} estimatedItemHeight={ROW} overdraw={0} style={{ width: 200, height: ROW * 3, scrollbarWidth: "none" }}>
           {rows}
         </virtual-list>
@@ -434,8 +437,7 @@ async function played(layout: Layout, play: (renderer, snap: Snap) => void) {
       root.unmount()
     }
   }
-  const [on, off] = results
-  return { on, off }
+  return { on: results[0], off: results[1] }
 }
 
 function sameAsOff(shown: { on: { pictures: string[]; mismatches: number }; off: { pictures: string[] } }) {
@@ -681,6 +683,30 @@ describeNative("a colour transition that runs in a root that a patch builds", { 
       expect(shown.off.unpatchable.RunInRelaidRoot).toBeUndefined()
     })
   }
+
+  // A transition asleep on a row nobody sees (`Retain::dormant`) is a run that goes on: the edit of a caption in the box around it starts no run,
+  // and stays a patch (`RunInRelaidRoot` counts what is in `dormant` too).
+  unverified("patches the edit of a caption in a box whose row out of sight has a colour transition asleep", async () => {
+    const root = await openPage(<Layouts layout="asleep" />, true)
+    const renderer = root.renderer
+    try {
+      editPage(1)
+      renderer.drawFrame()
+      tintRows(true)
+      renderer.drawFrame()
+      // The tick that finds the row asleep is built whole, and so is the edit that follows it: the next one is the patch.
+      elapse(renderer, FRAME * 4)
+      editPage(2)
+      renderer.drawFrame()
+      editPage(3)
+      const edit = frames(renderer, () => renderer.drawFrame())
+      expect(edit.patched, "the edit").toBeGreaterThanOrEqual(1)
+      expect(edit.painted).toBe(0)
+      expect(JSON.parse(renderer.getPatchCounters().unpatchable).RunInRelaidRoot).toBeUndefined()
+    } finally {
+      root.unmount()
+    }
+  })
 
   // A run that a patch started in a unit is cleared when a patch sees it end, and not left for the frame built whole after it: the next patch
   // (a hover on another row) builds the unit of the row that hovers and no other.
