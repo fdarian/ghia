@@ -53,6 +53,8 @@ const PLAIN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   "attach",
   "detach",
   "resize",
+  "popstate",
+  "hashchange",
 ])
 
 /**

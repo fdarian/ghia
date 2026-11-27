@@ -2259,6 +2259,7 @@ impl GpuixRenderer {
                         view.observe_appearance(window, cx);
                         view.observe_viewport(window, cx);
                         view.observe_scroller_style(cx);
+                        view.observe_media_features(window, cx);
                         view.set_frameless(window_options.frameless());
                         crate::events::enable_dom_hit_testing(window);
                         crate::focus_emulation::apply(window, cx);
@@ -2418,6 +2419,7 @@ impl GpuixRenderer {
                                         view.observe_appearance(window, cx);
                                         view.observe_viewport(window, cx);
                                         view.observe_scroller_style(cx);
+                                        view.observe_media_features(window, cx);
                                         view.set_frameless(window_options.frameless());
                                         crate::events::enable_dom_hit_testing(window);
                                         crate::focus_emulation::apply(window, cx);
@@ -4289,11 +4291,12 @@ impl GpuixRenderer {
     }
 
     /// The values `getComputedStyle` reads of an element, as `[name, value, name, value, ...]`, or
-    /// null while the element is not in the document. `pseudo_element` asks for a `::before` or
-    /// `::after` the element does not have. Laid out as `getBoundingClientRect` is, never stale.
+    /// null while the element is not in the document. `pseudo_element` (`"before"` or `"after"`)
+    /// asks for that box of the element. Laid out as `getBoundingClientRect` is, never stale.
     #[napi]
-    pub fn get_computed_style(&self, element_id: f64, pseudo_element: bool) -> Result<Option<Vec<String>>> {
+    pub fn get_computed_style(&self, element_id: f64, pseudo_element: Option<String>) -> Result<Option<Vec<String>>> {
         let id = to_element_id(element_id)?;
+        let pseudo_element = crate::css::computed_style::pseudo_of(pseudo_element)?;
         #[cfg(target_os = "macos")]
         {
             if !*self.initialized.lock().unwrap() {
@@ -4795,6 +4798,22 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Opens an `http:`, `https:`, `mailto:` or `tel:` URL with the system's default handler. Any other
+    /// scheme is an error.
+    #[napi]
+    pub fn open_url(&self, url: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        // Only the App is needed, so it does not lease the root view: a link handler can run inside a sync input handler.
+        return update_window_without_view(move |_window, cx| crate::open_url::open(cx, &url))?
+            .map_err(Error::from_reason);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = url;
+            Err(Error::from_reason("Opening a link in the system's handler is only implemented on macOS"))
+        }
     }
 
     /// Make the fonts in a TrueType or OpenType file (or a collection) usable by
@@ -6439,6 +6458,11 @@ pub(crate) struct GpuixView {
     appearance_subscription: Option<gpui::Subscription>,
     bounds_subscription: Option<gpui::Subscription>,
     media_viewport: gpui::Size<gpui::Pixels>,
+    /// The OS preferences the stylesheets' media queries read. The test renderer sets its own.
+    pub(crate) media_features: crate::media::MediaFeatures,
+    /// Keeps `media_features` current, whether or not JS listens for `mediaChange`.
+    #[cfg(target_os = "macos")]
+    pub(crate) sheet_media_observer: Option<crate::media::MediaChangeObserver>,
     /// Stands in for the platform's pointer lock in the test renderer, whose
     /// offscreen window is never key and so can never take a real one.
     simulated_platform: Option<crate::events::pointer_lock::SimulatedPlatform>,
@@ -6868,6 +6892,7 @@ fn sync_motions(
 ) -> (Vec<u64>, Vec<(u64, u64)>) {
     let painted = measurements.painted_frames();
     let mut root_font = crate::motion::ParentValues::initial();
+    root_font.custom = crate::css::custom_properties::CustomProperties::with_registered(tree.sheets.registered.clone());
     root_font.lengths = LengthContext::initial(
         f64::from(f32::from(viewport.width)),
         f64::from(f32::from(viewport.height)),
@@ -7541,6 +7566,9 @@ impl GpuixView {
             appearance_subscription: None,
             bounds_subscription: None,
             media_viewport: gpui::Size::default(),
+            media_features: crate::media::read_system_features(),
+            #[cfg(target_os = "macos")]
+            sheet_media_observer: None,
             simulated_platform: None,
             simulated_window_actions: None,
             resync_by_frame: false,
@@ -7606,12 +7634,13 @@ impl GpuixView {
     /// produces. Runs deferred, after GPUI is done with the event. A button
     /// press does not come through here: its listener dispatches it at once.
     /// Says whether the input only changed how elements paint, for the caller to ask
-    /// the window for a tick (`Output::paint`).
+    /// the window for a tick (`Output::paint`), and what the sheets restyled for it
+    /// (`Output::live`), for the caller to invalidate the window with.
     pub(crate) fn handle_pointer(
         &mut self,
         mut sample: crate::events::dispatcher::PointerSample,
         cx: &mut gpui::Context<Self>,
-    ) -> bool {
+    ) -> (bool, Dirty) {
         if let (Some(platform), crate::events::dispatcher::PointerAction::Move { .. }) =
             (&self.simulated_platform, &sample.action)
         {
@@ -7622,12 +7651,13 @@ impl GpuixView {
             cx.notify();
         }
         let repaint = !output.paint.is_empty();
+        let live = output.live;
         if let Some(callback) = &self.event_callback {
             for payload in output.into_payloads() {
                 callback(payload);
             }
         }
-        repaint
+        (repaint, live)
     }
 
     pub(crate) fn set_live_image(
@@ -7696,7 +7726,7 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> std::result::Result<(), String> {
-        check_font(&bytes)?;
+        crate::text::font_check::check_font(&bytes)?;
         crate::text::font_family::Fonts::of(cx).add(bytes).map_err(|error| error.to_string())?;
         cx.notify();
         window.refresh();
@@ -7874,6 +7904,7 @@ impl GpuixView {
                 // while building, so a change has to rebuild even when no JS
                 // listener asked for the event.
                 cx.notify();
+                view.sync_sheet_media(window, cx);
                 if view.window_media_change {
                     crate::media::emit_media_change(&view.event_callback, "appearance");
                 }
@@ -7901,7 +7932,10 @@ impl GpuixView {
         cx: &mut gpui::Context<Self>,
     ) {
         self.media_viewport = window.viewport_size();
-        self.bounds_subscription = Some(cx.observe_window_bounds(window, |view, window, _cx| {
+        // The window is being made and nothing is drawn yet, so what a flip would have to draw is.
+        self.sheet_media_environment(window);
+        self.bounds_subscription = Some(cx.observe_window_bounds(window, |view, window, cx| {
+            view.sync_sheet_media(window, cx);
             if crate::media::viewport_resized(&mut view.media_viewport, window.viewport_size())
                 && view.window_media_change
             {
@@ -8420,6 +8454,7 @@ impl BuildCtx<'_> {
     /// The states of an inline box, for the style it shows.
     fn inline_states(&self) -> impl Fn(u64, &StyleDesc) -> crate::events::state_styles::PointerStates + '_ {
         move |id: u64, style: &StyleDesc| {
+            let id = crate::layout::generated::state_owner(id);
             let inert = self
                 .tree
                 .elements
@@ -8440,6 +8475,7 @@ impl BuildCtx<'_> {
         let focus_styles = &self.focus_styles;
         let controls = &self.control_styles;
         let states = |id: u64, style: &StyleDesc| {
+            let id = crate::layout::generated::state_owner(id);
             let inert = tree
                 .elements
                 .get(&id)
@@ -8669,6 +8705,13 @@ impl Inherited {
         GroupState::default()
     }
 
+    /// The tree's `@property` registrations in force at the top of it: what an element computes its
+    /// custom properties to starts from their initial values.
+    pub(crate) fn with_registered_properties(mut self, tree: &crate::retained_tree::RetainedTree) -> Self {
+        self.custom = crate::css::custom_properties::CustomProperties::with_registered(tree.sheets.registered.clone());
+        self
+    }
+
     pub(crate) fn root(
         theme: &Theme,
         appearance: gpui::WindowAppearance,
@@ -8745,7 +8788,7 @@ impl Inherited {
     fn custom_of(&self, style: Option<&StyleDesc>) -> crate::css::custom_properties::CustomProperties {
         match style.and_then(|style| style.custom_properties.as_ref()) {
             Some(declared) => self.custom.descend(declared),
-            None => self.custom.clone(),
+            None => self.custom.inherit(),
         }
     }
 
@@ -9614,6 +9657,9 @@ impl GpuixView {
         fonts: Fonts,
         start: BuildStart,
     ) -> BuildCtx<'a> {
+        // A build outside `render` (a read that forces layout) sees the sheets' keyframes and fonts too.
+        self.keyframes.set_sheet(&tree.sheets.keyframes);
+        fonts.sync_faces(&tree.sheets.font_faces);
         BuildCtx {
             tree,
             inside_marker: None,
@@ -9674,20 +9720,23 @@ impl GpuixView {
     pub(crate) fn computed_style(
         &mut self,
         id: u64,
-        pseudo: bool,
+        pseudo: Option<crate::css::sheet::Pseudo>,
         boxes: &crate::css::computed_style::Boxes,
         window: &mut gpui::Window,
         cx: &mut gpui::App,
     ) -> Option<Vec<String>> {
         let tree_arc = self.tree.clone();
-        let tree = tree_arc.lock().unwrap();
+        let mut tree = tree_arc.lock().unwrap();
+        let unheld = pseudo.and_then(|pseudo| tree.unheld_pseudo_style(id, pseudo));
+        let tree = tree;
         let callback = self.event_callback.clone();
         let activation = self.activation();
         let pointer_state = self.pointer.clone();
         let pointer = pointer_state.borrow();
         let mut highlight_events = Vec::new();
         let start = BuildStart {
-            inherited: Inherited::root(&Theme::dark(), window.appearance(), self.frameless, window.viewport_size()),
+            inherited: Inherited::root(&Theme::dark(), window.appearance(), self.frameless, window.viewport_size())
+                .with_registered_properties(&tree),
             doc_path: Vec::new(),
             doc_hosts: Arc::from([]),
             now: self.read_instant().unwrap_or_else(|| self.clock.now()),
@@ -9700,7 +9749,7 @@ impl GpuixView {
             scroller: None,
         };
         let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), start);
-        crate::css::computed_style::read(&mut ctx, window, id, boxes, pseudo)
+        crate::css::computed_style::read(&mut ctx, window, id, boxes, pseudo, unheld.as_ref())
     }
 
     /// Builds the subtree of `id` for gpui, which asked for it while it laid out or prepainted the
@@ -10213,6 +10262,8 @@ impl GpuixView {
 
         let mut hasher = rustc_hash::FxHasher::default();
         self.keyframes.epoch().hash(&mut hasher);
+        // The registry takes the sheets' keyframes when a frame builds; until then this says they moved.
+        tree.sheets.keyframes.epoch().hash(&mut hasher);
         tree.reparents().hash(&mut hasher);
         let viewport = window.viewport_size();
         f32::from(viewport.width).to_bits().hash(&mut hasher);
@@ -10630,13 +10681,19 @@ impl gpui::Render for GpuixView {
 
         // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.
         let tree_arc = self.tree.clone();
+        {
+            // Before the live states: a `focus()` requested in the commit that made the element and the
+            // blur of a control that lost focusability land here, and the sheets must read the result.
+            let tree = tree_arc.lock().unwrap();
+            self.sync_focus_handles(&tree, window, cx);
+        }
+        self.sync_live_states(window);
+
         let tree = tree_arc.lock().unwrap();
+        self.keyframes.set_sheet(&tree.sheets.keyframes);
         let callback = self.event_callback.clone();
         // What this build reports of the elements is read from the tree as it stands.
         tree.relevance.note_transforms_captured();
-
-        // Sync focus handles before building elements.
-        self.sync_focus_handles(&tree, window, cx);
 
         // Ensure custom element instances are destroyed when their IDs disappear.
         self.custom_registry
@@ -10841,7 +10898,8 @@ impl gpui::Render for GpuixView {
                             window.appearance(),
                             self.frameless,
                             window.viewport_size(),
-                        ),
+                        )
+                        .with_registered_properties(&tree),
                         doc_path: Vec::new(),
                         doc_hosts: Arc::from([]),
                         now,
@@ -11996,6 +12054,8 @@ fn build_element_unpumped(
     let Some(element) = tree.elements.get(&id) else {
         return absent_host(id);
     };
+    // The states of a generated box (`.btn:hover::before`) are those of the element it belongs to.
+    let state_id = crate::layout::generated::state_owner(id);
     crate::perf_counters::element_built();
     if contents_dynamic != 0 {
         ctx.retain.dynamic_bits(contents_dynamic | crate::retain::Dynamic::Spliced as u8);
@@ -12044,7 +12104,7 @@ fn build_element_unpumped(
     // folded into the base here, before motion, so the GPUI element never sees them: the dispatcher
     // decides who is hovered.
     let pointer_states = declared
-        .map(|style| ctx.pointer_states(id, style, element.has_inert_prop()))
+        .map(|style| ctx.pointer_states(state_id, style, element.has_inert_prop()))
         .unwrap_or_default();
     let state_style = declared.and_then(|style| {
         pointer_states
@@ -12055,13 +12115,13 @@ fn build_element_unpumped(
     // A `var()` reads the custom properties the element computes to, its own included, and those
     // of the focus variants that apply to it. It is substituted before anything reads the style, so inheritance, transitions, animations and
     // motion see what the element declares.
-    let (var_style, own_custom) = ctx.substitute_vars(id, base_style);
+    let (var_style, own_custom) = ctx.substitute_vars(state_id, base_style);
     if var_style.is_some() {
         crate::css::custom_properties::reads::note();
     }
     let base_style = var_style.as_deref().or(base_style);
     ctx.retain.pointer(pointer_states);
-    ctx.retain.focus(&ctx.focus_styles, id, ctx.focus_handles.contains_key(&id));
+    ctx.retain.focus(&ctx.focus_styles, state_id, ctx.focus_handles.contains_key(&state_id));
     if let Some(links) = crate::accessibility::links_key(id) {
         ctx.retain.shape(links);
     }
@@ -12115,7 +12175,15 @@ fn build_element_unpumped(
     // moved, as the builders lay it.
     let focus_reset_style = animated
         .current(base_style)
-        .and_then(|style| ctx.focus_styles.folded_for_resets(id, style, ctx.focus_handles.contains_key(&id)));
+        .and_then(|style| {
+            let focusable = ctx.focus_handles.contains_key(&state_id);
+            // A box has no focus handle for the builders to lay a variant over it with.
+            if state_id == id {
+                ctx.focus_styles.folded_for_resets(id, style, focusable)
+            } else {
+                ctx.focus_styles.folded_for_box(state_id, style, focusable)
+            }
+        });
     let current_style = focus_reset_style.as_deref().or(animated.current(base_style));
     // An atomic inline's overlay is laid over its style after it has descended (below): what the boxes around it
     // declare is in `ctx.inherited` already.
@@ -12188,7 +12256,7 @@ fn build_element_unpumped(
     // Children inherit what the element computes to with its focus variants laid over it, which
     // is the style a transitioning element already has (motion folds them), so with or without a
     // transition `.card:focus-within { color: red }` reaches the text below.
-    let descend_style = style.map(|style| ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id)));
+    let descend_style = style.map(|style| ctx.focus_styles.folded(state_id, style, ctx.focus_handles.contains_key(&state_id)));
     let mut descended = ctx
         .inherited
         .clone()
@@ -12203,7 +12271,7 @@ fn build_element_unpumped(
         descended.colors = ctx
             .inherited
             .colors
-            .descend(&ctx.focus_styles.folded(id, overlaid, ctx.focus_handles.contains_key(&id)));
+            .descend(&ctx.focus_styles.folded(state_id, overlaid, ctx.focus_handles.contains_key(&state_id)));
     }
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
     let style = atomic_overlaid.as_ref().or(style);
@@ -12229,7 +12297,7 @@ fn build_element_unpumped(
     // the focus variants, which the builders lay over the element, folded in.
     let focus_folded = style.map(|style| {
         ctx.focus_styles
-            .folded(id, style, ctx.focus_handles.contains_key(&id))
+            .folded(state_id, style, ctx.focus_handles.contains_key(&state_id))
     });
     let resolved = crate::resolved_style::Resolved::of(
         element,
@@ -13028,7 +13096,7 @@ pub(crate) fn build_host_container(
     }
     // A skipped element is still read out, though its paragraphs are not built.
     let reads_text = !skipped || (a11y_active && crate::accessibility::carries_text(element));
-    let planned = (!element.children.is_empty() && reads_text).then(|| crate::text::plan_cache::planned(ctx.tree, element));
+    let planned = (!crate::layout::generated::childless(ctx.tree, element) && reads_text).then(|| crate::text::plan_cache::planned(ctx.tree, element));
     // Only a screen reader reads it, and the retained replay key has `a11y_active`.
     let text = if a11y_active && reads_text {
         crate::accessibility::read_text(element, planned.as_deref())
@@ -13083,7 +13151,11 @@ pub(crate) fn build_host_container(
     crate::text::atomic::report_containing_height(el, containing_heights);
     let focus_folded = style.map(|style| {
         ctx.focus_styles
-            .folded(element.id, style, ctx.focus_handles.contains_key(&element.id))
+            .folded(
+                crate::layout::generated::state_owner(element.id),
+                style,
+                ctx.focus_handles.contains_key(&crate::layout::generated::state_owner(element.id)),
+            )
     });
     if crate::layout::stacking::forms_context(
         focus_folded.as_deref(),
@@ -13345,7 +13417,7 @@ fn build_content(
     let mut content_elements = Vec::new();
     let mut placements = Vec::new();
     let trim = std::mem::take(&mut ctx.text_box_trim);
-    if element.children.is_empty() {
+    if crate::layout::generated::childless(ctx.tree, element) {
         if let Some(content) = crate::text::search::leaf_text(ctx.tree, element) {
             ctx.retain.text();
             ctx.inherited.colors.note_read();
@@ -13361,7 +13433,7 @@ fn build_content(
 
     // Children. Consecutive inline children are one paragraph, see
     // `text::inline`; the rest are elements of their own.
-    if !element.children.is_empty() {
+    if !crate::layout::generated::childless(ctx.tree, element) {
         // The baseline of an `inline-flex` or `inline-grid` box is its first item's.
         let probe = ctx
             .baseline_probe
@@ -13617,7 +13689,7 @@ fn build_contents_container(
     if let Some(variations) = ctx.inherited.font_variations.clone() {
         el = el.font_variations(variations);
     }
-    let planned = (!element.children.is_empty()).then(|| crate::text::plan_cache::planned(ctx.tree, element));
+    let planned = (!crate::layout::generated::childless(ctx.tree, element)).then(|| crate::text::plan_cache::planned(ctx.tree, element));
     let (content, placements, containing_heights) =
         build_content(element, planned.as_ref().map_or(&[], |planned| &planned.children), ctx, window, cx);
     el = crate::text::atomic::report_containing_height(el, containing_heights);
@@ -13734,7 +13806,7 @@ fn paragraph_content(
     let line = ctx
         .inline_line
         .take()
-        .or_else(|| (paragraph.atomics().next().is_some() || paragraph.has_placeholder()).then(|| paragraph.key()));
+        .or_else(|| (paragraph.atomics().next().is_some() || paragraph.has_placeholder() || paragraph.has_generated()).then(|| paragraph.key()));
     let (aligned_boxes, atomics) = build_atomics(paragraph, &styles, &motion, line.as_ref(), ctx, window, cx);
     let verifying = ctx.retain.verifying();
     let (paragraph_element, subtree, boxes_digest) = {
@@ -13803,6 +13875,7 @@ fn paragraph_content(
             group: None,
             line,
             cell: ctx.inherited.table_cell,
+            holes: paragraph.generated_ranges().into(),
             selectable: ctx.inherited.selectable,
             highlight: ctx
                 .inherited
@@ -16779,33 +16852,6 @@ mod window_options_tests {
             other => panic!("expected a layer-shell window kind, got {other:?}"),
         }
     }
-}
-
-/// Rejects fonts GPUI's text system cannot load. It unwraps the family, full and
-/// PostScript name records and aborts the whole process when one is missing, and
-/// skips a font without an "m" glyph, which would leave the family unresolvable.
-fn check_font(bytes: &[u8]) -> std::result::Result<(), String> {
-    use ttf_parser::name_id::{FAMILY, FULL_NAME, POST_SCRIPT_NAME};
-
-    let face = ttf_parser::Face::parse(bytes, 0)
-        .map_err(|error| format!("not a TrueType or OpenType font: {error}"))?;
-    for (id, what) in [
-        (FAMILY, "family"),
-        (FULL_NAME, "full"),
-        (POST_SCRIPT_NAME, "PostScript"),
-    ] {
-        let named = face
-            .names()
-            .into_iter()
-            .any(|name| name.name_id == id && name.to_string().is_some());
-        if !named {
-            return Err(format!("font has no {what} name"));
-        }
-    }
-    if face.glyph_index('m').is_none() {
-        return Err("font has no glyph for \"m\"".to_string());
-    }
-    Ok(())
 }
 
 #[cfg(test)]

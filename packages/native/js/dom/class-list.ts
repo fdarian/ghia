@@ -2,7 +2,7 @@
  * `element.classList`: a live `DOMTokenList` over the `class` attribute. It reads `getAttribute("class")`
  * and writes through `setAttribute("class", ...)`, the path a `class` prop and `setAttribute` take, so a
  * stylesheet, a `MutationObserver` and the framework's own `class` handling see a `classList` write
- * as they see any other attribute write.
+ * as they see any other attribute write. `relList` of a link is the same list over `rel`.
  */
 
 import { indexedView, splitOnSpaces } from "./indexed-view.js"
@@ -37,6 +37,23 @@ function validated(token: unknown, method: string): string {
  */
 const elements = new WeakMap<object, Element>()
 
+interface ListKind {
+  readonly attribute: string
+  /** The tokens `supports` knows, or `undefined` for a list that has none and throws, as `classList` does. */
+  readonly supported: ReadonlySet<string> | undefined
+}
+
+const CLASS_KIND: ListKind = { attribute: "class", supported: undefined }
+const REL_KIND: ListKind = { attribute: "rel", supported: new Set(["noopener", "noreferrer", "opener"]) }
+
+const kinds = new WeakMap<object, ListKind>()
+
+function kindOf(list: DOMTokenList): ListKind {
+  const kind = kinds.get(list)
+  if (kind === undefined) throw new TypeError("Illegal invocation")
+  return kind
+}
+
 function elementOf(list: DOMTokenList): Element {
   const element = elements.get(list)
   if (element === undefined) throw new TypeError("Illegal invocation")
@@ -44,21 +61,23 @@ function elementOf(list: DOMTokenList): Element {
 }
 
 function tokensOfList(list: DOMTokenList): string[] {
-  return tokensOf(elementOf(list).getAttribute("class"))
+  return tokensOf(elementOf(list).getAttribute(kindOf(list).attribute))
 }
 
 /** The update steps: an empty set does not create an attribute that was not there. */
 function writeTokens(list: DOMTokenList, tokens: string[]): void {
   const element = elementOf(list)
-  if (tokens.length === 0 && element.getAttribute("class") === null) return
-  element.setAttribute("class", tokens.join(" "))
+  const attribute = kindOf(list).attribute
+  if (tokens.length === 0 && element.getAttribute(attribute) === null) return
+  element.setAttribute(attribute, tokens.join(" "))
 }
 
 /** The DOM's `DOMTokenList` of one element's `class` attribute. */
 export class DOMTokenList {
-  constructor(element: Element, token: typeof CONSTRUCT) {
+  constructor(element: Element, token: typeof CONSTRUCT, kind: ListKind = CLASS_KIND) {
     if (token !== CONSTRUCT) throw new TypeError("Illegal constructor")
     elements.set(this, element)
+    kinds.set(this, kind)
   }
 
   get length(): number {
@@ -66,11 +85,11 @@ export class DOMTokenList {
   }
 
   get value(): string {
-    return elementOf(this).getAttribute("class") ?? ""
+    return elementOf(this).getAttribute(kindOf(this).attribute) ?? ""
   }
 
   set value(value: string) {
-    elementOf(this).setAttribute("class", String(value))
+    elementOf(this).setAttribute(kindOf(this).attribute, String(value))
   }
 
   item(index: number): string | null {
@@ -132,8 +151,12 @@ export class DOMTokenList {
     return true
   }
 
-  supports(_token: string): boolean {
-    throw new TypeError("Failed to execute 'supports' on 'DOMTokenList': DOMTokenList has no supported tokens.")
+  supports(token: string): boolean {
+    const supported = kindOf(this).supported
+    if (supported === undefined) {
+      throw new TypeError("Failed to execute 'supports' on 'DOMTokenList': DOMTokenList has no supported tokens.")
+    }
+    return supported.has(String(token).toLowerCase())
   }
 
   forEach(callback: (token: string, index: number, list: DOMTokenList) => void, thisArg?: unknown): void {
@@ -162,17 +185,28 @@ export class DOMTokenList {
 }
 
 const lists = new WeakMap<object, DOMTokenList>()
+const relLists = new WeakMap<object, DOMTokenList>()
 
-/** The one `DOMTokenList` of `element`, which `list[0]` and `0 in list` read as the DOM's indexed getter does. */
-export function classListOf(element: Element): DOMTokenList {
-  const existing = lists.get(element)
+function listOf(element: Element, cache: WeakMap<object, DOMTokenList>, kind: ListKind): DOMTokenList {
+  const existing = cache.get(element)
   if (existing !== undefined) return existing
-  const list = new DOMTokenList(element, CONSTRUCT)
+  const list = new DOMTokenList(element, CONSTRUCT, kind)
   const view = indexedView(list, {
     length: () => list.length,
     at: (index) => list.item(index) ?? undefined,
   })
   elements.set(view, element)
-  lists.set(element, view)
+  kinds.set(view, kind)
+  cache.set(element, view)
   return view
+}
+
+/** The one `DOMTokenList` of `element`, which `list[0]` and `0 in list` read as the DOM's indexed getter does. */
+export function classListOf(element: Element): DOMTokenList {
+  return listOf(element, lists, CLASS_KIND)
+}
+
+/** The one `DOMTokenList` over the `rel` attribute of a link, which is `relList`. */
+export function relListOf(element: Element): DOMTokenList {
+  return listOf(element, relLists, REL_KIND)
 }

@@ -404,6 +404,35 @@ export class AnimationEvent extends Event {
   }
 }
 
+export interface PopStateEventInit extends EventInit {
+  state?: unknown
+}
+
+export class PopStateEvent extends Event {
+  readonly state: unknown
+
+  constructor(type: string, init: PopStateEventInit = {}) {
+    super(type, init)
+    this.state = init.state ?? null
+  }
+}
+
+export interface HashChangeEventInit extends EventInit {
+  oldURL?: string
+  newURL?: string
+}
+
+export class HashChangeEvent extends Event {
+  readonly oldURL: string
+  readonly newURL: string
+
+  constructor(type: string, init: HashChangeEventInit = {}) {
+    super(type, init)
+    this.oldURL = init.oldURL ?? ""
+    this.newURL = init.newURL ?? ""
+  }
+}
+
 /** What `dom-globals` installs where the runtime has none. */
 export const EVENT_CLASSES = {
   UIEvent,
@@ -418,4 +447,6 @@ export const EVENT_CLASSES = {
   ClipboardEvent,
   TransitionEvent,
   AnimationEvent,
+  PopStateEvent,
+  HashChangeEvent,
 }

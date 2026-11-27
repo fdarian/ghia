@@ -11,6 +11,7 @@ use super::atoms::{Atom, Atoms};
 use super::document::StyleSheets;
 use super::matching::{AttrValue, ElementView, SiblingTest};
 use super::selector::AttrName;
+use super::states::State;
 use super::tree_states::TreeState;
 
 // Children scanned and siblings stepped over by the matcher, which the tests read to check that
@@ -345,6 +346,10 @@ impl ElementView for TreeView<'_> {
 
     fn tree_state(&self, state: TreeState) -> bool {
         super::tree_states::read(self.tree, self.id, self.element(), state)
+    }
+
+    fn live_state(&self, state: State) -> bool {
+        self.tree.sheets.live.has(self.id, state)
     }
 
     fn child_index(&self, of_type: bool, from_end: bool) -> Option<u32> {

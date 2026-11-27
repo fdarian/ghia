@@ -14,7 +14,7 @@ pub(crate) fn children_in_order<'a>(
     tree: &RetainedTree,
     element: &'a RetainedElement,
 ) -> Cow<'a, [u64]> {
-    let children = super::contents::flatten(tree, &element.children);
+    let children = super::contents::flatten_of(tree, element);
     let is_flex_or_grid = super::display::lays_out_items(element.display().as_deref());
     if !is_flex_or_grid || !children.iter().any(|id| order_of(tree, *id) != 0) {
         return children;

@@ -3,8 +3,9 @@
 
 //! OS display preferences behind `matchMedia`.
 //!
-//! JS owns the media query language (`js/media-query.ts`). Native only answers
-//! what the OS says, and says when it changed. Only macOS has an OS read; every
+//! JS owns the media query language of `matchMedia` (`js/media-query.ts`). Native only answers
+//! what the OS says, and says when it changed. A stylesheet's `@media` is evaluated natively
+//! (`css/media_query.rs`), against the same readings (`environment`, `sync_sheets`). Only macOS has an OS read; every
 //! other platform reports no preference, which is what browsers report when
 //! the OS has none.
 
@@ -13,7 +14,7 @@ use napi_derive::napi;
 
 #[cfg(feature = "test-support")]
 use crate::element_tree::EventPayload;
-use crate::renderer::{emit_event_full, EventCallback};
+use crate::renderer::{emit_event_full, invalidate_after_mutation, EventCallback, GpuixView};
 
 /// Event type of the change notification. JS re-reads everything on it, so the
 /// payload `value` only says what triggered it, for debugging.
@@ -29,6 +30,93 @@ pub struct MediaFeatures {
     pub increased_contrast: bool,
     /// `forced-colors: active`. macOS has no forced colors mode.
     pub forced_colors: bool,
+}
+
+/// What a stylesheet's `@media` reads of the window, in the units `getWindowSize`, `getAppearance`
+/// and `getMediaFeatures` report to `matchMedia`.
+pub(crate) fn environment(
+    viewport: gpui::Size<gpui::Pixels>,
+    scale_factor: f32,
+    appearance: gpui::WindowAppearance,
+    features: MediaFeatures,
+) -> crate::css::media_query::MediaEnvironment {
+    crate::css::media_query::MediaEnvironment {
+        width: f64::from(f32::from(viewport.width)),
+        height: f64::from(f32::from(viewport.height)),
+        scale_factor: f64::from(scale_factor),
+        color_scheme: crate::renderer::color_scheme_of(appearance),
+        reduced_motion: features.reduced_motion,
+        increased_contrast: features.increased_contrast,
+        forced_colors: features.forced_colors,
+    }
+}
+
+/// Gives the document's stylesheets the window's environment. When a media query of theirs
+/// flips they load again and restyle, and the answer says what the window has to draw.
+pub(crate) fn sync_sheets(
+    tree: &std::sync::Mutex<crate::retained_tree::RetainedTree>,
+    environment: crate::css::media_query::MediaEnvironment,
+) -> crate::retained_tree::Dirty {
+    let mut tree = tree.lock().unwrap();
+    if tree.set_media_environment(environment) {
+        tree.take_dirty_restyled()
+    } else {
+        crate::retained_tree::Dirty::Clean
+    }
+}
+
+/// The window's side of the sheets' `@media`.
+impl GpuixView {
+    #[cfg(feature = "test-support")]
+    pub(crate) fn set_media_features(&mut self, features: crate::media::MediaFeatures) {
+        self.media_features = features;
+    }
+
+    pub(crate) fn sheet_media_environment(&self, window: &gpui::Window) -> crate::retained_tree::Dirty {
+        let environment = crate::media::environment(
+            window.viewport_size(),
+            window.scale_factor(),
+            window.appearance(),
+            self.media_features,
+        );
+        crate::media::sync_sheets(&self.tree, environment)
+    }
+
+    /// Gives the stylesheets the window's size, appearance and preferences, which their `@media`
+    /// reads, whether or not JS listens for `mediaChange`. The sheets load again and the window
+    /// draws only when a query flips.
+    pub(crate) fn sync_sheet_media(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
+        let dirty = self.sheet_media_environment(window);
+        let view = cx.entity_id();
+        invalidate_after_mutation(window, cx, view, dirty);
+    }
+
+    /// Follows the OS accessibility options (reduce motion, increase contrast) for the
+    /// stylesheets' `@media`.
+    pub(crate) fn observe_media_features(&mut self, window: &gpui::Window, cx: &mut gpui::Context<Self>) {
+        #[cfg(target_os = "macos")]
+        {
+            use gpui::AppContext as _;
+
+            let handle = window.window_handle();
+            let app = cx.to_async();
+            self.sheet_media_observer = Some(crate::media::MediaChangeObserver::new(move || {
+                let result = app.clone().update_window(handle, |_, window, cx| {
+                    if let Some(view) = window.root::<GpuixView>().flatten() {
+                        view.update(cx, |view, cx| {
+                            view.media_features = crate::media::read_system_features();
+                            view.sync_sheet_media(window, cx);
+                        });
+                    }
+                });
+                if let Err(error) = result {
+                    log::warn!("could not update the stylesheets after the accessibility options changed: {error}");
+                }
+            }));
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (window, cx);
+    }
 }
 
 /// Records `now` as the window's content size and says whether it differs from

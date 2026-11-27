@@ -141,7 +141,8 @@ function pairsToValues(pairs: readonly string[]): Values {
 /**
  * Asks native for the computed style of element `id`, laying the window out first like
  * `getBoundingClientRect`. `undefined` while the element is not in the document. `pseudo` reads the
- * `::before` or `::after` of an element, which Ghia has none of.
+ * `::before` or `::after` of an element: the style the sheet rules for that box declare, on what it
+ * inherits from the element.
  *
  * The answer is kept until a batch of mutations reaches the renderer, the clock moves or a frame is
  * drawn (`invalidateComputedStyles`), or the current turn of the event loop ends, so reading ten properties costs one call and a read after a write is fresh.
@@ -149,13 +150,13 @@ function pairsToValues(pairs: readonly string[]): Values {
 export function readComputedStyle(
   renderer: NativeRenderer,
   id: number,
-  pseudo: boolean
+  pseudo: "before" | "after" | null
 ): Values | undefined {
   if (!renderer.getComputedStyle) {
     throw new Error("This renderer cannot read computed styles: it has no getComputedStyle")
   }
   flushPendingMutations(renderer)
-  const key = `${id}${pseudo ? ":" : ""}`
+  const key = `${id}${pseudo ? `:${pseudo}` : ""}`
   let records = cache.get(renderer)
   if (!records) {
     records = new Map()
@@ -187,9 +188,9 @@ const KNOWN: ReadonlySet<string> = new Set(COMPUTED_STYLE_PROPERTIES)
 
 class ComputedStyleDeclaration {
   readonly #element: ObservableElement
-  readonly #pseudo: "none" | "absent" | "unsupported"
+  readonly #pseudo: "before" | "after" | null | "unsupported"
 
-  constructor(element: ObservableElement, pseudo: "none" | "absent" | "unsupported") {
+  constructor(element: ObservableElement, pseudo: "before" | "after" | null | "unsupported") {
     this.#element = element
     this.#pseudo = pseudo
   }
@@ -198,7 +199,7 @@ class ComputedStyleDeclaration {
     if (this.#pseudo === "unsupported") return undefined
     const binding = this.#element[HOST_BINDING]()
     if (!binding) return undefined
-    return readComputedStyle(binding.renderer, this.#element.nativeId, this.#pseudo === "absent")
+    return readComputedStyle(binding.renderer, this.#element.nativeId, this.#pseudo)
   }
 
   get length(): number {
@@ -259,7 +260,13 @@ for (const property of COMPUTED_STYLE_PROPERTIES) {
   })
 }
 
-const PSEUDO_ABSENT = /^::?(before|after)$/
+const PSEUDO_BOX = /^::?(before|after)$/i
+
+function pseudoOf(pseudoElt: string | null | undefined): "before" | "after" | null | "unsupported" {
+  if (pseudoElt === undefined || pseudoElt === null || pseudoElt === "") return null
+  const box = PSEUDO_BOX.exec(pseudoElt)
+  return box ? (box[1].toLowerCase() as "before" | "after") : "unsupported"
+}
 
 /**
  * `window.getComputedStyle`: the resolved values of an element, as Chrome reports them for the
@@ -267,19 +274,15 @@ const PSEUDO_ABSENT = /^::?(before|after)$/
  * custom properties (`--name`) included. The object is live: each read asks native again, and an
  * element that is not in the document reads `""` for everything.
  *
- * `pseudoElt` `::before` and `::after` give what Chrome reports for a pseudo-element that does not
- * exist (Ghia has none): `content` is `none` and `width` and `height` are `auto`. Any other pseudo
- * reads `""`.
+ * `pseudoElt` `::before` and `::after` give the style the sheet rules for that box declare, with
+ * `content` as Chrome writes it (`"x"`, `none`), and the values the box inherits from the element; a
+ * box no rule matches reads what Chrome reports for a pseudo-element the element does not have
+ * (`content` is `none`, `width` and `height` are `auto`). Any other pseudo reads `""`.
  */
 export function getComputedStyle(element: ObservableElement, pseudoElt?: string | null): ComputedStyle {
   if (typeof element !== "object" || element === null || typeof element[HOST_BINDING] !== "function") {
     throw new TypeError("Failed to execute 'getComputedStyle' on 'Window': parameter 1 is not of type 'Element'.")
   }
-  const pseudo =
-    pseudoElt === undefined || pseudoElt === null || pseudoElt === ""
-      ? "none"
-      : PSEUDO_ABSENT.test(pseudoElt)
-        ? "absent"
-        : "unsupported"
+  const pseudo = pseudoOf(pseudoElt)
   return new ComputedStyleDeclaration(element, pseudo) as unknown as ComputedStyle
 }

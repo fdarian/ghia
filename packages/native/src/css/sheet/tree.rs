@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::css::media_query::MediaEnvironment;
 use crate::retained_tree::{Dirty, RetainedElement, RetainedTree};
 
 use super::atoms::{Atom, Atoms};
@@ -18,6 +19,9 @@ use super::document::ClassAtoms;
 use super::cascade::MatchedRules;
 use super::has::Presence;
 use super::invalidation::Reach;
+use super::live_states::LiveInputs;
+use super::index::Target;
+use super::pseudo::Pseudo;
 use super::share::{Found, StyleSharing};
 use super::tree_states::TreeStates;
 use super::view::{count_sibling_work, SiblingPositions, TreeView};
@@ -96,6 +100,13 @@ impl RetainedTree {
         if self.sheets.enabled {
             self.sheets.sources_dirty = true;
         }
+    }
+
+    /// What the window reports to the media queries of the rules. Returns whether a query flipped,
+    /// in which case the next flush loads the sheets again and matches every element
+    /// (`take_dirty_restyled` does both and says what to draw).
+    pub fn set_media_environment(&mut self, environment: MediaEnvironment) -> bool {
+        self.sheets.set_media_environment(environment)
     }
 
     // Hooks. Each runs only while `sheets.enabled`, except the one for a created `<style>`.
@@ -188,6 +199,50 @@ impl RetainedTree {
         }
     }
 
+    /// Whether a selector reads a pointer or focus state outside its subject. While none does, a
+    /// move of the pointer or the focus is not the sheets' business: [`Self::sync_live_states`]
+    /// returns at once, and callers may skip building its inputs.
+    pub(crate) fn live_states_wanted(&self) -> bool {
+        self.sheets.enabled && !self.sheets.index.invalidation.live_states.is_empty()
+    }
+
+    /// The pointer or the focus holds what `inputs` says now. The elements that entered or left a
+    /// state a selector reads live are marked with the reach of that state and matched, which is
+    /// what the pointer or focus change leaves to draw. No batch follows such a change, so the
+    /// flush is this call's.
+    pub(crate) fn sync_live_states(&mut self, inputs: &LiveInputs<'_>) -> Dirty {
+        if !self.live_states_wanted() {
+            if !self.sheets.live.is_empty() {
+                self.sheets.live.clear();
+            }
+            return Dirty::Clean;
+        }
+        let changed = self.sheets.live.update(inputs, &self.sheets.index.invalidation.live_states);
+        if changed.is_empty() {
+            return Dirty::Clean;
+        }
+        if self.sheets.atoms_fresh {
+            let marks: Vec<(u64, Reach)> = changed
+                .into_iter()
+                .filter_map(|(id, state)| Some((id, self.elements.get(&id)?, state)))
+                .flat_map(|(id, element, state)| {
+                    self.sheets
+                        .index
+                        .invalidation
+                        .live_states
+                        .reads(state)
+                        .iter()
+                        .filter(|read| read.can_hold(&self.sheets, element))
+                        .map(move |read| (id, read.reach))
+                })
+                .collect();
+            for (id, reach) in marks {
+                self.sheets.mark(id, reach);
+            }
+        }
+        self.take_dirty_restyled()
+    }
+
     /// A state that every element below `id` inherits changed on `id` (`contenteditable`): the
     /// elements below can tell too.
     pub(crate) fn sheets_tree_state_changed_below(&mut self, id: u64, changed: TreeStates) {
@@ -231,6 +286,7 @@ impl RetainedTree {
         };
         self.sheets.mark(id, reach);
         self.mark_has_anchors(id, has);
+        self.pseudo_attribute_changed(id, name);
     }
 
     /// Whether `ancestor` is a `<style>` element or has one below it. Asked on every insert and
@@ -362,11 +418,14 @@ impl RetainedTree {
             .collect();
         connected.sort();
         let texts = self.sheets.texts_with(connected.iter().map(|(_, id)| self.text_content(*id)).collect());
-        if texts == self.sheets.loaded() {
+        if texts == self.sheets.loaded() && !self.sheets.media_flipped {
             return;
         }
         let names = self.sheets.atoms.len();
         let reload = self.sheets.load(texts);
+        if self.sheets.take_document_changed() {
+            self.sheets_definitions_changed();
+        }
         // Elements keep atoms only for the names a sheet had when they were read, so the elements
         // that carry a name the new sheets bring have to be read again, whatever else the load
         // changed. Until then a rule added later cannot find the elements it names.
@@ -429,7 +488,12 @@ impl RetainedTree {
             out.extend(walked.iter().map(|id| (*id, true)));
             // Not a comparison of counts: the walk also lists a child id that has no element.
             let in_document: FxHashSet<u64> = walked.into_iter().collect();
-            out.extend(self.elements.keys().filter(|id| !in_document.contains(id)).map(|id| (*id, false)));
+            out.extend(
+                self.elements
+                    .keys()
+                    .filter(|id| !in_document.contains(id) && !crate::layout::generated::is_generated(**id))
+                    .map(|id| (*id, false)),
+            );
             return out;
         }
         let out: Vec<(u64, bool)> = Vec::with_capacity(marks.len());
@@ -557,8 +621,10 @@ impl RetainedTree {
         let restyle = self.restyle_set(&marks, all);
 
         let mut found: Vec<(u64, Found)> = Vec::new();
+        let mut found_pseudos: Vec<(u64, [Found; 2])> = Vec::new();
         let positions = SiblingPositions::default();
         let mut sharing = StyleSharing::default();
+        let pseudos = self.sheets.index.has_content_rules();
         for (id, connected) in restyle {
             crate::perf_counters::element_rematched();
             let Some(element) = self.elements.get(&id) else {
@@ -566,9 +632,10 @@ impl RetainedTree {
             };
             let css = element.css();
             let (element_id, classes) = css.map_or((None, &[][..]), |css| (css.id, &css.classes[..]));
-            let matched = if connected && element.is_matchable() && self.sheets.index.may_match(element_id, classes) {
+            let matchable = connected && element.is_matchable();
+            let matched = if matchable && self.sheets.index.may_match(element_id, classes, Target::Element) {
                 let view = TreeView::new(self, id, &positions);
-                sharing.matching(&self.sheets, element, &view, element_id, classes)
+                sharing.matching(&self.sheets, element, &view, element_id, classes, Target::Element)
             } else {
                 Found::Own(Vec::new())
             };
@@ -576,21 +643,42 @@ impl RetainedTree {
             if !sharing.is_empty(&matched) || was_matched {
                 found.push((id, matched));
             }
+            let had_boxes = css.is_some_and(|css| css.pseudo.is_some());
+            // An element that has boxes is asked again when the rules for them are gone.
+            if pseudos || had_boxes {
+                let boxes = Pseudo::BOTH.map(|pseudo| {
+                    let index = &self.sheets.index;
+                    // No rule that gives the box `content` matches: the element has no box, and the
+                    // rules that only style one are read when `getComputedStyle` asks for it.
+                    let gate = Target::Content(pseudo);
+                    if !(matchable && index.has_content_rules_for(pseudo) && index.may_match(element_id, classes, gate)) {
+                        return Found::Own(Vec::new());
+                    }
+                    let view = TreeView::new(self, id, &positions);
+                    let with_content = sharing.matching(&self.sheets, element, &view, element_id, classes, gate);
+                    if sharing.is_empty(&with_content) || !index.has_rules_without_content_for(pseudo) {
+                        return with_content;
+                    }
+                    sharing.matching(&self.sheets, element, &view, element_id, classes, Target::Box(pseudo))
+                });
+                if had_boxes || boxes.iter().any(|found| !sharing.is_empty(found)) {
+                    found_pseudos.push((id, boxes));
+                }
+            }
         }
 
         let mut shared: Vec<Option<Arc<MatchedRules>>> = vec![None; sharing.lists.len()];
+        let mut intern = |sheets: &mut super::document::StyleSheets, matched: Found| match matched {
+            Found::Own(list) if list.is_empty() => None,
+            Found::Own(list) => Some(sheets.interner.intern(&sheets.index, list)),
+            Found::Shared(list) if sharing.lists[list].is_empty() => None,
+            Found::Shared(list) => Some(
+                shared[list].get_or_insert_with(|| sheets.interner.intern(&sheets.index, sharing.lists[list].clone())).clone(),
+            ),
+        };
         let mut changes: Vec<(u64, Option<Arc<MatchedRules>>)> = Vec::new();
         for (id, matched) in found {
-            let new = match matched {
-                Found::Own(list) if list.is_empty() => None,
-                Found::Own(list) => Some(self.sheets.interner.intern(&self.sheets.index, list)),
-                Found::Shared(list) if sharing.lists[list].is_empty() => None,
-                Found::Shared(list) => Some(
-                    shared[list]
-                        .get_or_insert_with(|| self.sheets.interner.intern(&self.sheets.index, sharing.lists[list].clone()))
-                        .clone(),
-                ),
-            };
+            let new = intern(&mut self.sheets, matched);
             let old = self.elements.get(&id).and_then(|element| element.css()).and_then(|css| css.matched.as_ref());
             let same = match (old, &new) {
                 (None, None) => true,
@@ -601,7 +689,9 @@ impl RetainedTree {
                 changes.push((id, new));
             }
         }
+        let pseudo_changes = self.pseudo_changes(found_pseudos, &mut intern);
         self.apply_matched(changes);
+        self.apply_pseudo(pseudo_changes);
 
         self.sheets.release_unused();
         if self.sheets.style_elements.is_empty() && self.sheets.constructed.is_empty() {

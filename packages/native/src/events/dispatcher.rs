@@ -154,6 +154,10 @@ pub struct Output {
     /// builds only the roots that hold them draws it. Empty when `restyle` is true, since a
     /// frame built whole draws them too.
     pub paint: Vec<u64>,
+    /// What the sheets restyled for the elements that entered or left a pointer state a selector
+    /// reads outside its subject (`listeners::sync_live_pointer`), for the window to invalidate as it
+    /// does for a batch ([`crate::renderer::invalidate_after_mutation`]).
+    pub live: crate::retained_tree::Dirty,
     /// GPUI's hit chain and the retained path disagree about the target's
     /// ancestry. The retained path is what events use; this reports the drift.
     pub chain_mismatch: bool,
@@ -174,6 +178,7 @@ impl Output {
             events,
             restyle,
             paint: Vec::new(),
+            live: crate::retained_tree::Dirty::Clean,
             chain_mismatch,
             position: sample.position,
             modifiers: sample.modifiers.clone(),
@@ -297,14 +302,15 @@ impl<'a> Emitter<'a> {
         });
     }
 
-    /// A `click`, which also has to reach a label with no listener, a submit button and a checkbox
-    /// or radio: whether they activate something is decided after the event ran.
+    /// A `click`, which also has to reach a label with no listener, a submit button, a checkbox
+    /// or radio and a link: whether they activate something is decided after the event ran.
     fn emit_click(&mut self, target: u64, fields: Fields) {
         let activates = || {
             let path = event_path(self.tree, target);
             crate::accessibility::label::activated_control(self.tree, &path).is_some()
                 || crate::forms::submission_by_click(self.tree, &path).is_some()
                 || crate::custom_elements::input_choice::is_activated_by(self.tree, &path)
+                || crate::html::is_followed_by(self.tree, &path)
         };
         if path_listens(self.tree, target, "click")
             || self.requests.window_listens("click")
@@ -893,6 +899,12 @@ impl HoverChange {
             if crate::motion::listens_for_gesture(tree, *id, "whileHover") {
                 return Restyle::Whole;
             }
+            // The hover of a box of the element is built with the element's, and is not a patch's to write.
+            if crate::layout::generated::declares_of(tree, *id, |style| style.hover.is_some()) {
+                restyled.push(*id);
+                paints_only = false;
+                continue;
+            }
             let Some(style) = tree.elements.get(id).and_then(|element| element.style.as_deref()) else {
                 continue;
             };
@@ -901,6 +913,7 @@ impl HoverChange {
                 restyles = true;
                 paints_only &= hover_paint::hover_paints_only(tree, *id, style);
             }
+
             // A group's followers restyle with it, and a group is a frame built whole.
             if style.declared_group().is_some() {
                 restyles = true;
@@ -1175,11 +1188,11 @@ fn relational_changed<'a>(old: &'a [u64], new: &'a [u64]) -> impl Iterator<Item 
         .copied()
 }
 
+/// Whether the element `id`, or a `::before` or `::after` of it, declares a style `has` says yes to.
 fn has_state_style(tree: &RetainedTree, id: u64, has: impl Fn(&StyleDesc) -> bool) -> bool {
     tree.elements
         .get(&id)
-        .and_then(|element| element.style.as_deref())
-        .is_some_and(has)
+        .is_some_and(|element| element.style.as_deref().is_some_and(&has) || crate::layout::generated::declares(tree, element, &has))
 }
 
 #[cfg(test)]
@@ -1553,6 +1566,27 @@ mod tests {
 
         dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 1])));
         let output = dispatch(&mut state, &tree, &up(0, 1, chain_of(&[3, 1])));
+        assert!(output.events.is_empty());
+    }
+
+    #[test]
+    fn a_click_on_a_link_is_emitted_with_no_listener_and_one_on_an_anchor_without_href_is_not() {
+        let mut tree = RetainedTree::new();
+        crate::batch::test_json::apply(
+            &mut tree,
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"a"],["appendChild",1,2],["setCustomProp",2,"href","https://example.com/"],
+                ["createElement",3,"span"],["appendChild",2,3],
+                ["createElement",4,"a"],["appendChild",1,4]]"#,
+        )
+        .unwrap();
+        let mut state = PointerState::default();
+        dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 2, 1])));
+        let output = dispatch(&mut state, &tree, &up(0, 1, chain_of(&[3, 2, 1])));
+        assert_eq!(names(&output), ["click@3"]);
+
+        dispatch(&mut state, &tree, &down(0, 1, chain_of(&[4, 1])));
+        let output = dispatch(&mut state, &tree, &up(0, 1, chain_of(&[4, 1])));
         assert!(output.events.is_empty());
     }
 

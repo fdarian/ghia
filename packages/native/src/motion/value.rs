@@ -122,7 +122,7 @@ impl ParentValues {
     pub(crate) fn custom_of(&self, style: &StyleDesc) -> CustomProperties {
         match &style.custom_properties {
             Some(declared) => self.custom.descend(declared),
-            None => self.custom.clone(),
+            None => self.custom.inherit(),
         }
     }
 
@@ -135,7 +135,7 @@ impl ParentValues {
             weight: font.weight,
             variations: font.variations,
             inheritable: self.inheritable_of(style),
-            custom: style.map_or_else(|| self.custom.clone(), |style| self.custom_of(style)),
+            custom: style.map_or_else(|| self.custom.inherit(), |style| self.custom_of(style)),
         }
     }
 

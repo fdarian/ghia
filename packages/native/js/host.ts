@@ -2968,6 +2968,7 @@ export type NativeRenderer = MutationHost &
       | "getWindowInsets"
       | "setWindowTitle"
       | "registerFont"
+      | "openUrl"
       | "setAppearance"
       | "getAppearance"
       | "promptForPaths"

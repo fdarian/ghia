@@ -5,6 +5,7 @@
 use super::atoms::Atoms;
 use super::has::{HasArguments, RelativeSelector};
 use super::nth::{AnPlusB, Position};
+use super::pseudo::Pseudo;
 use super::states::{self, State};
 use super::tree_states::TreeState;
 use super::selector::{
@@ -57,12 +58,20 @@ struct Parser<'a, 'n> {
     /// How many `:is(`, `:where(`, `:not(` and `:has(` the selector being parsed sits inside.
     depth: usize,
     /// Whether the selector being parsed is inside a `:has(`, where `:has()` nests no deeper and
-    /// the states of the pointer and the focus are not read (they compile into the style block of
-    /// the subject, which an element inside the argument is not).
+    /// the states of the pointer and the focus are not read (a state in the subject compiles into
+    /// the style block of the subject, which an element inside the argument is not, and the live
+    /// states a change of the pointer marks do not reach the anchors of a `:has()`).
     in_has: bool,
     /// Whether a state was met inside the `:has(` being parsed, written there or brought in by `&`.
     /// A forgiving `:is()` drops the argument that holds it, so the `:has(` checks this when it ends.
     state_in_has: bool,
+}
+
+/// What `::name` or a legacy `:name` parsed to.
+enum Parsed {
+    Simple(Simple),
+    /// `::before` or `::after`: not part of the compound, which is the originating element's.
+    Generated(Pseudo),
 }
 
 fn combinator_of(kind: &Kind) -> Option<Combinator> {
@@ -138,7 +147,7 @@ impl Parser<'_, '_> {
         let parsed = self.complex_parts(tokens, relative, allow_pseudo_element);
         let saw_nesting = self.saw_nesting;
         self.saw_nesting = outer_saw_nesting || saw_nesting;
-        let mut parts = parsed?;
+        let (mut parts, pseudo) = parsed?;
         if let Nesting::Parent(parent) = self.nesting {
             if relative {
                 let leading = combinator_of(&tokens[0].kind);
@@ -156,16 +165,17 @@ impl Parser<'_, '_> {
             links.extend(link);
         }
         let condition = states::condition_of(&compounds).map_err(|_| InvalidSelector)?;
-        Ok(ComplexSelector { compounds, links, condition })
+        Ok(ComplexSelector { compounds, links, condition, pseudo })
     }
 
-    /// The compounds left to right, each with the combinator to the next.
+    /// The compounds left to right, each with the combinator to the next, and the generated box
+    /// the last one ends in.
     fn complex_parts(
         &mut self,
         tokens: &[Token],
         relative: bool,
         allow_pseudo_element: bool,
-    ) -> Result<Vec<(Compound, Option<Combinator>)>, InvalidSelector> {
+    ) -> Result<(Vec<(Compound, Option<Combinator>)>, Option<Pseudo>), InvalidSelector> {
         let mut parts = Vec::new();
         let mut index = 0;
         if relative && combinator_of(&tokens[0].kind).is_some() {
@@ -173,12 +183,16 @@ impl Parser<'_, '_> {
             skip_whitespace(tokens, &mut index);
         }
         loop {
-            let compound = self.compound(tokens, &mut index, allow_pseudo_element)?;
+            let (compound, pseudo) = self.compound(tokens, &mut index, allow_pseudo_element)?;
             let before = index;
             skip_whitespace(tokens, &mut index);
             if index == tokens.len() {
                 parts.push((compound, None));
-                return Ok(parts);
+                return Ok((parts, pseudo));
+            }
+            // A generated box is the end of the selector: nothing styles what is inside it.
+            if pseudo.is_some() {
+                return Err(InvalidSelector);
             }
             let spaced = index > before;
             let link = match combinator_of(&tokens[index].kind) {
@@ -199,12 +213,18 @@ impl Parser<'_, '_> {
         tokens: &[Token],
         index: &mut usize,
         allow_pseudo_element: bool,
-    ) -> Result<Compound, InvalidSelector> {
+    ) -> Result<(Compound, Option<Pseudo>), InvalidSelector> {
         let mut simples = Vec::new();
         let mut has_type = false;
+        let mut generated = None;
         while let Some(token) = tokens.get(*index) {
             if token.kind == Kind::Whitespace || combinator_of(&token.kind).is_some() {
                 break;
+            }
+            // `::before:hover` and `::before::marker` are not selectors: a generated box takes no
+            // user-action state and has no pseudo-element of its own here.
+            if generated.is_some() {
+                return Err(InvalidSelector);
             }
             match &token.kind {
                 Kind::Ident(name) if !has_type && simples.is_empty() => {
@@ -227,7 +247,7 @@ impl Parser<'_, '_> {
                     simples.push(match self.nesting {
                         Nesting::Top => Simple::Root,
                         Nesting::Parent(parent) => {
-                            if self.in_has && parent.iter().any(|selector| selector.condition.is_some()) {
+                            if self.in_has && parent.iter().any(states::reads_state) {
                                 self.state_in_has = true;
                                 return Err(InvalidSelector);
                             }
@@ -252,14 +272,20 @@ impl Parser<'_, '_> {
                     *index = (close + 1).min(tokens.len());
                     simples.push(Simple::Attr(attribute));
                 }
-                Kind::Colon => simples.push(self.pseudo(tokens, index, allow_pseudo_element)?),
+                Kind::Colon => match self.pseudo(tokens, index, allow_pseudo_element)? {
+                    Parsed::Simple(simple) => simples.push(simple),
+                    Parsed::Generated(_) if simples.iter().any(|simple| matches!(simple, Simple::PseudoElement)) => {
+                        return Err(InvalidSelector);
+                    }
+                    Parsed::Generated(pseudo) => generated = Some(pseudo),
+                },
                 _ => return Err(InvalidSelector),
             }
         }
-        if simples.is_empty() && !has_type {
+        if simples.is_empty() && !has_type && generated.is_none() {
             return Err(InvalidSelector);
         }
-        Ok(Compound { simples })
+        Ok((Compound { simples }, generated))
     }
 
     /// `ns|a` and `*|a` are not supported.
@@ -277,7 +303,7 @@ impl Parser<'_, '_> {
         tokens: &[Token],
         index: &mut usize,
         allow_pseudo_element: bool,
-    ) -> Result<Simple, InvalidSelector> {
+    ) -> Result<Parsed, InvalidSelector> {
         *index += 1;
         let element = tokens.get(*index).is_some_and(|token| token.kind == Kind::Colon);
         if element {
@@ -291,9 +317,15 @@ impl Parser<'_, '_> {
                 *index += 1;
                 let name = name.to_ascii_lowercase();
                 if element || matches!(name.as_str(), "before" | "after" | "first-line" | "first-letter") {
-                    return if allow_pseudo_element { Ok(Simple::PseudoElement) } else { Err(InvalidSelector) };
+                    if !allow_pseudo_element {
+                        return Err(InvalidSelector);
+                    }
+                    return Ok(match Pseudo::named(&name) {
+                        Some(pseudo) => Parsed::Generated(pseudo),
+                        None => Parsed::Simple(Simple::PseudoElement),
+                    });
                 }
-                match name.as_str() {
+                let simple = match name.as_str() {
                     "root" => Ok(Simple::Root),
                     "host" => Ok(Simple::Host),
                     "hover" | "active" | "focus" | "focus-visible" | "focus-within" if self.in_has => {
@@ -313,7 +345,8 @@ impl Parser<'_, '_> {
                     "only-of-type" => Ok(Simple::Position(Position::Only { of_type: true })),
                     "empty" => Ok(Simple::Position(Position::Empty)),
                     _ => TreeState::parse(&name).map(Simple::TreeState).ok_or(InvalidSelector),
-                }
+                };
+                simple.map(Parsed::Simple)
             }
             Kind::Function(name) => {
                 let close = find_close(tokens, *index);
@@ -321,12 +354,12 @@ impl Parser<'_, '_> {
                 *index = (close + 1).min(tokens.len());
                 let name = name.to_ascii_lowercase();
                 if element {
-                    return if allow_pseudo_element { Ok(Simple::PseudoElement) } else { Err(InvalidSelector) };
+                    return if allow_pseudo_element { Ok(Parsed::Simple(Simple::PseudoElement)) } else { Err(InvalidSelector) };
                 }
                 if let Some((of_type, from_end)) = nth_function(&name) {
                     // `of S` is not supported: it is left in the arguments, which then are no `An+B`.
                     let an_b = AnPlusB::parse(self.src, arguments).ok_or(InvalidSelector)?;
-                    return Ok(Simple::Position(Position::Nth { of_type, from_end, an_b }));
+                    return Ok(Parsed::Simple(Simple::Position(Position::Nth { of_type, from_end, an_b })));
                 }
                 if !matches!(name.as_str(), "is" | "where" | "not" | "has") {
                     return Err(InvalidSelector);
@@ -337,7 +370,7 @@ impl Parser<'_, '_> {
                 self.depth += 1;
                 let result = self.functional_pseudo_class(&name, arguments);
                 self.depth -= 1;
-                result
+                result.map(Parsed::Simple)
             }
             _ => Err(InvalidSelector),
         }
@@ -387,14 +420,14 @@ impl Parser<'_, '_> {
 
     fn relative(&mut self, tokens: &[Token]) -> Result<RelativeSelector, InvalidSelector> {
         let leading = combinator_of(&tokens[0].kind).unwrap_or(Combinator::Descendant);
-        let parts = self.complex_parts(tokens, true, false)?;
+        let (parts, _) = self.complex_parts(tokens, true, false)?;
         let mut compounds = Vec::with_capacity(parts.len());
         let mut links = Vec::with_capacity(parts.len());
         for (compound, link) in parts.into_iter().rev() {
             compounds.push(compound);
             links.extend(link);
         }
-        Ok(RelativeSelector { leading, selector: ComplexSelector { compounds, links, condition: None } })
+        Ok(RelativeSelector { leading, selector: ComplexSelector { compounds, links, condition: None, pseudo: None } })
     }
 
     /// The tokens between `[` and `]`.

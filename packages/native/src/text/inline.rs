@@ -192,8 +192,7 @@ pub fn is_inline_wrapper(element: &RetainedElement) -> bool {
 }
 
 fn children_are_inline(tree: &RetainedTree, element: &RetainedElement) -> bool {
-    element
-        .children
+    crate::layout::generated::layout_children(tree, element)
         .iter()
         .filter_map(|id| tree.elements.get(id))
         .filter(|child| !is_display_none(child))
@@ -218,6 +217,9 @@ pub struct Piece {
     /// The `#text` node the piece is the text of, and where the characters of its data went:
     /// what a DOM position is looked up by ([`crate::editing::positions`]).
     pub text: Option<crate::editing::positions::TextSource>,
+    /// `range` is the text of a generated box (`::before`, `::after`): painted, but no selection,
+    /// search or copy takes it.
+    pub generated: bool,
 }
 
 /// A run of inline content, painted as one string.
@@ -251,6 +253,16 @@ impl Paragraph {
         self.pieces
             .iter()
             .filter_map(|piece| piece.atomic.map(|id| (id, piece)))
+    }
+
+    /// The bytes of the text of generated boxes, which are painted and are no text of the document.
+    pub fn generated_ranges(&self) -> Vec<Range<usize>> {
+        self.pieces.iter().filter(|piece| piece.generated).map(|piece| piece.range.clone()).collect()
+    }
+
+    /// Whether the paragraph holds the text of a generated box: it is one line for copy, as with an atomic inline.
+    pub fn has_generated(&self) -> bool {
+        self.pieces.iter().any(|piece| piece.generated)
     }
 
     /// Whether the paragraph has the placeholder of an empty inline box, which cuts the text for
@@ -380,7 +392,9 @@ impl Builder {
         self.only_whitespace &= is_blank(content);
         let mode = self.mode();
         let mut start = self.text.len();
-        let mut source = node.map(|node| TextSource { node, map: SourceMap::default() });
+        // The text of a `::before` or `::after` is no node of the document: no position is made of it.
+        let generated = node.is_some_and(crate::layout::generated::is_generated);
+        let mut source = node.filter(|_| !generated).map(|node| TextSource { node, map: SourceMap::default() });
         // Where the character is in the data, in UTF-16 code units.
         let mut offset = 0;
         let mut chars = content.chars().peekable();
@@ -427,6 +441,7 @@ impl Builder {
                 atomic: None,
                 placeholder: false,
                 text: source,
+                generated,
             });
         }
     }
@@ -448,6 +463,7 @@ impl Builder {
             atomic: None,
             placeholder: false,
             text: None,
+            generated: false,
         });
     }
 
@@ -465,6 +481,7 @@ impl Builder {
             atomic: None,
             placeholder: false,
             text: None,
+            generated: false,
         });
     }
 
@@ -482,6 +499,7 @@ impl Builder {
             atomic: Some(element.id),
             placeholder: false,
             text: None,
+            generated: false,
         });
     }
 
@@ -499,6 +517,7 @@ impl Builder {
             atomic: None,
             placeholder: true,
             text: None,
+            generated: false,
         });
     }
 
@@ -536,8 +555,7 @@ impl Builder {
         if let Some(content) = element.content.as_deref() {
             self.push_text(content, chain, None);
         }
-        for child in element
-            .children
+        for child in crate::layout::generated::layout_children(tree, element)
             .iter()
             .filter_map(|id| tree.elements.get(id))
             .filter(|child| !is_display_none(child))
@@ -647,7 +665,7 @@ pub fn plan_children_at(tree: &RetainedTree, container: &RetainedElement) -> Vec
 /// The children of `container` in paint order, each with its document position, see
 /// [`plan_children_at`].
 fn children_at(tree: &RetainedTree, container: &RetainedElement) -> Vec<(u64, u32)> {
-    let document = crate::layout::contents::flatten(tree, &container.children);
+    let document = crate::layout::contents::flatten_of(tree, container);
     let children = crate::layout::order::children_in_order(tree, container);
     if *document == *children {
         return children.iter().enumerate().map(|(ix, id)| (*id, ix as u32)).collect();

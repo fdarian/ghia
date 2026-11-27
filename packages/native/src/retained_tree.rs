@@ -470,6 +470,24 @@ impl RetainedElement {
         self.release_empty_markup();
     }
 
+    pub(crate) fn pseudo_matches(&self) -> Option<&Arc<crate::css::sheet::PseudoMatches>> {
+        self.css()?.pseudo.as_ref()
+    }
+
+    /// Sets the rules the sheets matched the element's generated boxes with, and returns the ones
+    /// it had.
+    pub(crate) fn set_pseudo_matches(
+        &mut self,
+        pseudo: Option<Arc<crate::css::sheet::PseudoMatches>>,
+    ) -> Option<Arc<crate::css::sheet::PseudoMatches>> {
+        if pseudo.is_none() && self.css().is_none() {
+            return None;
+        }
+        let old = std::mem::replace(&mut self.css_mut().pseudo, pseudo);
+        self.release_empty_markup();
+        old
+    }
+
     /// Replaces the class atoms and returns the ones the element had.
     pub(crate) fn replace_css_classes(&mut self, classes: crate::css::sheet::ClassAtoms) -> crate::css::sheet::ClassAtoms {
         if classes.is_empty() && self.css().is_none_or(|css| css.classes.is_empty()) {
@@ -796,8 +814,8 @@ impl Dirty {
 
 /// What assigning a style changed, for the caller to mark the tree with.
 #[derive(Clone, Copy, Default)]
-struct StyleChange {
-    changed: bool,
+pub(crate) struct StyleChange {
+    pub(crate) changed: bool,
     /// The style differs in a key that is not only painted (see `StyleDesc::differs_only_in_paint`).
     layout: bool,
     /// It paints only, and a patch frame can follow it (`hover_paint::restyle_paints_strictly`).
@@ -1601,7 +1619,7 @@ impl RetainedTree {
         shrink_if_sparse(&mut self.geometry_ids);
     }
 
-    fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
+    pub(crate) fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
             self.removals += 1;
             self.list_markers.element_destroyed(&element.element_type);
@@ -1630,6 +1648,9 @@ impl RetainedTree {
             self.resolved.get_mut().forget(id);
             self.fresh.get_mut().remove(&id);
             destroyed.push(id);
+            if element.pseudo_matches().is_some() {
+                self.destroy_generated_of(id);
+            }
             for child_id in element.children {
                 self.destroy_element_recursive(child_id, destroyed);
             }
@@ -1865,6 +1886,17 @@ impl RetainedTree {
         }
     }
 
+    /// The sheets' `@keyframes` or `@property` rules changed. Nothing an element declared did, but
+    /// what a build reads of them did: the keyframes of an animation, and the custom properties an
+    /// element computes to (an initial value, a property that stops inheriting). Every subtree
+    /// builds again, which is what a change of the universal style does too.
+    pub(crate) fn sheets_definitions_changed(&mut self) {
+        let revision = self.take_revision_for(Dirty::Layout, None);
+        for element in self.elements.values_mut() {
+            element.subtree_revision = revision;
+        }
+    }
+
     /// The style layer under every element's own style, as a CSS `* { ... }` rule
     /// would be, or none. Restyles every element once, as if each had been given
     /// its new effective style with `set_style`.
@@ -1874,7 +1906,7 @@ impl RetainedTree {
         }
         self.universal = universal;
         self.styles.layered.clear();
-        let ids: Vec<u64> = self.elements.keys().copied().collect();
+        let ids: Vec<u64> = self.elements.keys().copied().filter(|id| !crate::layout::generated::is_generated(*id)).collect();
         let mut total = StyleChange::default();
         for id in ids {
             total.absorb(self.refresh_effective_style(id, false));
@@ -1906,6 +1938,10 @@ impl RetainedTree {
     /// Recompute the effective style of `id` from the style it declared, over the universal
     /// layer, over the user agent style of its tag and of its `popover`, and assign it.
     fn refresh_effective_style(&mut self, id: u64, classify: bool) -> StyleChange {
+        // A generated box has the style its rules gave it and no layer under it.
+        if crate::layout::generated::is_generated(id) {
+            return StyleChange::default();
+        }
         let Some(element) = self.elements.get(&id) else {
             return StyleChange::default();
         };
@@ -1915,7 +1951,7 @@ impl RetainedTree {
         };
         let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
         let above = if crate::html::is_list(&element.element_type) { self.lists_above(id) } else { Default::default() };
-        let tag_style = crate::html::ua_style_of(element, above);
+        let tag_style = crate::html::user_agent_under(crate::html::ua_style_of(element, above), declared.as_deref());
         let user_agent = crate::html::popover::user_agent(element, tag_style.as_ref()).or(tag_style);
         let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), declared) {
             (Some(base), Some(declared)) => Some(self.styles.layered.effective(&base, &declared)),
@@ -1931,7 +1967,7 @@ impl RetainedTree {
     /// from, containing-block escapes and `visibility`. Marking the tree
     /// changed is the caller's, because the universal layer does it once for
     /// all elements.
-    fn assign_style(&mut self, id: u64, style: Option<Arc<StyleDesc>>, classify: bool) -> StyleChange {
+    pub(crate) fn assign_style(&mut self, id: u64, style: Option<Arc<StyleDesc>>, classify: bool) -> StyleChange {
         let Some(element) = self.elements.get_mut(&id) else {
             return StyleChange::default();
         };
@@ -2122,6 +2158,7 @@ impl RetainedTree {
         let mut changed = false;
         let is_input_type = is_input && key == "type";
         let is_hidden_attribute = key == "hidden";
+        let is_link_href = key == "href" && self.elements.get(&id).is_some_and(|element| element.element_type == "a");
         let is_list_value = key == "value";
         let is_list_counting = key == "start" || key == "reversed";
         let is_input_group = is_input && matches!(key.as_str(), "type" | "name");
@@ -2214,8 +2251,8 @@ impl RetainedTree {
             self.editable_count = self.editable_count + usize::from(now_editable) - usize::from(was_editable);
             self.track_focusable_subtree(id);
         }
-        if is_hidden_attribute {
-            // The user agent style of any element is `display: none` while it is `hidden`.
+        if is_hidden_attribute || is_link_href {
+            // The user agent style of any element is `display: none` while it is `hidden`, and of an `<a>` its link style while it has an `href`.
             let change = self.refresh_effective_style(id, false);
             self.settle_style_change(id, change);
         }
@@ -2504,10 +2541,17 @@ impl RetainedTree {
         let marker_hit = || {
             (walk.painted_box)(crate::layout::list_marker_paint::marker_box_id(id)).is_some_and(|bounds| inside(&bounds, true, true))
         };
+        // A box generated for the element (`::before`, `::after`) is where the element is hit, though it may lie outside it.
+        let generated_hit = || {
+            crate::layout::generated::boxes_of(self, element)
+                .any(|box_id| (walk.painted_box)(box_id).is_some_and(|bounds| inside(&bounds, true, true)))
+        };
         let own = (!clipped
             && !none
             && !hidden
-            && (own_box.is_some_and(|bounds| inside(&bounds, true, true)) || (element.display().as_deref() == Some("list-item") && marker_hit())))
+            && (own_box.is_some_and(|bounds| inside(&bounds, true, true))
+                || (element.display().as_deref() == Some("list-item") && marker_hit())
+                || generated_hit()))
         .then_some(id);
         match own_context {
             Some(own_context) => own_context.paint_order(own, in_flow),

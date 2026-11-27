@@ -266,6 +266,10 @@ pub struct RegisteredText<'a> {
     /// The cell of a table the run is in. Copy puts a tab, where it puts a line break, between runs
     /// of different cells of one row, as Chrome does.
     pub cell: Option<TableCell>,
+    /// Bytes of `text` that are painted and are not text of the document: the content of a
+    /// `::before` or `::after`. A selection runs over them and copy leaves them out, as it does the
+    /// placeholder of an atomic inline.
+    pub holes: &'a [Range<usize>],
 }
 
 impl<'a> RegisteredText<'a> {
@@ -278,6 +282,7 @@ impl<'a> RegisteredText<'a> {
             line: None,
             group,
             cell: None,
+            holes: &[],
         }
     }
 
@@ -309,13 +314,33 @@ fn segments<'a>(
     let mut out = Vec::with_capacity(painted.len());
     for (ix, (run, doc)) in painted.iter().enumerate() {
         let mut start = run.window.0;
+        let mut whole: Vec<(usize, usize)> = Vec::new();
         for (at, placeholder) in run.text.match_indices(gpui::OBJECT_REPLACEMENT_CHARACTER) {
             if at >= run.window.0 && at < run.window.1 {
-                out.push((ix, RegisteredText { window: (start, at), ..*run }, doc.at(start)));
+                whole.push((start, at));
                 start = at + placeholder.len();
             }
         }
-        out.push((ix, RegisteredText { window: (start, run.window.1), ..*run }, doc.at(start)));
+        whole.push((start, run.window.1));
+        let first = out.len();
+        for (from, to) in whole {
+            let mut start = from;
+            let mut holes: Vec<&Range<usize>> = run.holes.iter().filter(|hole| hole.start < to && hole.end > from).collect();
+            holes.sort_by_key(|hole| hole.start);
+            for hole in &holes {
+                if hole.start > start {
+                    out.push((ix, RegisteredText { window: (start, hole.start), ..*run }, doc.at(start)));
+                }
+                start = start.max(hole.end);
+            }
+            if holes.is_empty() || start < to {
+                out.push((ix, RegisteredText { window: (start, to), ..*run }, doc.at(start)));
+            }
+        }
+        // A run that is all hole is still a place the pointer can be on, and holds nothing to select.
+        if out.len() == first {
+            out.push((ix, RegisteredText { window: (run.window.1, run.window.1), ..*run }, doc.at(run.window.1)));
+        }
     }
     out
 }

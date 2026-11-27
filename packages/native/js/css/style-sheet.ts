@@ -31,10 +31,11 @@ export class CSSRule {
 
   readonly type: number
   readonly cssText: string
-  readonly parentRule: null = null;
+  readonly parentRule: CSSRule | null;
   [SHEET_OF]: CSSStyleSheet | null
 
-  constructor(source: RuleText, sheet: CSSStyleSheet) {
+  constructor(source: RuleText, sheet: CSSStyleSheet, parent: CSSRule | null = null) {
+    this.parentRule = parent
     this.cssText = source.text
     this.type = source.atRule ? (RULE_TYPES[atRuleName(source.prelude)] ?? 0) : CSSRule.STYLE_RULE
     this[SHEET_OF] = sheet
@@ -50,8 +51,8 @@ export class CSSStyleRule extends CSSRule {
   readonly selectorText: string
   private declared: StyleDesc | undefined
 
-  constructor(source: RuleText, sheet: CSSStyleSheet) {
-    super(source, sheet)
+  constructor(source: RuleText, sheet: CSSStyleSheet, parent: CSSRule | null = null) {
+    super(source, sheet, parent)
     this.selectorText = source.prelude
   }
 
@@ -106,6 +107,106 @@ function showRules(list: CSSRuleList, rules: readonly CSSRule[]): void {
   list[DEFINED] = rules.length
 }
 
+/** The rules between the braces of a grouping at-rule, as a rule list. Read-only: `insertRule` and `deleteRule` are the sheet's. */
+function groupedRules(group: CSSRule, sheet: CSSStyleSheet): CSSRuleList {
+  const list = new CSSRuleList()
+  const text = group.cssText
+  const inner = text.slice(text.indexOf("{") + 1, text.lastIndexOf("}"))
+  showRules(
+    list,
+    splitRules(inner).map((rule) => makeRule(rule, sheet, group))
+  )
+  return list
+}
+
+/** `media.mediaText` of a `CSSMediaRule`: the comma-separated queries, as written. */
+export class MediaList {
+  readonly mediaText: string
+
+  constructor(mediaText: string) {
+    this.mediaText = mediaText
+  }
+
+  get length(): number {
+    return this.queries().length
+  }
+
+  item(index: number): string | null {
+    return this.queries()[index >>> 0] ?? null
+  }
+
+  toString(): string {
+    return this.mediaText
+  }
+
+  private queries(): string[] {
+    return this.mediaText === "" ? [] : splitTopLevelCommas(this.mediaText).map((query) => query.trim())
+  }
+}
+
+/** The pieces of a comma list, where a comma inside parentheses (`(min-resolution: calc(1, 2))`) does not split. */
+function splitTopLevelCommas(text: string): string[] {
+  const pieces: string[] = []
+  let depth = 0
+  let start = 0
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (char === "(") depth += 1
+    else if (char === ")") depth = Math.max(0, depth - 1)
+    else if (char === "," && depth === 0) {
+      pieces.push(text.slice(start, index))
+      start = index + 1
+    }
+  }
+  pieces.push(text.slice(start))
+  return pieces
+}
+
+/** What follows the at-keyword in the prelude of an at-rule. */
+function conditionOf(prelude: string): string {
+  return prelude.replace(/^@[^\s{(;"']*/, "").trim()
+}
+
+/** `@media`: its queries and the rules it holds. */
+export class CSSMediaRule extends CSSRule {
+  readonly media: MediaList
+  readonly cssRules: CSSRuleList
+
+  constructor(source: RuleText, sheet: CSSStyleSheet, parent: CSSRule | null = null) {
+    super(source, sheet, parent)
+    this.media = new MediaList(conditionOf(source.prelude))
+    this.cssRules = groupedRules(this, sheet)
+  }
+
+  get conditionText(): string {
+    return this.media.mediaText
+  }
+}
+
+/** `@supports`: its condition and the rules it holds. */
+export class CSSSupportsRule extends CSSRule {
+  readonly conditionText: string
+  readonly cssRules: CSSRuleList
+
+  constructor(source: RuleText, sheet: CSSStyleSheet, parent: CSSRule | null = null) {
+    super(source, sheet, parent)
+    this.conditionText = conditionOf(source.prelude)
+    this.cssRules = groupedRules(this, sheet)
+  }
+}
+
+function makeRule(source: RuleText, sheet: CSSStyleSheet, parent: CSSRule | null = null): CSSRule {
+  if (!source.atRule) return new CSSStyleRule(source, sheet, parent)
+  switch (atRuleName(source.prelude)) {
+    case "@media":
+      return new CSSMediaRule(source, sheet, parent)
+    case "@supports":
+      return new CSSSupportsRule(source, sheet, parent)
+    default:
+      return new CSSRule(source, sheet, parent)
+  }
+}
+
 export interface CSSStyleSheetInit {
   baseURL?: string
   media?: unknown
@@ -151,7 +252,7 @@ export class CSSStyleSheet implements SyncedSheet {
     this.setRules(
       splitRules(String(text))
         .filter((rule) => atRuleName(rule.prelude) !== "@import")
-        .map((rule) => this.makeRule(rule))
+        .map((rule) => makeRule(rule, this))
     )
   }
 
@@ -181,7 +282,7 @@ export class CSSStyleSheet implements SyncedSheet {
     if (atRuleName(inserted.prelude) === "@import") {
       throw syntaxError("Failed to execute 'insertRule' on 'CSSStyleSheet': Can't insert @import rules into a constructed stylesheet.")
     }
-    this.rules.splice(position, 0, this.makeRule(inserted))
+    this.rules.splice(position, 0, makeRule(inserted, this))
     showRules(this.cssRules, this.rules)
     sheetChanged(this)
     return position
@@ -202,10 +303,6 @@ export class CSSStyleSheet implements SyncedSheet {
 
   sheetText(): string {
     return this.rules.map((rule) => rule.cssText).join("\n")
-  }
-
-  private makeRule(source: RuleText): CSSRule {
-    return source.atRule ? new CSSRule(source, this) : new CSSStyleRule(source, this)
   }
 
   private setRules(rules: CSSRule[]): void {

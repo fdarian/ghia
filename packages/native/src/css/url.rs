@@ -106,7 +106,7 @@ fn closing_paren(text: &str) -> Option<usize> {
 /// CSS escapes: `\` and a hex number (up to six digits, one space after), or `\`
 /// and any other character, which stands for itself. `\` and a newline is
 /// nothing, inside a string.
-fn unescape(address: &str) -> Cow<'_, str> {
+pub(crate) fn unescape(address: &str) -> Cow<'_, str> {
     if !address.contains('\\') {
         return Cow::Borrowed(address);
     }

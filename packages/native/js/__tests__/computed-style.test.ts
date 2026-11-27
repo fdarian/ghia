@@ -8,10 +8,10 @@ import { activateAfterClick, preActivateClick } from "../events/activation.js"
 import { createElementMethods } from "../host-runtime.js"
 
 function fakeElement(id: number, pairs: string[] | null, mounted = true) {
-  const reads: [number, boolean][] = []
+  const reads: [number, string | null][] = []
   const renderer = {
     applyBatch: () => [],
-    getComputedStyle(elementId: number, pseudo: boolean) {
+    getComputedStyle(elementId: number, pseudo: string | null) {
       reads.push([elementId, pseudo])
       return pairs
     },
@@ -37,7 +37,7 @@ describe("getComputedStyle", () => {
     ])
     expect(style.getPropertyValue("--missing")).toBe("")
     expect(style.width).toBe("")
-    expect(reads).toEqual([[3, false]])
+    expect(reads).toEqual([[3, null]])
     await Promise.resolve()
     expect(style.fontSize).toBe("20px")
     expect(reads).toHaveLength(2)
@@ -74,14 +74,18 @@ describe("getComputedStyle", () => {
     expect(style.opacity).toBe("0.5")
   })
 
-  it("asks for an absent pseudo-element for ::before and ::after, and reads empty for any other", () => {
+  it("asks native for the box named by ::before and ::after, and reads empty for any other", () => {
     const fake = fakeElement(3, ["content", "none"])
     const element = fake.element
     const reads = fake.reads
     expect(getComputedStyle(element, "::before").content).toBe("none")
     expect(getComputedStyle(element, ":after").content).toBe("none")
+    expect(getComputedStyle(element, "::AFTER").content).toBe("none")
     expect(getComputedStyle(element, "::marker").content).toBe("")
-    expect(reads).toEqual([[3, true]])
+    expect(reads, "`:after` and `::AFTER` are one read").toEqual([
+      [3, "before"],
+      [3, "after"],
+    ])
   })
 
   it("reads empty for an element that is not mounted or not in the document", () => {

@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::css::media_query::MediaEnvironment;
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
 use super::atoms::Atom;
@@ -59,12 +60,14 @@ pub(super) struct Reload {
 
 impl Reload {
     /// `None` when the change cannot be told apart from a rule that moved a layer, or the added
-    /// rules cannot be found by a feature of their subject.
+    /// rules cannot be found by a feature of their subject. `environment` is the window both loads
+    /// were indexed in: the rules of a unit that apply there are the ones the index holds.
     pub(super) fn between(
         old: &[Arc<ParsedRule>],
         new: &[Arc<ParsedRule>],
         old_index: &RuleIndex,
         new_index: &RuleIndex,
+        environment: Option<&MediaEnvironment>,
     ) -> Option<Reload> {
         let prefix_units = old.iter().zip(new).take_while(|(old, new)| Arc::ptr_eq(old, new)).count();
         let suffix_units = old[prefix_units..]
@@ -73,7 +76,7 @@ impl Reload {
             .zip(new[prefix_units..].iter().rev())
             .take_while(|(old, new)| Arc::ptr_eq(old, new))
             .count();
-        let rules = |units: &[Arc<ParsedRule>]| units.iter().map(|unit| unit.len()).sum::<usize>();
+        let rules = |units: &[Arc<ParsedRule>]| units.iter().map(|unit| unit.active_len(environment)).sum::<usize>();
         let prefix = rules(&old[..prefix_units]);
         let suffix = rules(&old[old.len() - suffix_units..]);
         let old_suffix = old_index.rules.len() - suffix;
@@ -271,6 +274,9 @@ pub(super) struct Plan {
     reached: Vec<u64>,
     /// The elements that hold a list that is replaced by another.
     holders: Vec<u64>,
+    /// The elements whose generated boxes match a list that is replaced by another, and none that
+    /// is gone.
+    box_holders: Vec<u64>,
 }
 
 impl RetainedTree {
@@ -285,6 +291,7 @@ impl RetainedTree {
         };
         let mut reached: Vec<u64> = Vec::new();
         let mut holders: Vec<u64> = Vec::new();
+        let mut box_holders: Vec<u64> = Vec::new();
         if !reload.features.is_empty() || !renumbering.is_empty() {
             // Whether the list is gone, by address.
             let changed: FxHashMap<usize, bool> = renumbering.iter().map(|change| (change.address(), change.is_gone())).collect();
@@ -294,7 +301,18 @@ impl RetainedTree {
                 if fate == Some(&false) {
                     holders.push(*id);
                 }
-                let read_removed = fate == Some(&true);
+                // The lists of the boxes are renumbered like the element's.
+                let (boxes_moved, boxes_gone) = element.pseudo_matches().map_or((false, false), |boxes| {
+                    boxes.lists().fold((false, false), |(moved, gone), list| match changed.get(&(Arc::as_ptr(list) as usize)) {
+                        Some(true) => (moved, true),
+                        Some(false) => (true, gone),
+                        None => (moved, gone),
+                    })
+                });
+                if boxes_moved && !boxes_gone {
+                    box_holders.push(*id);
+                }
+                let read_removed = fate == Some(&true) || boxes_gone;
                 if read_removed || (element.is_matchable() && !reload.features.is_empty() && reload.features.reach(&self.sheets, element)) {
                     reached.push(*id);
                     if reached.len() * 2 > total {
@@ -303,7 +321,7 @@ impl RetainedTree {
                 }
             }
         }
-        Some(Plan { renumbering, reached, holders })
+        Some(Plan { renumbering, reached, holders, box_holders })
     }
 
     /// Brings the elements to the sheets just loaded: renumbers what they matched, and marks the
@@ -321,6 +339,11 @@ impl RetainedTree {
                     .expect("a holder holds a list that is replaced by another")
                     .clone();
                 element.set_matched(Some(moved));
+            }
+            for id in &plan.box_holders {
+                let element = self.elements.get_mut(id).expect("the plan found the element in this tree");
+                let boxes = element.pseudo_matches().expect("a holder of boxes has them").clone();
+                element.set_pseudo_matches(Some(self.sheets.renumbered_pseudos(&boxes, &replaced)));
             }
             self.styles.cascaded.replaced(&replaced);
         }

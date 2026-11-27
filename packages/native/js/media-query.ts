@@ -3,9 +3,13 @@
 /// Pure: it knows nothing about windows or renderers. `match-media.ts` feeds
 /// it a `MediaEnvironment` and turns the result into `MediaQueryList`s.
 ///
-/// A query list item that does not parse, or that names a feature or value the
-/// engine does not know, becomes `not all`: it never matches and serializes as
-/// `not all`, as in browsers.
+/// A query list item that does not parse becomes `not all`: it never matches and
+/// serializes as `not all`, as in browsers. A parenthesized block that names a
+/// feature or value the engine does not know is `<general-enclosed>`: its result
+/// is unknown, which is false at the top and in an `and`, stays unknown under
+/// `not`, and does not void a true sibling of an `or`. An item that can never be
+/// true for that reason serializes as `not all`. `css/media_query.rs` evaluates a
+/// stylesheet's `@media` the same way.
 
 export interface MediaEnvironment {
   /** Content size of the window in CSS pixels. */
@@ -39,6 +43,10 @@ type MediaCondition =
   | { kind: "not"; child: MediaCondition }
   | { kind: "and"; children: MediaCondition[] }
   | { kind: "or"; children: MediaCondition[] }
+  /** `<general-enclosed>`: the block as written, for the serialization. */
+  | { kind: "unknown"; text: string }
+
+type Truth = "true" | "false" | "unknown"
 
 interface MediaQueryItem {
   readonly text: string
@@ -291,17 +299,39 @@ class Parser {
   }
 
   private parseInParens(): MediaCondition {
+    const openAt = this.index
     const open = this.next()
     if (open?.type !== "(") throw new Unsupported()
     const first = this.peek()
-    let result: MediaCondition
-    if (first?.type === "(" || (first?.type === "ident" && first.value === "not" && this.peekAt(1)?.type === "(")) {
-      result = this.parseCondition(true)
-    } else {
-      result = this.parseFeature()
+    const nested = first?.type === "(" || (first?.type === "ident" && first.value === "not" && this.peekAt(1)?.type === "(")
+    try {
+      const inner = nested ? this.parseCondition(true) : this.parseFeature()
+      if (this.peek()?.type === ")") {
+        this.index += 1
+        return inner
+      }
+    } catch (error) {
+      if (!(error instanceof Unsupported)) throw error
     }
-    if (this.next()?.type !== ")") throw new Unsupported()
-    return result
+    // Not a condition or a feature known with a value it takes (a syntax error inside a nested condition included): the
+    // block is <general-enclosed>, as long as it is closed, so a sibling of an `or` still decides the query.
+    const close = this.closeOf(openAt)
+    if (close === undefined) throw new Unsupported()
+    this.index = close + 1
+    return { kind: "unknown", text: describeTokens(this.tokens.slice(openAt, close + 1)) }
+  }
+
+  private closeOf(open: number): number | undefined {
+    let depth = 0
+    for (let index = open; index < this.tokens.length; index += 1) {
+      const type = this.tokens[index].type
+      if (type === "(") depth += 1
+      if (type === ")") {
+        depth -= 1
+        if (depth === 0) return index
+      }
+    }
+    return undefined
   }
 
   private parseFeature(): MediaCondition {
@@ -395,6 +425,15 @@ function isGreater(op: Comparison): boolean {
   return op === ">" || op === ">="
 }
 
+function describeTokens(tokens: Token[]): string {
+  let text = ""
+  for (const [position, token] of tokens.entries()) {
+    const piece = token.type === "ident" ? token.value : token.type === "number" ? token.text : token.type
+    text += position > 0 && token.spaceBefore ? ` ${piece}` : piece
+  }
+  return text
+}
+
 function plainFeature(name: string, value: MediaValue): MediaCondition {
   if (name.startsWith("min-")) return { kind: "plain", feature: name.slice(4), prefix: "min", value }
   if (name.startsWith("max-")) return { kind: "plain", feature: name.slice(4), prefix: "max", value }
@@ -404,55 +443,93 @@ function plainFeature(name: string, value: MediaValue): MediaCondition {
 // ── Validation and evaluation ────────────────────────────────────────
 
 function featureOf(name: string): FeatureType {
-  if (!Object.hasOwn(FEATURES, name)) throw new Unsupported()
+  if (!Object.hasOwn(FEATURES, name)) throw new Error("Unreachable: validated as a known feature")
   return FEATURES[name]
 }
 
-/** Throws `Unsupported` when the condition names an unknown feature or a value the feature cannot take. */
-function validate(condition: MediaCondition): void {
+/** Whether the feature is one this engine knows and the value is one it can take. */
+function isKnown(condition: MediaCondition): boolean {
   switch (condition.kind) {
-    case "not":
-      validate(condition.child)
-      return
-    case "and":
-    case "or":
-      for (const child of condition.children) validate(child)
-      return
     case "boolean":
-      featureOf(condition.feature)
-      return
+      return Object.hasOwn(FEATURES, condition.feature)
     case "plain": {
-      const feature = featureOf(condition.feature)
+      if (!Object.hasOwn(FEATURES, condition.feature)) return false
+      const feature = FEATURES[condition.feature]
       if (feature.kind === "discrete") {
-        if (condition.prefix) throw new Unsupported()
-        if (condition.value.type !== "ident" || !feature.values.includes(condition.value.value)) {
-          throw new Unsupported()
-        }
-        return
+        return (
+          !condition.prefix &&
+          condition.value.type === "ident" &&
+          feature.values.includes(condition.value.value)
+        )
       }
-      checkRangeValue(feature, condition.value)
-      return
+      return fitsRange(feature, condition.value)
     }
     case "range": {
-      const feature = featureOf(condition.feature)
-      if (feature.kind === "discrete") throw new Unsupported()
-      if (condition.left) checkRangeValue(feature, condition.left.value)
-      if (condition.right) checkRangeValue(feature, condition.right.value)
-      return
+      if (!Object.hasOwn(FEATURES, condition.feature)) return false
+      const feature = FEATURES[condition.feature]
+      if (feature.kind === "discrete") return false
+      return (
+        (!condition.left || fitsRange(feature, condition.left.value)) &&
+        (!condition.right || fitsRange(feature, condition.right.value))
+      )
     }
+    default:
+      return true
   }
 }
 
-function checkRangeValue(feature: FeatureType, value: MediaValue): void {
+function fitsRange(feature: FeatureType, value: MediaValue): boolean {
   if (feature.kind === "length") {
-    const zero = value.type === "number" && value.value === 0
-    if (value.type !== "length" && !zero) throw new Unsupported()
-  } else if (feature.kind === "ratio") {
-    if (value.type !== "ratio" && value.type !== "number") throw new Unsupported()
-  } else if (feature.kind === "integer") {
-    if (value.type !== "number" || !Number.isInteger(value.value)) throw new Unsupported()
-  } else {
-    throw new Unsupported()
+    return value.type === "length" || (value.type === "number" && value.value === 0)
+  }
+  if (feature.kind === "ratio") return value.type === "ratio" || value.type === "number"
+  if (feature.kind === "integer") return value.type === "number" && Number.isInteger(value.value)
+  return false
+}
+
+/** Replaces the features this engine does not know, or whose value it cannot take, by `<general-enclosed>`. */
+function enclose(condition: MediaCondition): MediaCondition {
+  switch (condition.kind) {
+    case "not":
+      return { kind: "not", child: enclose(condition.child) }
+    case "and":
+    case "or":
+      return { kind: condition.kind, children: condition.children.map(enclose) }
+    default:
+      return isKnown(condition)
+        ? condition
+        : { kind: "unknown", text: serializeCondition(condition, false) }
+  }
+}
+
+/** Whether every result of the condition is unknown. */
+function alwaysUnknown(condition: MediaCondition): boolean {
+  switch (condition.kind) {
+    case "unknown":
+      return true
+    case "not":
+      return alwaysUnknown(condition.child)
+    case "and":
+    case "or":
+      return condition.children.every(alwaysUnknown)
+    default:
+      return false
+  }
+}
+
+/** Whether no environment makes the condition true, because of what it does not know. */
+function neverTrue(condition: MediaCondition): boolean {
+  switch (condition.kind) {
+    case "unknown":
+      return true
+    case "not":
+      return alwaysUnknown(condition.child)
+    case "and":
+      return condition.children.some(neverTrue)
+    case "or":
+      return condition.children.every(neverTrue)
+    default:
+      return false
   }
 }
 
@@ -512,30 +589,54 @@ function flip(op: Comparison): Comparison {
   }
 }
 
-function evaluate(condition: MediaCondition, env: MediaEnvironment): boolean {
+function truth(known: boolean): Truth {
+  return known ? "true" : "false"
+}
+
+function negate(value: Truth): Truth {
+  return value === "unknown" ? "unknown" : value === "true" ? "false" : "true"
+}
+
+function evaluate(condition: MediaCondition, env: MediaEnvironment): Truth {
   switch (condition.kind) {
+    case "unknown":
+      return "unknown"
     case "not":
-      return !evaluate(condition.child, env)
-    case "and":
-      return condition.children.every((child) => evaluate(child, env))
-    case "or":
-      return condition.children.some((child) => evaluate(child, env))
+      return negate(evaluate(condition.child, env))
+    case "and": {
+      let result: Truth = "true"
+      for (const child of condition.children) {
+        const value = evaluate(child, env)
+        if (value === "false") return "false"
+        if (value === "unknown") result = "unknown"
+      }
+      return result
+    }
+    case "or": {
+      let result: Truth = "false"
+      for (const child of condition.children) {
+        const value = evaluate(child, env)
+        if (value === "true") return "true"
+        if (value === "unknown") result = "unknown"
+      }
+      return result
+    }
     case "boolean": {
       const feature = featureOf(condition.feature)
-      if (feature.kind === "discrete") return feature.read(env) !== feature.falsy
-      return feature.read(env) !== 0
+      if (feature.kind === "discrete") return truth(feature.read(env) !== feature.falsy)
+      return truth(feature.read(env) !== 0)
     }
     case "plain": {
       const feature = featureOf(condition.feature)
       if (feature.kind === "discrete") {
         if (condition.value.type !== "ident") throw new Error("Unreachable: validated as a keyword")
-        return feature.read(env) === condition.value.value
+        return truth(feature.read(env) === condition.value.value)
       }
       const actual = feature.read(env)
       const wanted = numericValue(condition.value, env)
-      if (condition.prefix === "min") return actual >= wanted
-      if (condition.prefix === "max") return actual <= wanted
-      return actual === wanted
+      if (condition.prefix === "min") return truth(actual >= wanted)
+      if (condition.prefix === "max") return truth(actual <= wanted)
+      return truth(actual === wanted)
     }
     case "range": {
       const feature = featureOf(condition.feature)
@@ -543,12 +644,12 @@ function evaluate(condition: MediaCondition, env: MediaEnvironment): boolean {
       const actual = feature.read(env)
       // `400px <= width` reads as `width >= 400px`.
       if (condition.left && !compare(actual, flip(condition.left.op), numericValue(condition.left.value, env))) {
-        return false
+        return "false"
       }
       if (condition.right && !compare(actual, condition.right.op, numericValue(condition.right.value, env))) {
-        return false
+        return "false"
       }
-      return true
+      return "true"
     }
   }
 }
@@ -562,6 +663,8 @@ function serializeValue(value: MediaValue): string {
 /** `nested` wraps compound conditions, which have no parentheses of their own. */
 function serializeCondition(condition: MediaCondition, nested: boolean): string {
   switch (condition.kind) {
+    case "unknown":
+      return condition.text
     case "boolean":
       return `(${condition.feature})`
     case "plain": {
@@ -606,10 +709,10 @@ function compileItem(tokens: Token[]): MediaQueryItem {
   }
   try {
     const parsed = new Parser(tokens).parseItem()
-    if (parsed.condition) validate(parsed.condition)
     const typeMatches = parsed.type === undefined ? true : (KNOWN_TYPES.get(parsed.type) ?? false)
-    const negate = parsed.qualifier === "not"
-    const condition = parsed.condition
+    const negated = parsed.qualifier === "not"
+    const condition = parsed.condition ? enclose(parsed.condition) : undefined
+    if (condition && !negated && neverTrue(condition)) return NEVER
     const parts: string[] = []
     if (parsed.qualifier) parts.push(parsed.qualifier)
     if (parsed.type) parts.push(parsed.type)
@@ -620,8 +723,10 @@ function compileItem(tokens: Token[]): MediaQueryItem {
     return {
       text: parts.join(" "),
       matches(env) {
-        const result = typeMatches && (condition ? evaluate(condition, env) : true)
-        return negate ? !result : result
+        const known = truth(typeMatches)
+        const value = condition ? evaluate(condition, env) : "true"
+        const result: Truth = known === "false" || value === "false" ? "false" : value
+        return (negated ? negate(result) : result) === "true"
       },
     }
   } catch (error) {

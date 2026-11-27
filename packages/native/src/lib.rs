@@ -42,6 +42,7 @@ mod motion;
 #[cfg(all(feature = "test-support", target_os = "macos"))]
 mod native_event;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+mod open_url;
 mod platform;
 mod observers;
 pub mod perf_counters;

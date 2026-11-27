@@ -9,7 +9,7 @@ mod semantics;
 mod tags;
 
 pub(crate) use semantics::{
-    activation_keys, activation_target, button_type, has_href, heading_level, implicit_role, is_activatable, is_focusable_by_default, ActivationKeys,
+    activation_keys, activation_target, button_type, has_href, heading_level, implicit_role, is_activatable, is_followed_by, is_focusable_by_default, ActivationKeys,
     ButtonType,
 };
 
@@ -133,6 +133,9 @@ pub fn ua_style_of(element: &crate::retained_tree::RetainedElement, above: Lists
 }
 
 fn ua_style_of_tag_and_type(element: &crate::retained_tree::RetainedElement) -> Option<Arc<StyleDesc>> {
+    if element.element_type == "a" && has_href(element) {
+        return styles().get("a[href]").cloned();
+    }
     if element.element_type != "input" {
         return ua_style(&element.element_type);
     }
@@ -144,6 +147,19 @@ fn ua_style_of_tag_and_type(element: &crate::retained_tree::RetainedElement) -> 
         _ => return None,
     };
     styles().get(name).cloned()
+}
+
+/// `style`, the user agent style of an element, as it stays under what the author declared (`declared`): a link
+/// whose declarations set a `color` keeps no pressed colour of its own, which would win over that `color` while
+/// the link is pressed.
+pub(crate) fn user_agent_under(style: Option<Arc<StyleDesc>>, declared: Option<&StyleDesc>) -> Option<Arc<StyleDesc>> {
+    let Some(declared) = declared.filter(|declared| declared.color.is_some()) else {
+        return style;
+    };
+    match (&style, styles().get("a[href]")) {
+        (Some(style), Some(link)) if Arc::ptr_eq(style, link) => styles().get("a[href] with a color").cloned(),
+        _ => style,
+    }
 }
 
 /// The style `element_type` is laid out and read with, given the one its layers add up to. Chrome lays a
@@ -184,6 +200,17 @@ mod tests {
         for tag in ["div", "span", "label", "form", "img", "svg", "input", "textarea", "code-block", "select", "#text", "nativeview"] {
             assert!(!is_tag(tag), "<{tag}> has a built-in meaning");
         }
+    }
+
+    #[test]
+    fn the_elements_that_hold_data_for_the_page_are_not_displayed() {
+        for tag in [
+            "area", "base", "basefont", "datalist", "head", "link", "meta", "noembed", "noframes", "noscript", "param", "rp", "script", "style",
+            "template", "title",
+        ] {
+            assert_eq!(ua_style(tag).expect("a style").display.as_deref(), Some("none"), "<{tag}>");
+        }
+        assert_eq!(ua_style("p").unwrap().display.as_deref(), Some("block"));
     }
 
     #[test]

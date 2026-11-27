@@ -1,24 +1,37 @@
-//! Rules, `@layer` and nesting over the token list.
+//! Rules, `@layer`, `@media`, `@supports`, `@keyframes`, `@property` and nesting over the token list.
+
+use std::sync::Arc;
 
 use crate::css::lenient::Declaration;
+use crate::css::media_query::MediaQueryList;
 
 use super::atoms::Atoms;
+use super::conditions::Conditions;
 use super::declarations::{parse_declaration, push_declaration};
+use super::definitions::Defined;
+use super::font_face;
+use super::keyframes;
+use super::property_rules;
 use super::layers::{LayerId, Layers};
 use super::selector::{ComplexSelector, SelectorList, Specificity};
 use super::selector_parse::{parse_selector_list, Nesting};
+use super::supports;
 use super::tokenizer::{find_close, tokenize, trim, Kind, Token};
+use super::validate::Validator;
 use super::{Rule, StyleSheet};
 
-pub fn parse_sheet(text: &str, atoms: &mut Atoms, layers: &mut Layers) -> StyleSheet {
+/// `validator` answers the `@supports (property: value)` conditions, which are decided here.
+pub fn parse_sheet(text: &str, atoms: &mut Atoms, layers: &mut Layers, validator: &mut Validator) -> StyleSheet {
     let tokens = tokenize(text);
     let mut parser = Parser {
         src: text,
         tokens: &tokens,
         atoms,
         layers,
-        sheet: StyleSheet { rules: Vec::new(), unsupported: Vec::new() },
+        validator,
+        sheet: StyleSheet { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), font_faces: Vec::new(), unsupported: Vec::new() },
         depth: 0,
+        conditions: None,
     };
     parser.rule_list(0, tokens.len(), None);
     parser.sheet
@@ -29,12 +42,15 @@ struct Parser<'a> {
     tokens: &'a [Token],
     atoms: &'a mut Atoms,
     layers: &'a mut Layers,
+    validator: &'a mut Validator,
     sheet: StyleSheet,
-    /// How many style rules and `@layer` blocks enclose the one being parsed.
+    /// How many style rules, `@layer`, `@media` and `@supports` blocks enclose the one being parsed.
     depth: usize,
+    /// The `@media` queries around what is being parsed.
+    conditions: Option<Arc<Conditions>>,
 }
 
-/// Blocks nest this deep; a rule or `@layer` inside more is dropped like an invalid rule, so
+/// Blocks nest this deep; a rule or at-rule block inside more is dropped like an invalid rule, so
 /// hostile input cannot overflow the stack.
 const MAX_BLOCK_DEPTH: usize = 32;
 
@@ -112,6 +128,45 @@ impl Parser<'_> {
         self.sheet.unsupported.push(text);
     }
 
+    /// Records an `@media` or `@supports` that has no block, or whose condition is not valid.
+    fn record_dropped_at_rule(&mut self, name: &str, prelude: &[Token]) {
+        let text = match (prelude.first(), prelude.last()) {
+            (Some(first), Some(last)) => format!("@{name} {}", &self.src[first.start..last.end]),
+            _ => format!("@{name}"),
+        };
+        self.sheet.unsupported.push(text);
+    }
+
+    /// Runs `parse_block` for the contents of an `@media` or `@supports` with `prelude`. An
+    /// `@media` adds its queries to the conditions of every rule in the block. An `@supports` is
+    /// decided now: the block is parsed only when it holds, and is dropped with a record when its
+    /// condition is not valid.
+    fn conditional(&mut self, name: &str, prelude: &[Token], parse_block: impl FnOnce(&mut Self)) {
+        if self.depth == MAX_BLOCK_DEPTH {
+            self.sheet.unsupported.push(name.to_owned());
+            return;
+        }
+        let outer = self.conditions.clone();
+        if name == "media" {
+            let text = match (prelude.first(), prelude.last()) {
+                (Some(first), Some(last)) => &self.src[first.start..last.end],
+                _ => "",
+            };
+            let queries = Arc::new(MediaQueryList::parse(text));
+            self.conditions = Some(Conditions::within(outer.as_ref(), queries));
+        } else {
+            match supports::evaluate(self.src, prelude, self.validator) {
+                Some(true) => {}
+                Some(false) => return,
+                None => return self.record_dropped_at_rule(name, prelude),
+            }
+        }
+        self.depth += 1;
+        parse_block(self);
+        self.depth -= 1;
+        self.conditions = outer;
+    }
+
     fn at_rule(&mut self, start: usize, end: usize, name: &str, layer: Option<LayerId>) -> usize {
         let (stop, terminator) = self.scan_prelude(start + 1, end, true, true);
         let prelude = trim(&self.tokens[start + 1..stop]);
@@ -120,6 +175,22 @@ impl Parser<'_> {
             Terminator::Semicolon => (stop, stop + 1),
             Terminator::End => (end, end),
         };
+        if matches!(name, "media" | "supports") {
+            if !matches!(terminator, Terminator::Block) {
+                self.record_dropped_at_rule(name, prelude);
+                return after;
+            }
+            self.conditional(name, prelude, |parser| parser.rule_list(stop + 1, contents_end, layer));
+            return after;
+        }
+        if name == "font-face" {
+            self.font_face(prelude, contents_end, stop, terminator, layer);
+            return after;
+        }
+        if matches!(name, "keyframes" | "-webkit-keyframes" | "property") {
+            self.definition(name, prelude, stop, contents_end, terminator, layer);
+            return after;
+        }
         if name != "layer" {
             self.sheet.unsupported.push(name.to_owned());
             return after;
@@ -151,6 +222,54 @@ impl Parser<'_> {
         after
     }
 
+    /// `@keyframes` or `@property`, whose block starts at `open` and holds the tokens up to `end`.
+    /// One that is not valid is dropped, and recorded when it was a `@property`, whose reason is not
+    /// obvious from the text.
+    fn definition(&mut self, name: &str, prelude: &[Token], open: usize, end: usize, terminator: Terminator, layer: Option<LayerId>) {
+        let head = || match (prelude.first(), prelude.last()) {
+            (Some(first), Some(last)) => format!("@{name} {}", &self.src[first.start..last.end]),
+            _ => format!("@{name}"),
+        };
+        if !matches!(terminator, Terminator::Block) {
+            let head = head();
+            self.sheet.unsupported.push(head);
+            return;
+        }
+        let contents = &self.tokens[(open + 1).min(end)..end];
+        if name == "property" {
+            match property_rules::parse(self.src, prelude, contents) {
+                Ok(registration) => {
+                    self.sheet.properties.push(Defined { body: Arc::new(registration), layer, conditions: self.conditions.clone() });
+                }
+                Err(reason) => {
+                    let head = head();
+                    self.sheet.unsupported.push(format!("{head}: {reason}"));
+                }
+            }
+            return;
+        }
+        match keyframes::parse(self.src, prelude, contents, self.validator) {
+            Some(rule) => self.sheet.keyframes.push(Defined { body: Arc::new(rule), layer, conditions: self.conditions.clone() }),
+            None => {
+                let head = head();
+                self.sheet.unsupported.push(head);
+            }
+        }
+    }
+
+    /// `@font-face`, whose block starts at `open`. One that makes no face is dropped, and recorded with its reason.
+    fn font_face(&mut self, prelude: &[Token], end: usize, open: usize, terminator: Terminator, layer: Option<LayerId>) {
+        if !matches!(terminator, Terminator::Block) || !prelude.is_empty() {
+            self.record_dropped_at_rule("font-face", prelude);
+            return;
+        }
+        let contents = &self.tokens[(open + 1).min(end)..end];
+        match font_face::parse(self.src, contents) {
+            Ok(rule) => self.sheet.font_faces.push(Defined { body: Arc::new(rule), layer, conditions: self.conditions.clone() }),
+            Err(reason) => self.sheet.unsupported.push(format!("@font-face: {reason}")),
+        }
+    }
+
     fn declare_path(&mut self, parent: Option<LayerId>, path: &[String]) -> LayerId {
         let mut layer = parent;
         for name in path {
@@ -171,10 +290,28 @@ impl Parser<'_> {
                 Kind::AtKeyword(name) => {
                     let name = name.to_ascii_lowercase();
                     let (stop, terminator) = self.scan_prelude(index + 1, end, true, true);
-                    self.sheet.unsupported.push(name);
-                    index = match terminator {
-                        Terminator::Block => self.block(stop, end).1,
-                        _ => stop + 1,
+                    let block = matches!(terminator, Terminator::Block).then(|| self.block(stop, end));
+                    index = match block {
+                        Some((contents_end, after)) if matches!(name.as_str(), "media" | "supports") => {
+                            // What was written before the block comes first in the cascade.
+                            self.flush(&selectors, &mut normal, &mut important, layer);
+                            let prelude = trim(&self.tokens[index + 1..stop]);
+                            let nested = selectors.clone();
+                            self.conditional(&name, prelude, |parser| parser.style_block(stop + 1, contents_end, nested, layer));
+                            after
+                        }
+                        Some((_, after)) => {
+                            self.sheet.unsupported.push(name);
+                            after
+                        }
+                        None if matches!(name.as_str(), "media" | "supports") => {
+                            self.record_dropped_at_rule(&name, trim(&self.tokens[index + 1..stop]));
+                            stop + 1
+                        }
+                        None => {
+                            self.sheet.unsupported.push(name);
+                            stop + 1
+                        }
                     };
                 }
                 _ => {
@@ -224,6 +361,7 @@ impl Parser<'_> {
             normal: std::mem::take(normal),
             important: std::mem::take(important),
             layer,
+            conditions: self.conditions.clone(),
             order,
         });
     }

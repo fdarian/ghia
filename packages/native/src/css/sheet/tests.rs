@@ -8,15 +8,16 @@ const DND_KIT: &str = include_str!("fixtures/dnd-kit.css");
 struct Doc {
     atoms: Atoms,
     layers: Layers,
+    validator: validate::Validator,
 }
 
 impl Doc {
     fn new() -> Doc {
-        Doc { atoms: Atoms::default(), layers: Layers::default() }
+        Doc { atoms: Atoms::default(), layers: Layers::default(), validator: validate::Validator::default() }
     }
 
     fn parse(&mut self, text: &str) -> StyleSheet {
-        parse_sheet(text, &mut self.atoms, &mut self.layers)
+        parse_sheet(text, &mut self.atoms, &mut self.layers, &mut self.validator)
     }
 
     /// The first selector of `selector { color: red }`.
@@ -49,6 +50,8 @@ struct Node {
     attrs: Vec<(Atom, String)>,
     /// The tree states the node is in.
     states: Vec<TreeState>,
+    /// The pointer and focus states the node is in.
+    live: Vec<State>,
     parent: Option<usize>,
     prev: Option<usize>,
 }
@@ -77,6 +80,7 @@ impl Tree {
             classes: classes.iter().map(|class| atoms.intern(class)).collect(),
             attrs: attrs.iter().map(|(name, value)| (atoms.intern(name), (*value).to_owned())).collect(),
             states: Vec::new(),
+            live: Vec::new(),
             parent,
             prev,
         });
@@ -145,6 +149,9 @@ impl ElementView for View<'_> {
     }
     fn tree_state(&self, state: TreeState) -> bool {
         self.tree.nodes[self.index].states.contains(&state)
+    }
+    fn live_state(&self, state: State) -> bool {
+        self.tree.nodes[self.index].live.contains(&state)
     }
     fn child_index(&self, of_type: bool, from_end: bool) -> Option<u32> {
         let Some(parent) = self.tree.nodes[self.index].parent else {
@@ -312,13 +319,248 @@ fn unknown_at_rules_are_skipped_whole_and_recorded() {
     let mut doc = Doc::new();
     let sheet = doc.parse(
         "@charset \"utf-8\"; @import url(a.css) layer(x); a { color: red } \
-         @media (min-width: 1px) { b { color: blue } @media print { c { x: y } } } \
-         @keyframes k { from { top: 0 } to { top: 1px } } @font-face { font-family: x; } \
-         @Supports (display: grid) { d { display: grid } } e { top: 1px }",
+         @keyframes k { from { top: 0 } to { top: 1px } } @font-face { font-family: x; src: url(x.ttf) } \
+         @property --p { syntax: '<length>'; inherits: false; initial-value: 0px } \
+         @namespace svg url(x); @container (min-width: 1px) { b { top: 2px } } e { top: 1px }",
     );
-    assert_eq!(sheet.unsupported, ["charset", "import", "media", "keyframes", "font-face", "supports"]);
+    assert_eq!(sheet.unsupported, ["charset", "import", "namespace", "container"]);
+    assert_eq!(sheet.keyframes.len(), 1);
+    assert_eq!(sheet.font_faces.len(), 1);
+    assert_eq!(sheet.properties.len(), 1);
     let colors: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].0).collect();
     assert_eq!(colors, ["color", "top"]);
+}
+
+fn keyframes_of(sheet: &StyleSheet) -> Vec<(&str, Vec<(Vec<f64>, Vec<(&str, &str)>)>)> {
+    sheet
+        .keyframes
+        .iter()
+        .map(|rule| {
+            let blocks = rule.body.blocks.iter().map(|block| (block.offsets.clone(), pairs(&block.declarations))).collect();
+            (rule.body.name.as_str(), blocks)
+        })
+        .collect()
+}
+
+#[test]
+fn keyframes_have_a_name_and_blocks_of_declarations() {
+    let sheet = Doc::new().parse(
+        "@keyframes spin { to { transform: rotate(360deg) } } \
+         @-webkit-keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .5; animation-timing-function: ease-in } } \
+         @keyframes \"quoted name\" { from { top: 0 } }",
+    );
+    assert!(sheet.unsupported.is_empty(), "{:?}", sheet.unsupported);
+    assert_eq!(
+        keyframes_of(&sheet),
+        [
+            ("spin", vec![(vec![1.0], vec![("transform", r#""rotate(360deg)""#)])]),
+            (
+                "pulse",
+                vec![
+                    (vec![0.0, 1.0], vec![("opacity", "1")]),
+                    (vec![0.5], vec![("opacity", "0.5"), ("animationTimingFunction", r#""ease-in""#)]),
+                ]
+            ),
+            ("quoted name", vec![(vec![0.0], vec![("top", r#""0""#)])]),
+        ]
+    );
+}
+
+#[test]
+fn a_keyframe_with_a_bad_selector_is_dropped_and_the_others_stay() {
+    let sheet = Doc::new().parse(
+        "@keyframes k { from { top: 1px } middle { top: 2px } 150% { top: 3px } -5% { top: 4px } 10%, wat { top: 5px } 20% 30% { top: 6px } 40% { top: 7px } }",
+    );
+    let blocks = &keyframes_of(&sheet)[0].1;
+    assert_eq!(blocks.iter().map(|(offsets, _)| offsets.clone()).collect::<Vec<_>>(), [vec![0.0], vec![0.4]]);
+}
+
+#[test]
+fn important_declarations_in_a_keyframe_are_ignored_and_a_later_declaration_replaces_an_earlier() {
+    let sheet = Doc::new().parse("@keyframes k { to { top: 1px !important; left: 2px; left: 3px; width: bogus } }");
+    assert_eq!(keyframes_of(&sheet)[0].1, [(vec![1.0], vec![("left", r#""3px""#)])]);
+}
+
+#[test]
+fn keyframes_with_an_invalid_name_or_no_block_are_dropped_and_recorded() {
+    let sheet = Doc::new().parse("@keyframes none { to { top: 1px } } @keyframes { to { top: 1px } } @keyframes a b { to { top: 1px } } @keyframes x;");
+    assert!(sheet.keyframes.is_empty());
+    assert_eq!(sheet.unsupported, ["@keyframes none", "@keyframes", "@keyframes a b", "@keyframes x"]);
+}
+
+#[test]
+fn keyframes_stand_under_the_media_and_layer_around_them() {
+    let sheet = Doc::new().parse(
+        "@layer base { @keyframes a { to { top: 1px } } } @media (min-width: 10px) { @keyframes b { to { top: 1px } } @supports (display: grid) { @keyframes c { to { top: 1px } } } } @supports (bogus: 1) { @keyframes d { to { top: 1px } } }",
+    );
+    let found: Vec<(&str, bool, Option<String>)> = sheet
+        .keyframes
+        .iter()
+        .map(|rule| (rule.body.name.as_str(), rule.layer.is_some(), rule.conditions.as_ref().map(|c| c.texts().join(" && "))))
+        .collect();
+    assert_eq!(
+        found,
+        [("a", true, None), ("b", false, Some("(min-width: 10px)".into())), ("c", false, Some("(min-width: 10px)".into()))]
+    );
+}
+
+fn registrations_of(sheet: &StyleSheet) -> Vec<(&str, bool, Option<&str>)> {
+    sheet.properties.iter().map(|rule| (rule.body.name.as_str(), rule.body.inherits, rule.body.initial.as_deref())).collect()
+}
+
+#[test]
+fn a_property_rule_registers_a_custom_property() {
+    let sheet = Doc::new().parse(
+        "@property --tw-rotate-x { syntax: \"*\"; inherits: false; } \
+         @property --tw-shadow { syntax: \"*\"; inherits: false; initial-value: 0 0 #0000; } \
+         @property --len { syntax: '<length>'; inherits: true; initial-value: 4px /* c */ }",
+    );
+    assert!(sheet.unsupported.is_empty(), "{:?}", sheet.unsupported);
+    assert_eq!(
+        registrations_of(&sheet),
+        [("--tw-rotate-x", false, None), ("--tw-shadow", false, Some("0 0 #0000")), ("--len", true, Some("4px"))]
+    );
+}
+
+#[test]
+fn a_property_rule_with_invalid_descriptors_is_ignored_and_recorded_with_the_reason() {
+    let sheet = Doc::new().parse(
+        "@property --a { syntax: '<length>'; inherits: false } \
+         @property --b { inherits: false; initial-value: 1 } \
+         @property --c { syntax: '*' } \
+         @property --d { syntax: '<length>'; inherits: true; initial-value: 2em } \
+         @property --e { syntax: '<length>'; inherits: true; initial-value: red } \
+         @property --f { syntax: '<bogus>'; inherits: true; initial-value: 1 } \
+         @property e { syntax: '*'; inherits: true } \
+         @property --g { syntax: '*'; inherits: true; initial-value: var(--x) } \
+         @property --ok { syntax: '*'; inherits: true; unknown: 1; initial-value: x }",
+    );
+    assert_eq!(registrations_of(&sheet), [("--ok", true, Some("x"))]);
+    assert_eq!(sheet.unsupported.len(), 8);
+    assert!(sheet.unsupported[0].starts_with("@property --a: the initial-value descriptor is missing"), "{:?}", sheet.unsupported);
+    assert!(sheet.unsupported[3].contains("computationally independent"));
+}
+
+#[test]
+fn a_property_rule_stands_under_its_media_and_layer() {
+    let sheet = Doc::new().parse("@media (min-width: 1px) { @property --a { syntax: '*'; inherits: true } } @layer l { @property --b { syntax: '*'; inherits: true } }");
+    assert_eq!(sheet.properties.len(), 2);
+    assert!(sheet.properties[0].conditions.is_some());
+    assert!(sheet.properties[1].layer.is_some());
+}
+
+fn conditions_of(sheet: &StyleSheet) -> Vec<Option<String>> {
+    sheet
+        .rules
+        .iter()
+        .map(|rule| rule.conditions.as_ref().map(|conditions| format!("{}", conditions.texts().join(" && "))))
+        .collect()
+}
+
+#[test]
+fn a_rule_in_media_carries_the_queries_around_it() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse(
+        "a { color: red } @media (min-width: 1px) { b { color: blue } @media print { c { top: 1px } } } \
+         @layer l { @media screen { d { top: 2px } } } e { top: 3px }",
+    );
+    assert!(sheet.unsupported.is_empty());
+    assert_eq!(
+        conditions_of(&sheet),
+        [None, Some("(min-width: 1px)".into()), Some("(min-width: 1px) && print".into()), Some("screen".into()), None]
+    );
+    assert!(sheet.rules[3].layer.is_some());
+}
+
+#[test]
+fn media_inside_a_style_rule_gates_its_declarations_and_keeps_source_order() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse(".a { color: red; @media (min-width: 1px) { color: blue; &:hover { top: 1px } } left: 2px; .b { right: 3px } }");
+    assert!(sheet.unsupported.is_empty());
+    let found: Vec<_> = sheet
+        .rules
+        .iter()
+        .map(|rule| (pairs(&rule.normal)[0].0.to_owned(), rule.conditions.is_some(), rule.order))
+        .collect();
+    assert_eq!(
+        found,
+        [("color".into(), false, 0), ("color".into(), true, 1), ("top".into(), true, 2), ("left".into(), false, 3), ("right".into(), false, 4)]
+    );
+}
+
+#[test]
+fn an_unparseable_media_query_is_kept_and_never_matches() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse("@media (bogus: 1) { a { color: red } } @media { b { color: red } }");
+    assert_eq!(conditions_of(&sheet), [Some("(bogus: 1)".into()), Some("".into())]);
+}
+
+#[test]
+fn a_media_rule_with_no_block_is_dropped_and_recorded() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse("@media screen; a { color: red }");
+    assert_eq!(sheet.unsupported, ["@media screen"]);
+    assert_eq!(sheet.rules.len(), 1);
+}
+
+#[test]
+fn supports_is_decided_at_parse_time() {
+    let cases = [
+        ("(display: grid)", true),
+        ("(color: notacolor)", false),
+        ("(bogus-property: 1)", false),
+        ("not (bogus-property: 1)", true),
+        ("(display: grid) and (color: red)", true),
+        ("(bogus-property: 1) or (color: red)", true),
+        ("(bogus-property: 1) and (color: red)", false),
+        ("selector(.a > .b)", true),
+        ("selector(:has(.a))", true),
+        ("selector(:bogus)", false),
+        ("not selector(:bogus)", true),
+        ("((display: grid) and (not (bogus-property: 1)))", true),
+        ("(--custom: anything)", true),
+        ("(z-index: auto)", true),
+        ("(selector(.a))", true),
+        ("(selector(:bogus))", false),
+        ("font-tech(variations)", true),
+        ("font-tech(color-COLRv1)", false),
+        ("font-format(truetype)", true),
+        ("font-format(woff2)", false),
+        ("unknown-function(1, 2)", false),
+        ("not unknown-function(1, 2)", true),
+        ("(unknown tokens here)", false),
+        ("(unknown tokens here) or (display: grid)", true),
+        ("(display: grid) and (unknown tokens here)", false),
+        ("not (unknown tokens here)", true),
+    ];
+    let text: String =
+        cases.iter().enumerate().map(|(index, (condition, _))| format!("@supports {condition} {{ a {{ top: {index}px }} }} ")).collect();
+    let mut doc = Doc::new();
+    let sheet = doc.parse(&text);
+    assert!(sheet.unsupported.is_empty(), "{:?}", sheet.unsupported);
+    let kept: Vec<String> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].1.trim_matches('"').to_owned()).collect();
+    let expected: Vec<String> =
+        cases.iter().enumerate().filter(|(_, (_, holds))| *holds).map(|(index, _)| format!("{index}px")).collect();
+    assert_eq!(kept, expected);
+    assert!(sheet.rules.iter().all(|rule| rule.conditions.is_none()), "a decided condition leaves none on the rule");
+}
+
+#[test]
+fn an_invalid_supports_condition_drops_the_block_and_is_recorded() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse("@supports { a { color: red } } @supports (display: grid) and or (color: red) { b { color: red } } @supports foo { c { color: red } }");
+    assert!(sheet.rules.is_empty());
+    assert_eq!(sheet.unsupported, ["@supports", "@supports (display: grid) and or (color: red)", "@supports foo"]);
+}
+
+#[test]
+fn supports_nests_in_media_and_media_in_supports() {
+    let mut doc = Doc::new();
+    let sheet = doc.parse(
+        "@supports (display: grid) { @media screen { a { color: red } } } \
+         @media screen { @supports (bogus: 1) { b { color: red } } @supports (color: red) { c { color: red } } }",
+    );
+    assert_eq!(conditions_of(&sheet), [Some("screen".into()), Some("screen".into())]);
 }
 
 #[test]
@@ -551,10 +793,10 @@ fn an_invalid_nested_selector_drops_only_that_rule() {
 
 #[test]
 fn at_rules_in_a_style_rule_are_skipped_and_recorded() {
-    let sheet = Doc::new().parse("a { top: 1px; @media print { top: 2px } left: 3px }");
+    let sheet = Doc::new().parse("a { top: 1px; @container (min-width: 1px) { top: 2px } left: 3px }");
     assert_eq!(sheet.rules.len(), 1);
     assert_eq!(pairs(&sheet.rules[0].normal), [("top", r#""1px""#), ("left", r#""3px""#)]);
-    assert_eq!(sheet.unsupported, ["media"]);
+    assert_eq!(sheet.unsupported, ["container"]);
 }
 
 #[test]
@@ -694,16 +936,68 @@ fn root_and_host() {
 }
 
 #[test]
-fn pseudo_elements_parse_and_never_match() {
-    for selector in ["::backdrop", "div::before", "div:before", "p:after", "p:first-line", "p:FIRST-LETTER", "span::part(x)"] {
+fn pseudo_elements_without_a_box_parse_and_never_match() {
+    for selector in ["::backdrop", "p:first-line", "p:FIRST-LETTER", "span::part(x)", "::selection", "p::placeholder", "p::marker"] {
         let mut doc = Doc::new();
         let parsed = doc.selector(selector);
         assert!(parsed.has_pseudo_element(), "{selector}");
+        assert_eq!(parsed.pseudo, None, "{selector}");
         let tree = fixture(&mut doc.atoms);
         assert!((0..tree.nodes.len()).all(|index| !matches(&parsed, &tree.view(index))), "{selector}");
     }
-    assert_eq!(selected("*::before"), Vec::<usize>::new());
-    assert_eq!(selected(":not(.nothing)::before"), Vec::<usize>::new());
+    assert_eq!(selected(":not(.nothing)::selection"), Vec::<usize>::new());
+}
+
+#[test]
+fn before_and_after_name_the_box_of_the_element_the_compounds_match() {
+    use super::Pseudo::{After, Before};
+    for (selector, pseudo) in [
+        ("div::before", Before), ("div:before", Before), ("div::BEFORE", Before), ("div:After", After), ("div::after", After),
+    ] {
+        let parsed = Doc::new().selector(selector);
+        assert_eq!(parsed.pseudo, Some(pseudo), "{selector}");
+        assert!(!parsed.has_pseudo_element(), "{selector}");
+    }
+    assert_eq!(selected("div::before"), selected("div"));
+    assert_eq!(selected(".first::after"), [FIRST]);
+    assert_eq!(selected("#main > .first::before"), [FIRST]);
+    assert_eq!(selected("#main .first:not(.second)::before"), [FIRST]);
+    assert_eq!(selected("*::before").len(), fixture(&mut Atoms::default()).nodes.len());
+    assert_eq!(selected("::after"), selected("*"));
+    assert_eq!(Doc::new().selector("::before").compounds.len(), 1);
+    assert_eq!(Doc::new().selector("a::before").compounds[0].simples.len(), 1, "the box is not a simple selector");
+}
+
+#[test]
+fn a_generated_box_ends_the_selector_and_takes_no_state_after_it() {
+    for selector in [
+        "::before:hover", "a::before.b", "a::before b", "a::before > b", "a::before + b", "a::before::after", "a::before::marker",
+        "a::selection::before", "a::before:first-child", "a::before[x]", "::before::before", "a::before,", ":is(a::before)b::before2",
+    ] {
+        assert!(!is_valid(selector), "{selector}");
+    }
+    assert!(is_valid("a:hover::before"));
+    assert!(is_valid("a:focus-visible:not(.x)::after"));
+    assert!(is_valid("a b::before, c::after"));
+    assert_eq!(Doc::new().selector("a:hover::before").condition, Some(State::Hover));
+    assert_eq!(Doc::new().selector(".a:is(:hover)::after").condition, Some(State::Hover));
+}
+
+#[test]
+fn a_box_selector_is_no_argument_and_a_nested_rule_does_not_reach_through_one() {
+    assert_eq!(selected(":is(::before, .first)"), [FIRST]);
+    assert!(!is_valid(":not(::before)"));
+    assert!(!is_valid(":where(a)::before:hover"));
+    let mut doc = Doc::new();
+    let sheet = doc.parse(".first::before { .nested { color: red } &:hover { color: red } }");
+    let tree = fixture(&mut doc.atoms);
+    for rule in &sheet.rules {
+        for (selector, _) in &rule.selectors {
+            if selector.pseudo.is_none() {
+                assert!((0..tree.nodes.len()).all(|index| !matches(selector, &tree.view(index))), "a rule nested in a box styles nothing");
+            }
+        }
+    }
 }
 
 #[test]
@@ -753,7 +1047,7 @@ fn flat(atoms: &mut Atoms, tags: &[(&str, &[&str])]) -> List {
 
 fn selected_in(list: &List, atoms: &mut Atoms, selector: &str) -> Vec<usize> {
     let selector = {
-        let sheet = parse_sheet(&format!("{selector} {{ color: red }}"), atoms, &mut Layers::default());
+        let sheet = parse_sheet(&format!("{selector} {{ color: red }}"), atoms, &mut Layers::default(), &mut validate::Validator::default());
         assert_eq!(sheet.rules.len(), 1, "{selector} is valid");
         sheet.rules[0].selectors[0].0.clone()
     };
@@ -1027,31 +1321,88 @@ fn state_pseudo_classes_parse_into_a_condition_of_the_selector() {
 }
 
 #[test]
-fn a_state_a_selector_cannot_compile_into_a_style_block_is_invalid() {
+fn a_state_the_subject_cannot_compile_into_a_style_block_is_invalid() {
     for selector in [
-        ".card:hover .title",
-        ".card:hover > .title",
-        ".a:hover + .b",
         ".a:hover:focus",
         ".a:focus-visible:focus-within",
         ".a:not(:hover)",
         ":not(.a:focus)",
         ":is(.a:hover, .b)",
         ":is(.a:hover, .b:active)",
-        ":is(.a:hover) .b",
+        ".a:hover:is(.b:focus)",
     ] {
         assert!(!is_valid(selector), "{selector}");
     }
 }
 
 #[test]
+fn a_state_outside_the_subject_is_read_live_and_is_no_condition() {
+    use super::State::Hover;
+    let mut doc = Doc::new();
+    for (selector, condition) in [
+        (".card:hover .title", None),
+        (".card:hover > .title", None),
+        (".a:hover + .b", None),
+        (".peer:focus ~ .y", None),
+        (".menu:focus-within .item", None),
+        (".a:hover:focus .b", None),
+        (":is(.a:hover) .b", None),
+        (":not(.a:hover) .b", None),
+        (".card:hover .title:hover", Some(Hover)),
+        (".x:is(:where(.group):hover *)", None),
+        (".x:not(.a:hover .b)", None),
+    ] {
+        assert_eq!(doc.selector(selector).condition, condition, "{selector}");
+    }
+}
+
+#[test]
 fn a_state_in_a_nested_rule_follows_the_same_rules() {
     let sheet = Doc::new().parse(".btn { color: red; &:hover { color: blue } &:hover .icon { top: 1px } .x { top: 2px } }");
-    assert_eq!(sheet.rules.len(), 3, "the rule, &:hover, and .x");
+    assert_eq!(sheet.rules.len(), 4, "the rule, &:hover, &:hover .icon and .x");
     assert_eq!(sheet.rules[1].selectors[0].0.condition, Some(super::State::Hover));
-    assert_eq!(sheet.unsupported, ["&:hover .icon"]);
+    assert_eq!(sheet.rules[2].selectors[0].0.condition, None, "`:hover` is live in `&:hover .icon`");
+    assert!(sheet.unsupported.is_empty());
     let under = Doc::new().parse(".btn:hover { color: red; .x { top: 2px } }");
-    assert_eq!(under.rules.len(), 1, "`.x` is `:is(.btn:hover) .x`, a state outside the subject");
+    assert_eq!(under.rules.len(), 2, "`.x` is `:is(.btn:hover) .x`, a live state outside the subject");
+    let both = Doc::new().parse(".a:hover { &:focus { top: 1px } }");
+    assert_eq!(both.unsupported, ["&:focus"], "two states in the subject");
+}
+
+#[test]
+fn a_live_state_matches_what_the_view_says_of_the_element_it_is_on() {
+    use super::State::{Focus, FocusWithin, Hover};
+    let mut doc = Doc::new();
+    let mut tree = fixture(&mut doc.atoms);
+    let all = |doc: &mut Doc, tree: &Tree, selector: &str| {
+        let selector = doc.selector(selector);
+        (0..tree.nodes.len()).filter(|index| matches(&selector, &tree.view(*index))).collect::<Vec<_>>()
+    };
+    assert_eq!(all(&mut doc, &tree, ".box:hover .first"), Vec::<usize>::new(), "nothing is hovered");
+    tree.nodes[MAIN].live.push(Hover);
+    assert_eq!(all(&mut doc, &tree, ".box:hover .first"), [FIRST]);
+    assert_eq!(all(&mut doc, &tree, ".box:hover > span"), [FIRST, SECOND]);
+    assert_eq!(all(&mut doc, &tree, ".box:hover"), [MAIN], "the subject's state is the condition, read as true");
+    assert_eq!(all(&mut doc, &tree, ".box:hover .first:hover"), [FIRST], "the subject is not asked");
+    assert_eq!(all(&mut doc, &tree, ":is(.box:hover) p"), [PARA]);
+    assert_eq!(all(&mut doc, &tree, "p:is(:where(.box):hover *)"), [PARA], "Tailwind's group-hover");
+    assert_eq!(all(&mut doc, &tree, "p:is(:where(.nothing):hover *)"), Vec::<usize>::new());
+    assert_eq!(all(&mut doc, &tree, ":not(.box:hover) > p"), Vec::<usize>::new());
+    tree.nodes[FIRST].live.push(Focus);
+    assert_eq!(all(&mut doc, &tree, ".first:focus ~ .second"), [SECOND]);
+    assert_eq!(all(&mut doc, &tree, ".first:focus + p"), Vec::<usize>::new(), "not the next sibling");
+    tree.nodes[SECOND].live.push(FocusWithin);
+    assert_eq!(all(&mut doc, &tree, ".second:focus-within + p"), [PARA]);
+}
+
+#[test]
+fn a_state_in_has_is_still_invalid_whatever_brought_it() {
+    assert!(!is_valid("div:has(.a:hover)"));
+    assert!(!is_valid("div:has(.a:hover .b)"));
+    assert!(!is_valid("div:has(:is(.a:focus-within))"));
+    let sheet = Doc::new().parse(".a:hover .b { .list:has(> &) { top: 1px } } .a:focus-within, .b { .c:has(> &) { top: 5px } } .p { .q:has(> &) { top: 6px } }");
+    assert_eq!(sheet.rules.len(), 1, "only `.q:has(> &)`, whose parent reads no state");
+    assert_eq!(sheet.unsupported, [".list:has(> &)", ".c:has(> &)"]);
 }
 
 #[test]

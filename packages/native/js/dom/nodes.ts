@@ -19,6 +19,7 @@ import { defineConstraintValidation } from "./constraint-validation.js"
 import { hasLiveRanges, liveRangesReplaceData, liveRangesSplitText } from "./live-ranges.js"
 import { namedError } from "../named-error.js"
 import { elementsByClassName, elementsByName, elementsByTagName, staticNodeList, type HTMLCollection, type NodeList } from "./html-collection.js"
+import { defineHyperlinkMembers, type HyperlinkMembers } from "./hyperlink.js"
 import { defineReflectedMembers, type ReflectedMembers } from "./reflected-members.js"
 import { closestElement, elementById, matchesSelector, querySelector, querySelectorAll } from "./selectors.js"
 import * as tree from "./tree-mutation.js"
@@ -747,8 +748,9 @@ abstract class ElementClass extends NodeClass {
   }
 }
 
-interface ElementClass extends ReflectedMembers {}
+interface ElementClass extends ReflectedMembers, HyperlinkMembers {}
 defineReflectedMembers(ElementClass.prototype)
+defineHyperlinkMembers(ElementClass.prototype)
 defineConstraintValidation(ElementClass.prototype)
 
 function isElement(node: Node): node is Element {

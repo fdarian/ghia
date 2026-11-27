@@ -21,6 +21,7 @@ import { runKeyBinding } from "../editing/key-moves.js"
 import { scrollKeyName } from "../scroll.js"
 import { moveFocusByTab } from "../focus.js"
 import { isDragEvent } from "./drag.js"
+import { clickActivatesLink, followLinkOnClick } from "./link-activation.js"
 import { handlerEventType, hasDomListener, isOutsidePress } from "./route.js"
 import {
   dispatchPropagating,
@@ -103,8 +104,20 @@ export function handlesEvent(root: ActiveRoot, event: EventPayload): boolean {
   return (
     hasDomListener(root.eventHandlers, event) ||
     window.hasListeners(event.eventType) ||
-    document.hasListeners(event.eventType)
+    document.hasListeners(event.eventType) ||
+    clicksLink(root, event)
   )
+}
+
+/** A click on a link has a default action even when nothing listens to it. */
+function clicksLink(root: ActiveRoot, event: EventPayload): boolean {
+  if (event.eventType !== "click" || event.path == null) return false
+  const path: object[] = []
+  for (const id of event.path) {
+    const element = root.elementById(id)
+    if (element !== undefined) path.push(element)
+  }
+  return clickActivatesLink(path)
 }
 
 /** An event of the window (selection, appearance), with `target` as the element when it names one. */
@@ -155,6 +168,7 @@ export function runRootEvent(
   if (event.eventType === "keydown" && !result.defaultPrevented) {
     return { ...result, handled: runKeyDefault(root, domEvent, context) }
   }
+  if (event.eventType === "click" && !result.defaultPrevented) followLinkOnClick(domEvent.composedPath())
   return result
 }
 

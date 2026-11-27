@@ -11,16 +11,24 @@ use std::sync::{Arc, Weak};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::css::media_query::MediaEnvironment;
+use crate::css::registered_properties::Registered;
 use crate::retained_tree::{InternedStyle, StyleTable};
 use crate::style::StyleDesc;
 
 use super::atoms::{Atom, Atoms};
 use super::cascade::{merge, MatchedInterner, MatchedRules};
-use super::index::RuleIndex;
+use super::conditions::{self, Watched};
+use super::definitions::winners;
+use super::font_face::SheetFontFaces;
+use super::index::{DocRule, RuleIndex};
 use super::invalidation::Reach;
+use super::keyframes::SheetKeyframes;
 use super::layers::Layers;
+use super::live_states::LiveStates;
 use super::parse_cache::{ParseCache, ParsedRule};
 use super::positions::PendingRanges;
+use super::pseudo::{PseudoMatches, PseudoState};
 use super::reload::Reload;
 use super::states::LoggedFolds;
 use super::validate::Validator;
@@ -39,11 +47,13 @@ pub struct ElementCss {
     pub classes: ClassAtoms,
     /// `None` for an element no rule matches, and for one that is not in the document.
     pub matched: Option<Arc<MatchedRules>>,
+    /// The rules that match its `::before` and `::after`, `None` when neither has one.
+    pub pseudo: Option<Arc<PseudoMatches>>,
 }
 
 impl ElementCss {
     pub fn is_empty(&self) -> bool {
-        self.id.is_none() && self.classes.is_empty() && self.matched.is_none()
+        self.id.is_none() && self.classes.is_empty() && self.matched.is_none() && self.pseudo.is_none()
     }
 }
 
@@ -66,9 +76,32 @@ pub struct StyleSheets {
     pub(crate) constructed: FxHashMap<u64, String>,
     pub(crate) adopted: Vec<u64>,
     pub(crate) index: RuleIndex,
+    /// The elements the pointer and the focus hold, for the selectors that read a state outside
+    /// their subject. Empty while no rule does.
+    pub(crate) live: LiveStates,
+    /// What the window reports to the media queries of the rules, `None` until it has. It is the
+    /// window's and not the sheets', so it outlives them (`wind_down` keeps it).
+    pub(crate) media: Option<MediaEnvironment>,
+    /// The media queries the loaded rules stand under, with the answers the index was built on.
+    watched: Watched,
+    /// A media query answers differently than the index was built on: the sheets are loaded again
+    /// even when their text is unchanged, and the elements are matched again, since the old
+    /// numbering of the rules says nothing about the new index.
+    pub(crate) media_flipped: bool,
+    /// The sets of keyframes the loaded sheets define, which the animation engine reads.
+    pub(crate) keyframes: Arc<SheetKeyframes>,
+    /// The `@font-face` rules that hold in the window, which the text system registers before a build.
+    pub(crate) font_faces: Arc<SheetFontFaces>,
+    /// What the loaded sheets register with `@property`.
+    pub(crate) registered: Option<Arc<Registered>>,
+    /// A load changed the keyframes or the registrations: what a build reads that is not an element's
+    /// style changed, and the tree has to draw again (`take_document_changed`).
+    document_changed: bool,
     /// The top-level rules `index` was built from, when every source was cut into them.
     loaded_units: Option<Vec<Arc<ParsedRule>>>,
     pub(crate) interner: MatchedInterner,
+    /// What is shared between the elements that match the same rules for their generated boxes.
+    pub(super) pseudo: PseudoState,
     validator: Validator,
     parse_cache: ParseCache,
     /// The skipped rules already logged, kept across reloads (every sheet is parsed again when
@@ -104,8 +137,17 @@ impl Default for StyleSheets {
             constructed: FxHashMap::default(),
             adopted: Vec::new(),
             index: RuleIndex::default(),
+            live: LiveStates::default(),
+            media: None,
+            watched: Watched::default(),
+            media_flipped: false,
+            keyframes: Arc::default(),
+            font_faces: Arc::default(),
+            registered: None,
+            document_changed: false,
             loaded_units: None,
             interner: MatchedInterner::default(),
+            pseudo: PseudoState::default(),
             validator: Validator::default(),
             parse_cache: ParseCache::default(),
             logged_skips: FxHashSet::default(),
@@ -202,13 +244,86 @@ impl StyleSheets {
         for skipped in assembled.unsupported {
             self.warn_skipped(skipped);
         }
-        let index = RuleIndex::build(&assembled.rules, &layers.order(), self.style);
+        let environment_flipped = std::mem::take(&mut self.media_flipped);
+        self.watched = Watched::of(
+            assembled
+                .rules
+                .iter()
+                .map(|rule| &rule.conditions)
+                .chain(assembled.keyframes.iter().map(|rule| &rule.conditions))
+                .chain(assembled.properties.iter().map(|rule| &rule.conditions))
+                .chain(assembled.font_faces.iter().map(|rule| &rule.conditions)),
+            self.media.as_ref(),
+        );
+        let order = layers.order();
+        self.settle_definitions(&assembled.keyframes, &assembled.properties, &assembled.font_faces, &order);
+        let applying: Vec<DocRule> = if self.watched.is_empty() {
+            assembled.rules
+        } else {
+            let environment = self.media.as_ref();
+            assembled.rules.into_iter().filter(|rule| conditions::holds(rule.conditions.as_ref(), environment)).collect()
+        };
+        let index = RuleIndex::build(&applying, &order, self.style);
         let old_units = std::mem::replace(&mut self.loaded_units, assembled.units);
         let old_index = std::mem::replace(&mut self.index, index);
         match (old_units, &self.loaded_units) {
-            (Some(old), Some(new)) => Reload::between(&old, new, &old_index, &self.index),
+            (Some(old), Some(new)) if !environment_flipped => Reload::between(&old, new, &old_index, &self.index, self.media.as_ref()),
             _ => None,
         }
+    }
+
+    /// Settles the `@keyframes`, `@property` and `@font-face` rules of a load on one definition for each name (for a face, each set of descriptors).
+    fn settle_definitions(
+        &mut self,
+        keyframes: &[super::definitions::Defined<super::keyframes::KeyframesRule>],
+        properties: &[super::definitions::Defined<crate::css::registered_properties::Registration>],
+        font_faces: &[super::definitions::Defined<super::font_face::FontFaceRule>],
+        order: &super::layers::LayerOrder,
+    ) {
+        let environment = self.media.as_ref();
+        let chosen = winners(keyframes, environment, order, |rule| &rule.name);
+        if let Some(replaced) = SheetKeyframes::replaced_by(&self.keyframes, chosen) {
+            self.keyframes = replaced;
+            self.document_changed = true;
+        }
+        let chosen = winners(font_faces, environment, order, |rule| &rule.identity);
+        if let Some(replaced) = SheetFontFaces::replaced_by(&self.font_faces, chosen) {
+            self.font_faces = replaced;
+            self.document_changed = true;
+        }
+        let chosen = winners(properties, environment, order, |registration| &registration.name);
+        let registered = Registered::new(chosen.into_iter().map(|registration| (**registration).clone()).collect()).map(Arc::new);
+        let unchanged = match (&self.registered, &registered) {
+            (None, None) => true,
+            (Some(held), Some(new)) => **held == **new,
+            _ => false,
+        };
+        if !unchanged {
+            self.registered = registered;
+            self.document_changed = true;
+        }
+    }
+
+    /// Whether a load changed what the sheets define by name since this was last asked.
+    pub(crate) fn take_document_changed(&mut self) -> bool {
+        std::mem::take(&mut self.document_changed)
+    }
+
+    /// Tells the sheets what the window reports to media queries. Returns whether a query the
+    /// loaded rules stand under now answers differently, which marks the sheets to be loaded again
+    /// (a flush does it): the rules that apply changed. A change that flips nothing costs one
+    /// evaluation of each distinct query, which is what a window drag pays.
+    pub(crate) fn set_media_environment(&mut self, environment: MediaEnvironment) -> bool {
+        if self.media == Some(environment) {
+            return false;
+        }
+        self.media = Some(environment);
+        if !self.watched.update(&environment) {
+            return false;
+        }
+        self.media_flipped = true;
+        self.sources_dirty = true;
+        true
     }
 
     fn warn_skipped(&mut self, skipped: String) {
@@ -292,11 +407,15 @@ impl StyleSheets {
         self.loaded_units = None;
         // Its rules hold atoms of the interner replaced below.
         self.parse_cache.clear();
+        self.watched = Watched::default();
+        self.media_flipped = false;
         self.logged_skips.clear();
         self.logged_folds.clear();
         self.skip_log_capped = false;
         self.index = Default::default();
+        self.live.clear();
         self.interner = Default::default();
+        self.wind_down_pseudos();
         self.atoms = Atoms::default();
         self.style = self.atoms.intern("style");
         self.style_texts.get_mut().clear();

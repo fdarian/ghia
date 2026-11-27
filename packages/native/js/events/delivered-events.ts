@@ -17,10 +17,12 @@ import {
   CompositionEvent,
   DragEvent,
   FocusEvent,
+  HashChangeEvent,
   InputEvent,
   KeyboardEvent,
   MouseEvent,
   PointerEvent,
+  PopStateEvent,
   TransitionEvent,
   UIEvent,
   WheelEvent,
@@ -96,6 +98,8 @@ const SPECS: ReadonlyMap<string, TypeSpec> = new Map([
     { cls: AnimationEvent, modifiers: false, pointer: false },
     ["animationstart", "animationiteration", "animationend", "animationcancel"]
   ),
+  ...typesOf({ cls: PopStateEvent, modifiers: false, pointer: false }, ["popstate"]),
+  ...typesOf({ cls: HashChangeEvent, modifiers: false, pointer: false }, ["hashchange"]),
 ])
 
 /** The members the DOM's classes give an event that native does not send. */

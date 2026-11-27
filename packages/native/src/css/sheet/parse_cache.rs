@@ -14,8 +14,15 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
+use crate::css::media_query::MediaEnvironment;
+use crate::css::registered_properties::Registration;
+
 use super::atoms::Atoms;
+use super::conditions::{self, Conditions};
+use super::definitions::Defined;
+use super::font_face::FontFaceRule;
 use super::index::{DocRule, RuleBody};
+use super::keyframes::KeyframesRule;
 use super::layers::{LayerId, Layers};
 use super::parser::parse_sheet;
 use super::validate::Validator;
@@ -31,26 +38,36 @@ struct LocalLayer(LayerId);
 struct LocalRule {
     body: Arc<RuleBody>,
     layer: Option<LocalLayer>,
+    conditions: Option<Arc<Conditions>>,
 }
 
 /// What one top-level rule parsed to, with its declarations already judged by the validator.
 pub(super) struct ParsedRule {
     /// In the order of the cascade, and without the rules no selector can match.
     rules: Vec<LocalRule>,
+    /// Their layers are ids of `layers`, as the rules' are.
+    keyframes: Vec<Defined<KeyframesRule, LocalLayer>>,
+    properties: Vec<Defined<Registration, LocalLayer>>,
+    font_faces: Vec<Defined<FontFaceRule, LocalLayer>>,
     unsupported: Vec<String>,
     /// The layers the rule declares, which `rules` are in.
     layers: Layers,
 }
 
 impl ParsedRule {
-    pub(super) fn len(&self) -> usize {
-        self.rules.len()
+    /// How many of the rules apply in `environment`, which is how many of them the index holds.
+    pub(super) fn active_len(&self, environment: Option<&MediaEnvironment>) -> usize {
+        self.rules.iter().filter(|rule| conditions::holds(rule.conditions.as_ref(), environment)).count()
     }
 }
 
 /// The rules of every source of a load, in cascade order.
 pub(super) struct Assembled {
     pub(super) rules: Vec<DocRule>,
+    /// The `@keyframes` and `@property` rules, in the same order.
+    pub(super) keyframes: Vec<Defined<KeyframesRule>>,
+    pub(super) properties: Vec<Defined<Registration>>,
+    pub(super) font_faces: Vec<Defined<FontFaceRule>>,
     /// The name of each skipped at-rule and the text of each invalid selector list, in source order.
     pub(super) unsupported: Vec<String>,
     /// The top-level rules the rules came from, in order, to tell what a change touched. `None`
@@ -101,7 +118,7 @@ impl ParseCache {
         let load = self.loads;
         let mut used = 0;
         let mut cut = Vec::with_capacity(texts.len());
-        let mut assembled = Assembled { rules: Vec::new(), unsupported: Vec::new(), units: Some(Vec::new()) };
+        let mut assembled = Assembled { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), font_faces: Vec::new(), unsupported: Vec::new(), units: Some(Vec::new()) };
         let mut touch = |cached: &Cached| {
             if cached.used_in.swap(load, Ordering::Relaxed) != load {
                 used += 1;
@@ -128,9 +145,12 @@ impl ParseCache {
                 }),
             };
             let Some(cached_rules) = cached_rules else {
-                let (rules, unsupported) = parse_whole(text, atoms, layers, validator);
-                assembled.rules.extend(rules);
-                assembled.unsupported.extend(unsupported);
+                let whole = parse_whole(text, atoms, layers, validator);
+                assembled.rules.extend(whole.rules);
+                assembled.keyframes.extend(whole.keyframes);
+                assembled.properties.extend(whole.properties);
+                assembled.font_faces.extend(whole.font_faces);
+                assembled.unsupported.extend(whole.unsupported);
                 assembled.units = None;
                 cut.push(None);
                 continue;
@@ -142,7 +162,11 @@ impl ParseCache {
                 assembled.rules.extend(parsed.rules.iter().map(|rule| DocRule {
                     body: rule.body.clone(),
                     layer: rule.layer.map(|layer| mapped[layer.0.index()]),
+                    conditions: rule.conditions.clone(),
                 }));
+                assembled.keyframes.extend(parsed.keyframes.iter().map(|rule| globalize(rule, &mapped)));
+                assembled.properties.extend(parsed.properties.iter().map(|rule| globalize(rule, &mapped)));
+                assembled.font_faces.extend(parsed.font_faces.iter().map(|rule| globalize(rule, &mapped)));
                 assembled.unsupported.extend(parsed.unsupported.iter().cloned());
                 if let Some(units) = &mut assembled.units {
                     units.push(parsed.clone());
@@ -160,26 +184,48 @@ impl ParseCache {
 }
 
 /// A source parsed as one sheet, in its own order.
-fn parse_whole(
-    text: &str,
-    atoms: &mut Atoms,
-    layers: &mut Layers,
-    validator: &mut Validator,
-) -> (Vec<DocRule>, Vec<String>) {
-    let mut sheet = parse_sheet(text, atoms, layers);
+struct Whole {
+    rules: Vec<DocRule>,
+    keyframes: Vec<Defined<KeyframesRule>>,
+    properties: Vec<Defined<Registration>>,
+    font_faces: Vec<Defined<FontFaceRule>>,
+    unsupported: Vec<String>,
+}
+
+fn parse_whole(text: &str, atoms: &mut Atoms, layers: &mut Layers, validator: &mut Validator) -> Whole {
+    let mut sheet = parse_sheet(text, atoms, layers, validator);
     validator.filter(&mut sheet.rules);
-    (doc_rules(sheet.rules), sheet.unsupported)
+    Whole { rules: doc_rules(sheet.rules), keyframes: sheet.keyframes, properties: sheet.properties, font_faces: sheet.font_faces, unsupported: sheet.unsupported }
 }
 
 fn parse_rule(text: &str, atoms: &mut Atoms, validator: &mut Validator) -> ParsedRule {
     let mut layers = Layers::default();
-    let mut sheet = parse_sheet(text, atoms, &mut layers);
+    let mut sheet = parse_sheet(text, atoms, &mut layers, validator);
     validator.filter(&mut sheet.rules);
     let rules = doc_rules(sheet.rules)
         .into_iter()
-        .map(|rule| LocalRule { body: rule.body, layer: rule.layer.map(LocalLayer) })
+        .map(|rule| LocalRule { body: rule.body, layer: rule.layer.map(LocalLayer), conditions: rule.conditions })
         .collect();
-    ParsedRule { rules, unsupported: sheet.unsupported, layers }
+    ParsedRule {
+        rules,
+        keyframes: localize(sheet.keyframes),
+        properties: localize(sheet.properties),
+        font_faces: localize(sheet.font_faces),
+        unsupported: sheet.unsupported,
+        layers,
+    }
+}
+
+fn localize<T>(definitions: Vec<Defined<T>>) -> Vec<Defined<T, LocalLayer>> {
+    definitions
+        .into_iter()
+        .map(|rule| Defined { body: rule.body, layer: rule.layer.map(LocalLayer), conditions: rule.conditions })
+        .collect()
+}
+
+/// A definition's layer is turned into the document's like a rule's is, by the answer of [`Layers::replay_into`].
+fn globalize<T>(rule: &Defined<T, LocalLayer>, mapped: &[LayerId]) -> Defined<T> {
+    Defined { body: rule.body.clone(), layer: rule.layer.map(|layer| mapped[layer.0.index()]), conditions: rule.conditions.clone() }
 }
 
 /// `rules` in cascade order, without the selectors that name a pseudo-element and the rules that
@@ -197,6 +243,7 @@ fn doc_rules(mut rules: Vec<Rule>) -> Vec<DocRule> {
             Some(DocRule {
                 body: Arc::new(RuleBody { selectors, normal: rule.normal, important: rule.important }),
                 layer: rule.layer,
+                conditions: rule.conditions,
             })
         })
         .collect()
@@ -499,13 +546,14 @@ mod tests {
          .a, .c > .d { right: bogus; width: 4px; color: red !important }
          @layer base { .base { top: 4 } }
          .dup { top: 5 } .dup { top: 5 }
+         @keyframes k { to { top: 1px } } @layer theme { @keyframes k { to { top: 2px } } @property --p { syntax: '*'; inherits: true } }
          :bogus(1) { top: 6 }
          @layer { .anon { top: 2 } }",
         "@layer reset, base;
          @layer reset { * { margin: 0 } }
          .a { top: 7 }
          @layer theme.dark { .a { color: black } }
-         @layer theme { .after { top: 8 } }
+         @layer theme { .after { top: 8 } @keyframes k { to { top: 3px } } }
          @layer { .anon { top: 2 } }
          .dup { top: 5 }",
         ".broken { top: 9 } .open { top: 10 ",
@@ -526,17 +574,29 @@ mod tests {
                 )
             })
             .collect();
+        lines.extend(assembled.keyframes.iter().map(|rule| {
+            format!("rank {} {:?}", order.rank(rule.layer), rule.body)
+        }));
+        lines.extend(assembled.properties.iter().map(|rule| {
+            format!("rank {} {:?}", order.rank(rule.layer), rule.body)
+        }));
+        lines.extend(assembled.font_faces.iter().map(|rule| {
+            format!("rank {} {:?}", order.rank(rule.layer), rule.body)
+        }));
         lines.push(format!("unsupported {:?}", assembled.unsupported));
         lines
     }
 
     fn whole(texts: &[String], atoms: &mut Atoms) -> Vec<String> {
         let (mut layers, mut validator) = (Layers::default(), Validator::default());
-        let mut assembled = Assembled { rules: Vec::new(), unsupported: Vec::new(), units: None };
+        let mut assembled = Assembled { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), font_faces: Vec::new(), unsupported: Vec::new(), units: None };
         for text in texts {
-            let (rules, unsupported) = parse_whole(text, atoms, &mut layers, &mut validator);
-            assembled.rules.extend(rules);
-            assembled.unsupported.extend(unsupported);
+            let whole = parse_whole(text, atoms, &mut layers, &mut validator);
+            assembled.rules.extend(whole.rules);
+            assembled.keyframes.extend(whole.keyframes);
+            assembled.properties.extend(whole.properties);
+            assembled.font_faces.extend(whole.font_faces);
+            assembled.unsupported.extend(whole.unsupported);
         }
         describe(&assembled, &layers)
     }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use super::atoms::Atom;
 use super::nth::Position;
+use super::states::State;
 use super::tree_states::TreeState;
 use super::selector::{AttrName, AttrOp, AttrSelector, Combinator, ComplexSelector, Compound, Simple};
 
@@ -46,6 +47,10 @@ pub trait ElementView: Sized {
     fn is_root(&self) -> bool;
     /// Whether the element is in the state: an open popover, a disabled control, a checked box.
     fn tree_state(&self, state: TreeState) -> bool;
+    /// Whether the pointer or the focus has the element in the state. Asked only of a state that
+    /// is not in the subject of the selector (`.card:hover .title`): the subject's is the
+    /// selector's condition and reads as true.
+    fn live_state(&self, state: State) -> bool;
     /// The element's place among the elements of its parent, from 1: counted from the start or
     /// the end, over every element child or only those of its type (an HTML type compares
     /// case-insensitively, an SVG one as written). An element with no parent is alone, so 1.
@@ -90,26 +95,37 @@ pub struct SiblingTest {
     compound: usize,
 }
 
+/// Whether `element` is what the compounds of the selector describe: the originating element of
+/// a selector that ends in `::before` or `::after`, which the rule index asks for the target it
+/// files the selector under.
 pub fn matches(selector: &ComplexSelector, element: &impl ElementView) -> bool {
-    matches_from(selector, 0, element)
+    matches_from(selector, 0, element, true)
 }
 
-fn matches_from<E: ElementView>(selector: &ComplexSelector, index: usize, element: &E) -> bool {
-    if !compound_matches(&selector.compounds[index], element) {
+/// `lifted` is whether the subject of `selector` stands where the state of the subject is its
+/// condition: the selector of a rule, or an argument of a `:is()` of such a subject. Any other
+/// state is the element's live one. A selector of a generated box inside a list (the parent `&`
+/// stands for) styles no element.
+fn matches_in<E: ElementView>(selector: &ComplexSelector, element: &E, lifted: bool) -> bool {
+    selector.pseudo.is_none() && matches_from(selector, 0, element, lifted)
+}
+
+fn matches_from<E: ElementView>(selector: &ComplexSelector, index: usize, element: &E, lifted: bool) -> bool {
+    if !compound_matches_in(&selector.compounds[index], element, lifted && index == 0) {
         return false;
     }
     if index + 1 == selector.compounds.len() {
         return true;
     }
     match selector.links[index] {
-        Combinator::Child => element.parent().is_some_and(|parent| matches_from(selector, index + 1, &parent)),
+        Combinator::Child => element.parent().is_some_and(|parent| matches_from(selector, index + 1, &parent, lifted)),
         Combinator::NextSibling => {
-            element.prev_sibling().is_some_and(|sibling| matches_from(selector, index + 1, &sibling))
+            element.prev_sibling().is_some_and(|sibling| matches_from(selector, index + 1, &sibling, lifted))
         }
         Combinator::Descendant => {
             let mut ancestor = element.parent();
             while let Some(candidate) = ancestor {
-                if matches_from(selector, index + 1, &candidate) {
+                if matches_from(selector, index + 1, &candidate, lifted) {
                     return true;
                 }
                 ancestor = candidate.parent();
@@ -118,26 +134,30 @@ fn matches_from<E: ElementView>(selector: &ComplexSelector, index: usize, elemen
         }
         Combinator::SubsequentSibling => {
             let test = SiblingTest { selector: std::ptr::from_ref(selector) as usize, compound: index + 1 };
-            element.any_earlier_sibling(test, |sibling| matches_from(selector, index + 1, sibling))
+            element.any_earlier_sibling(test, |sibling| matches_from(selector, index + 1, sibling, lifted))
         }
     }
 }
 
 pub(super) fn compound_matches(compound: &Compound, element: &impl ElementView) -> bool {
-    compound.simples.iter().all(|simple| simple_matches(simple, element))
+    compound_matches_in(compound, element, true)
 }
 
-fn simple_matches<E: ElementView>(simple: &Simple, element: &E) -> bool {
+fn compound_matches_in(compound: &Compound, element: &impl ElementView, lifted: bool) -> bool {
+    compound.simples.iter().all(|simple| simple_matches(simple, element, lifted))
+}
+
+fn simple_matches<E: ElementView>(simple: &Simple, element: &E, lifted: bool) -> bool {
     match simple {
         Simple::Tag(tag) => element.tag() == Some(tag.for_element(element.is_svg())),
         Simple::Class(class) => element.has_class(*class),
         Simple::Id(id) => element.id() == Some(*id),
         Simple::Attr(attr) => attr_matches(attr, element),
-        Simple::Is(list) => list.iter().any(|selector| matches(selector, element)),
-        Simple::Where(list) => list.iter().any(|selector| matches(selector, element)),
-        Simple::Not(list) => !list.iter().any(|selector| matches(selector, element)),
+        Simple::Is(list) => list.iter().any(|selector| matches_in(selector, element, lifted)),
+        Simple::Where(list) => list.iter().any(|selector| matches_in(selector, element, lifted)),
+        Simple::Not(list) => !list.iter().any(|selector| matches_in(selector, element, lifted)),
         Simple::Root => element.is_root(),
-        Simple::State(_) => true,
+        Simple::State(state) => lifted || element.live_state(*state),
         Simple::TreeState(state) => element.tree_state(*state),
         Simple::Position(position) => position_matches(*position, element),
         Simple::Has(arguments) => super::has::matches(arguments, element),

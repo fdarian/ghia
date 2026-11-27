@@ -10,14 +10,14 @@ use crate::retained_tree::{RetainedElement, RetainedTree};
 /// The role HTML gives the element's tag when no `role` prop does, as Chrome's accessibility tree
 /// has it. The tag's own tree role (`generic`, or no node at all) is `None`.
 ///
-/// - `a` is a link only with an `href`; `section` is a region only with an accessible name; `header`
+/// - `a` and `area` are links only with an `href`; `section` is a region only with an accessible name; `header`
 ///   and `footer` are the banner and the content info of the page only outside `article`, `aside`,
 ///   `main`, `nav` and `section`.
 /// - `th` is always a column header: the `scope` attribute is not forwarded, so there is no row header.
 pub(crate) fn implicit_role(tree: &RetainedTree, element: &RetainedElement) -> Option<Role> {
     Some(match element.element_type.as_str() {
         "button" => Role::Button,
-        "a" if has_href(element) => Role::Link,
+        "a" | "area" if has_href(element) => Role::Link,
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => Role::Heading,
         "ul" | "ol" => Role::List,
         "li" => Role::ListItem,
@@ -60,6 +60,11 @@ pub(crate) fn heading_level(element_type: &str) -> Option<usize> {
     }
 }
 
+/// An `a` or an `area` with an `href`: the elements a click follows, and a link to assistive technology.
+pub(crate) fn is_link(element: &RetainedElement) -> bool {
+    matches!(element.element_type.as_str(), "a" | "area") && has_href(element)
+}
+
 pub(crate) fn has_href(element: &RetainedElement) -> bool {
     element.custom_props().get("href").is_some_and(Value::is_string)
 }
@@ -71,8 +76,8 @@ fn in_sectioning_content(tree: &RetainedTree, element: &RetainedElement) -> bool
 }
 
 /// Whether the tag is focusable and a tab stop without a `tabIndex`: an enabled `button` and an
-/// `a` with an `href`. A `tabIndex` still sets the order, or takes the element out of it with `-1`.
-/// A disabled `button` is never focusable, whatever its `tabIndex`.
+/// `a` with an `href`. An `area` is not: it is `display: none`, and without image maps has no shape to focus. A `tabIndex`
+/// still sets the order, or takes the element out of it with `-1`. A disabled `button` is never focusable, whatever its `tabIndex`.
 pub(crate) fn is_focusable_by_default(element: &RetainedElement) -> bool {
     match element.element_type.as_str() {
         "button" => !element.is_disabled(),
@@ -93,7 +98,7 @@ pub(crate) struct ActivationKeys {
 }
 
 /// What a key activates on the element: a `button` takes Enter on key down, repeating while it is
-/// held and with no Ctrl, Alt or Cmd, and Space on key up. An `a` with an `href` takes Enter on key
+/// held and with no Ctrl, Alt or Cmd, and Space on key up. An `a` or `area` with an `href` takes Enter on key
 /// down once per press (Blink's `IsEnterKeyKeydownEvent` needs a key down that is not a repeat), with
 /// any modifier. A disabled button takes none.
 pub(crate) fn activation_keys(element: &RetainedElement) -> Option<ActivationKeys> {
@@ -101,7 +106,7 @@ pub(crate) fn activation_keys(element: &RetainedElement) -> Option<ActivationKey
         "button" if !element.is_disabled() => {
             Some(ActivationKeys { enter: true, space: true, enter_repeats: true, enter_with_modifiers: false })
         }
-        "a" if has_href(element) => {
+        "a" | "area" if has_href(element) => {
             Some(ActivationKeys { enter: true, space: false, enter_repeats: false, enter_with_modifiers: true })
         }
         // Space on a checkbox or a radio clicks it, on key up as on a button; Enter does not.
@@ -115,7 +120,7 @@ pub(crate) fn activation_keys(element: &RetainedElement) -> Option<ActivationKey
 /// Whether an assistive technology can press the element without a listener on it.
 pub(crate) fn is_activatable(element: &RetainedElement) -> bool {
     element.element_type == "button"
-        || (element.element_type == "a" && has_href(element))
+        || is_link(element)
         || crate::custom_elements::input_choice::choice_of(element).is_some()
 }
 
@@ -128,6 +133,15 @@ pub(crate) fn activation_target(tree: &RetainedTree, path: &[u64]) -> Option<u64
             matches!(element.element_type.as_str(), "label" | "button") || is_activatable(element)
         })
     })
+}
+
+/// Whether a click on `path` follows a link: its activation target is an `<a href>` or `<area href>`. The click has to be
+/// delivered for it even with no listener, since following it (`js/events/link-activation.ts`) is decided after
+/// the event ran.
+pub(crate) fn is_followed_by(tree: &RetainedTree, path: &[u64]) -> bool {
+    activation_target(tree, path)
+        .and_then(|target| tree.elements.get(&target))
+        .is_some_and(is_link)
 }
 
 /// What a `button` does when clicked inside a `form`.
@@ -207,6 +221,33 @@ mod tests {
         assert_eq!(keys(5), None);
         assert!(tree.elements[&2].needs_focus() && tree.elements[&4].needs_focus());
         assert!(!tree.elements[&3].needs_focus() && !tree.elements[&5].needs_focus());
+    }
+
+    #[test]
+    fn an_area_with_an_href_is_followed_like_an_a() {
+        let tree = tree(
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"area"],["appendChild",1,2],["setCustomProp",2,"href","/x"],
+                ["createElement",3,"area"],["appendChild",1,3]]"#,
+        );
+        assert!(is_followed_by(&tree, &[2, 1]));
+        assert_eq!(activation_target(&tree, &[2, 1]), Some(2));
+        assert!(!is_followed_by(&tree, &[3, 1]));
+        assert_eq!(role(&tree, 2), Some(Role::Link));
+        assert_eq!(role(&tree, 3), None);
+        assert!(is_activatable(&tree.elements[&2]) && !is_activatable(&tree.elements[&3]));
+        assert!(activation_keys(&tree.elements[&2]).is_some() && activation_keys(&tree.elements[&3]).is_none());
+    }
+
+    #[test]
+    fn an_area_is_not_a_tab_stop_with_or_without_an_href() {
+        let tree = tree(
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"area"],["appendChild",1,2],["setCustomProp",2,"href","/x"],
+                ["createElement",3,"a"],["appendChild",1,3],["setCustomProp",3,"href","/x"]]"#,
+        );
+        assert!(!is_focusable_by_default(&tree.elements[&2]) && !tree.elements[&2].needs_focus());
+        assert!(is_focusable_by_default(&tree.elements[&3]) && tree.elements[&3].needs_focus());
     }
 
     #[test]

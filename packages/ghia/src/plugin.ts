@@ -1,6 +1,6 @@
 import type {} from "vitest/config"
-import { realpathSync } from "node:fs"
-import { resolve } from "node:path"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { extname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createRunnableDevEnvironment, DevEnvironment, type Plugin, type ResolvedConfig } from "vite"
 import { SERVER_PORT_SLOT_KEY } from "./protocol.js"
@@ -14,6 +14,7 @@ export const PLUGIN_NAME = "ghia"
 
 const SERVER_PORT_MODULE = "virtual:ghia/server"
 const SERVER_MAIN_MODULE = "virtual:ghia/server-main"
+const APP_ID_MODULE = "virtual:ghia/app-id"
 const RESOLVED_PREFIX = "\0"
 
 export interface GhiaOptions {
@@ -34,6 +35,12 @@ export interface GhiaOptions {
    * `app` inside the build's output directory.
    */
   compile?: { outfile?: string }
+  /**
+   * Names the app's data directory, `~/Library/Application Support/<appId>`, where `localStorage` keeps its file. It is
+   * a single directory name: no slash. The default is the `name` in the `package.json` of the Vite root (`@scope/app`
+   * becomes `scope-app`); an app with neither has an in-memory `localStorage`.
+   */
+  appId?: string
 }
 
 export interface GhiaPluginApi {
@@ -47,6 +54,8 @@ export interface GhiaPluginApi {
   readonly serverChannel: WorkerHotChannel
   /** Absolute path of the `compile.outfile` option; undefined when it is not set. Set once the config is resolved. */
   readonly compileOutfile: string | undefined
+  /** The app id the runtime gets: the `appId` option, else the package name; undefined when there is neither. Set once the config is resolved. */
+  readonly appId: string | undefined
 }
 
 export const ENTRY_FILE_NAMES: Record<string, string> = {
@@ -55,9 +64,18 @@ export const ENTRY_FILE_NAMES: Record<string, string> = {
 }
 
 const DOM_GLOBALS_IMPORT = 'import "@ghia/native/dom-globals";'
+const APP_ID_IMPORT = `import ${JSON.stringify(APP_ID_MODULE)};`
+// Read by `@ghia/native` (js/shell/storage.ts) when `localStorage` is first used.
+const APP_ID_SLOT_KEY = "@ghia/native/app-id"
+
+const FONT_FILE = /\.(?:ttf|otf|ttc)$/i
+/** A `url()` of a font by a path from the Vite root, as the CSS of `?inline` text holds it in a JS string: its quotes may be escaped. */
+const DEV_FONT_URL = /url\(\s*(\\?["']?)(\/[^"'\\)\s?]+\.(?:ttf|otf|ttc))\1\s*\)/gi
 
 const UI_CONDITIONS = ["browser", "import", "module", "default"]
 const NATIVE_PACKAGE = "@ghia/native"
+
+const inlineFonts = (file: string): boolean | undefined => (FONT_FILE.test(file) ? true : undefined)
 
 const TEST_SETUP_FILE = fileURLToPath(new URL("./test-setup.js", import.meta.url))
 
@@ -68,8 +86,8 @@ const TEST_SETUP_FILE = fileURLToPath(new URL("./test-setup.js", import.meta.url
  * Under vitest there is no `ghia` environment: the test environment gets the same resolve
  * settings and inlines every dependency, and `@ghia/native/dom-globals` loads before every test file.
  */
-export function ghia(options: GhiaOptions = {}): [Plugin<GhiaPluginApi>, Plugin] {
-  return [ghiaPlugin(options), workerPlugin([ENVIRONMENT_NAME, SERVER_ENVIRONMENT_NAME])]
+export function ghia(options: GhiaOptions = {}): [Plugin<GhiaPluginApi>, Plugin, Plugin] {
+  return [ghiaPlugin(options), workerPlugin([ENVIRONMENT_NAME, SERVER_ENVIRONMENT_NAME]), fontUrlPlugin()]
 }
 
 function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
@@ -77,6 +95,7 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
   let entry: string | undefined
   let serverEntry: string | undefined
   let compileOutfile: string | undefined
+  let appId: string | undefined
   const uiChannel = createUiHotChannel()
   const serverChannel = options.server === undefined ? undefined : new WorkerHotChannel()
 
@@ -175,6 +194,8 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
       return {
         build: {
           target: environment.build?.target ?? "esnext",
+          // The build half of `fontUrlPlugin`: a font in the CSS of the app becomes a data URL, whatever its size.
+          assetsInlineLimit: environment.build?.assetsInlineLimit ?? inlineFonts,
           rolldownOptions: {
             // Every chunk beside the entry: a Worker starts `./<name>.worker.js` relative to the chunk that holds the call, and
             // that chunk may be a lazy one.
@@ -196,6 +217,7 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
         serverEntry = realpathSync(resolve(config.root, options.server))
       }
       if (options.compile?.outfile !== undefined) compileOutfile = resolve(config.root, options.compile.outfile)
+      appId = resolveAppId(options.appId, config.root)
     },
 
     applyToEnvironment(environment) {
@@ -212,6 +234,9 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
           // condition that path is the wasm build. Node's own resolution finds the addon's loader.
           return { id: fileURLToPath(import.meta.resolve(id)), external: true }
         }
+        if (id === APP_ID_MODULE && this.environment.name === ENVIRONMENT_NAME) {
+          return RESOLVED_PREFIX + id
+        }
         if (id === SERVER_PORT_MODULE && this.environment.name === ENVIRONMENT_NAME) {
           return RESOLVED_PREFIX + id
         }
@@ -222,6 +247,9 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
     },
 
     load(id) {
+      if (id === RESOLVED_PREFIX + APP_ID_MODULE) {
+        return appIdModule(appId)
+      }
       if (id === RESOLVED_PREFIX + SERVER_PORT_MODULE) {
         if (serverEntry === undefined) {
           throw new Error(
@@ -240,8 +268,9 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
       order: "pre",
       handler(code, id) {
         if (this.environment.name !== ENVIRONMENT_NAME || id.split("?")[0] !== entry) return
-        // Same line, so the line numbers of the source map stay right.
-        return { code: `${DOM_GLOBALS_IMPORT} ${code}`, map: null }
+        // Same line, so the line numbers of the source map stay right. The app id comes first: a module the entry imports may read `localStorage` while it loads.
+        const imports = appId === undefined ? DOM_GLOBALS_IMPORT : `${APP_ID_IMPORT} ${DOM_GLOBALS_IMPORT}`
+        return { code: `${imports} ${code}`, map: null }
       },
     },
 
@@ -255,6 +284,9 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
       get compileOutfile() {
         return compileOutfile
       },
+      get appId() {
+        return appId
+      },
       get uiChannel() {
         return uiChannel
       },
@@ -264,6 +296,64 @@ function ghiaPlugin(options: GhiaOptions): Plugin<GhiaPluginApi> {
       },
     },
   }
+}
+
+/**
+ * A font in a `url()` of the CSS of a Ghia app is a `data:` URL, the one address that loads in `ghia dev`, in
+ * a build and in the compiled executable (`@font-face` in a sheet reads it, see `docs/fork/stylesheets.md`): the
+ * document has no base to resolve `/src/x.ttf` against and `ghia build` emits no assets. A build gets it from
+ * `assetsInlineLimit` (see `configEnvironment`); the dev server answers a `url()` with a path from the root, which
+ * this reads from the root, or from the public directory, and inlines.
+ */
+function fontUrlPlugin(): Plugin {
+  let roots: string[] = []
+  return {
+    name: `${PLUGIN_NAME}:font-urls`,
+    apply: "serve",
+    applyToEnvironment: (environment) => environment.name === ENVIRONMENT_NAME,
+    configResolved(config) {
+      roots = [config.root, config.publicDir].filter((directory) => directory !== "")
+    },
+    transform: {
+      order: "post",
+      filter: { id: /\.(?:css|pcss|postcss|sss|scss|sass|less|styl|stylus)(?:\?|$)/ },
+      handler(code) {
+        if (!code.includes("url(")) return
+        const replaced = code.replace(DEV_FONT_URL, (match, quote: string, path: string) => {
+          const file = roots.map((root) => join(root, path)).find((candidate) => existsSync(candidate))
+          if (file === undefined) return match
+          return `url(${quote}data:font/${extname(file).slice(1).toLowerCase()};base64,${readFileSync(file).toString("base64")}${quote})`
+        })
+        return replaced === code ? undefined : { code: replaced, map: null }
+      },
+    },
+  }
+}
+
+function resolveAppId(option: string | undefined, root: string): string | undefined {
+  if (option !== undefined) {
+    assertAppId(option, "The appId option of ghia()")
+    return option
+  }
+  const manifest = join(root, "package.json")
+  if (!existsSync(manifest)) return undefined
+  const name: unknown = JSON.parse(readFileSync(manifest, "utf8")).name
+  if (typeof name !== "string") return undefined
+  const id = name.replace(/^@/, "").replace("/", "-")
+  assertAppId(id, `The name in ${manifest}, the default appId,`)
+  return id
+}
+
+function assertAppId(id: string, subject: string): void {
+  if (id === "" || id === "." || id === ".." || /[/\\\0]/.test(id)) {
+    throw new Error(`${subject} cannot name a directory (${JSON.stringify(id)}): set appId in ghia() to a name without slashes`)
+  }
+}
+
+/** Sets the slot before `@ghia/native` loads: the app's own modules, and the libraries they import, may read `localStorage` while they load. */
+function appIdModule(appId: string | undefined): string {
+  if (appId === undefined) return "export {}\n"
+  return `globalThis[Symbol.for(${JSON.stringify(APP_ID_SLOT_KEY)})] = ${JSON.stringify(appId)}\n`
 }
 
 /** `ghia dev` starts the Worker and parks the UI's end of the channel in a slot before the UI entry loads. */

@@ -2,6 +2,7 @@ import { flushPendingMutations } from "../bounds.js"
 import type { NativeRenderer } from "../host.js"
 import { requiredWriter } from "../dom/renderer-writer.js"
 import { MouseEvent } from "./classes.js"
+import { followLinkOnClick } from "./link-activation.js"
 
 const NO_ACTIVATION = "a dispatched click has no activation behaviour"
 
@@ -35,6 +36,15 @@ export function activateAfterClick(target: ClickTarget, event: Event): void {
   if (!activates(target, event)) return
   if (event.defaultPrevented) requiredWriter(target.renderer, "cancelActivation", NO_ACTIVATION)(target.id)
   else requiredWriter(target.renderer, "activateElement", NO_ACTIVATION)(target.id)
+}
+
+/**
+ * The activation behaviour of a link, for a click an app dispatched: native has none for `<a>`, and the
+ * clicks native makes are followed where they are delivered (`runRootEvent`). `path` is the event's path, target first.
+ */
+export function followLinkAfterClick(path: readonly object[], event: Event): void {
+  if (event.type !== "click" || !isMouseEvent(event) || event.defaultPrevented) return
+  followLinkOnClick(path)
 }
 
 function isMouseEvent(event: Event): boolean {

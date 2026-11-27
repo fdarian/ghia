@@ -30,6 +30,8 @@ the renderer is created, so `fontFamily` resolves to them. It has no Rust (`js/f
 `js/testing.ts`). If upstream grows its own font option, drop the fonts commit. How a registered font is held in memory is
 in [frames-and-wakes.md](frames-and-wakes.md#memory-footprint-of-a-window-79).
 
+A sheet's `@font-face` is the second way to add a face, and both end in `Fonts::add` (`TextSystem::add_fonts`). They differ in who names the family and when the bytes are read: the option registers every file under the family it declares, before the first frame, and a path that cannot be read fails the window; a sheet rule names the family itself, can sit under `@media`, `@supports` and `@layer`, and is read in the frame that first builds with it, where a source that cannot load is logged and skipped (see [stylesheets.md](stylesheets.md#definitions-keyframes-property-and-font-face)). Neither loads WOFF or WOFF2.
+
 ## Window drag regions (`appRegion`)
 
 A `titlebarTransparent` window has no titlebar, and nothing in gpuix said what moves it. AppKit dragged such a window

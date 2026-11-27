@@ -3,6 +3,7 @@
  *  list is the same set. `select` is not here: Ghia has an element of that name. */
 export const HTML_TAGS = [
   "html", "head", "body",
+  "area", "base", "basefont", "datalist", "link", "meta", "noembed", "noframes", "noscript", "param", "rp", "script", "style", "template", "title",
   "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "dl", "dt", "dd",
   "section", "nav", "header", "footer", "main", "article", "aside",
   "figure", "figcaption", "blockquote", "pre", "fieldset", "legend", "address", "hr", "details", "summary", "dialog",
@@ -52,6 +53,7 @@ export function isInlineBox(type: string, style: { display?: unknown; position?:
 /** What a tag forwards to native beyond the props of every host element. */
 export const HTML_TAG_PROPS: Readonly<Partial<Record<HtmlTag, readonly string[]>>> = {
   a: ["href"],
+  area: ["href"],
   button: ["type", "disabled"],
   ol: ["start", "reversed"],
   li: ["value"],

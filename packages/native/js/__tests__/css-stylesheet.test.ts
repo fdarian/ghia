@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createMutationQueue, type MutationHost } from "../host.js"
 import { document } from "../events/window-target.js"
-import { CSSRule, CSSRuleList, CSSStyleRule, CSSStyleSheet } from "../css/index.js"
+import { CSSMediaRule, CSSRule, CSSRuleList, CSSStyleRule, CSSStyleSheet, CSSSupportsRule } from "../css/index.js"
 import { splitRules } from "../css/rules.js"
 import { registerSheetSink, type SheetSink } from "../css/sheet-sync.js"
 import { decodeWireBatchForTest } from "../wire-testing.js"
@@ -132,6 +132,44 @@ describe("CSSStyleSheet", () => {
     sheet.replaceSync(".only { top: 0 }")
     expect(list.length).toBe(1)
     expect(list[1]).toBeUndefined()
+  })
+
+  it("splits a media list at the top-level commas only", () => {
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync("@media (min-resolution: calc(1, 2)), print { .a { top: 0 } }")
+    const media = (sheet.cssRules[0] as CSSMediaRule).media
+    expect(media.length).toBe(2)
+    expect(media.item(0)).toBe("(min-resolution: calc(1, 2))")
+    expect(media.item(1)).toBe("print")
+  })
+
+  it("lists @media and @supports as grouping rules with their condition and their rules", () => {
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync(
+      "@media screen and (min-width: 600px), print { .a { top: 0 } @supports (display: grid) { .b { left: 1px } } } @supports not (color: bogus) { .c { top: 1px } }"
+    )
+    const media = sheet.cssRules[0] as CSSMediaRule
+    expect(media).toBeInstanceOf(CSSMediaRule)
+    expect(media.type).toBe(CSSRule.MEDIA_RULE)
+    expect(media.conditionText).toBe("screen and (min-width: 600px), print")
+    expect(media.media.mediaText).toBe("screen and (min-width: 600px), print")
+    expect(media.media.length).toBe(2)
+    expect(media.media.item(1)).toBe("print")
+    expect(media.cssRules.length).toBe(2)
+    const inner = media.cssRules[0] as CSSStyleRule
+    expect(inner).toBeInstanceOf(CSSStyleRule)
+    expect(inner.selectorText).toBe(".a")
+    expect(inner.parentRule).toBe(media)
+    expect(inner.parentStyleSheet).toBe(sheet)
+    const nested = media.cssRules[1] as CSSSupportsRule
+    expect(nested).toBeInstanceOf(CSSSupportsRule)
+    expect(nested.type).toBe(CSSRule.SUPPORTS_RULE)
+    expect(nested.conditionText).toBe("(display: grid)")
+    expect((nested.cssRules[0] as CSSStyleRule).selectorText).toBe(".b")
+    expect(sheet.cssRules[0]!.parentRule).toBeNull()
+    expect((sheet.cssRules[1] as CSSSupportsRule).conditionText).toBe("not (color: bogus)")
+    sheet.deleteRule(0)
+    expect(media.parentStyleSheet).toBeNull()
   })
 
   it("replaceSync leaves out @import rules", () => {

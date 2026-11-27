@@ -253,8 +253,8 @@ describe.skipIf(!hasNativeTestRenderer)("state pseudo-classes in a stylesheet in
     app.render(
       <div>
         <style>{`
-          :is(.keep, .card:hover .title) { width: 70px; height: 20px }
-          .also, .card:hover .title { opacity: 0.5 }
+          :is(.keep, .card:hover:focus) { width: 70px; height: 20px }
+          .also, .card:hover:focus { opacity: 0.5 }
         `}</style>
         <div testId="keep" className="keep" />
         <div ref={(element: unknown) => {

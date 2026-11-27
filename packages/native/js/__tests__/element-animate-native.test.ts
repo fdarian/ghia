@@ -29,7 +29,7 @@ describeNative("element.animate()", () => {
   const getAnimations = () => createElementMethods(host(), BOX).getAnimations.call(target)
 
   const computed = (property: string) => {
-    const pairs = renderer.getComputedStyle(BOX, false)!
+    const pairs = renderer.getComputedStyle(BOX, null)!
     return pairs[pairs.indexOf(property) + 1]
   }
 

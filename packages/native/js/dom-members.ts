@@ -4,7 +4,7 @@ import {
   type ElementEventListener,
   type ElementListenerOptions,
 } from "./events/element-listeners.js"
-import { activateAfterClick, preActivateClick } from "./events/activation.js"
+import { activateAfterClick, followLinkAfterClick, preActivateClick } from "./events/activation.js"
 import { reportUncaught } from "./events/dispatch.js"
 import { createRendererState } from "./renderer-state.js"
 import { readLayoutSize } from "./bounds.js"
@@ -315,6 +315,7 @@ export function defineDomMembers<This extends object>(
         preActivateClick(bound.layout, event)
         dispatchEventAlongPath(event, path, (index) => listenersOf(path[index]), bound.connected, report)
         activateAfterClick(bound.layout, event)
+        followLinkAfterClick(path, event)
         return !event.defaultPrevented
       },
     },

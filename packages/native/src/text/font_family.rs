@@ -15,6 +15,8 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use super::font_faces::{FaceState, Host};
+use crate::css::sheet::SheetFontFaces;
 use gpui::{font, App, FontFallbacks, FontId, Global, SharedString, TextSystem};
 
 /// A `font-family` list as GPUI is given it.
@@ -40,7 +42,9 @@ struct Shared {
     text_system: Arc<TextSystem>,
     /// A hash of the bytes of each font registered through [`Fonts::add`].
     registered: RefCell<Vec<u64>>,
-    stamp: Cell<Option<(u64, Stamp)>>,
+    /// The faces the sheets declare.
+    faces: RefCell<FaceState>,
+    stamp: Cell<Option<((u64, u64), Stamp)>>,
     state: RefCell<Option<State>>,
 }
 
@@ -48,6 +52,8 @@ struct Shared {
 /// resolve now, so all of it is dropped when the generation moves.
 struct State {
     generation: u64,
+    /// What `FaceState::version` was when this was read.
+    faces_version: u64,
     /// The face GPUI answers a family it cannot load with, and the family that face was loaded as.
     fallback_face: FontId,
     fallback_family: String,
@@ -66,7 +72,7 @@ impl Fonts {
     }
 
     fn new(text_system: Arc<TextSystem>) -> Fonts {
-        Fonts(Rc::new(Shared { text_system, registered: RefCell::new(Vec::new()), stamp: Cell::new(None), state: RefCell::new(None) }))
+        Fonts(Rc::new(Shared { text_system, registered: RefCell::new(Vec::new()), faces: RefCell::default(), stamp: Cell::new(None), state: RefCell::new(None) }))
     }
 
     /// Adds the fonts in `bytes` to the text system and remembers them for the [`Stamp`].
@@ -97,8 +103,9 @@ impl Fonts {
     /// the stamp.
     pub(crate) fn stamp(&self) -> Stamp {
         let generation = self.0.text_system.font_generation();
+        let faces_version = self.0.faces.borrow().version();
         if let Some((read_at, stamp)) = self.0.stamp.get() {
-            if read_at == generation {
+            if read_at == (generation, faces_version) {
                 return stamp;
             }
         }
@@ -108,40 +115,68 @@ impl Fonts {
         let mut hasher = rustc_hash::FxHasher::default();
         generation.hash(&mut hasher);
         registered.hash(&mut hasher);
+        faces_version.hash(&mut hasher);
         let stamp = Stamp(hasher.finish());
-        self.0.stamp.set(Some((generation, stamp)));
+        self.0.stamp.set(Some(((generation, faces_version), stamp)));
         stamp
     }
 
     /// The family and fallbacks of a `font-family` list.
     pub(crate) fn resolve(&self, list: &str) -> Resolved {
-        if !needs_resolution(list) {
+        let faces = self.0.faces.borrow();
+        if !needs_resolution(list) && !faces.has(list) {
             return Resolved { family: SharedString::from(list.to_owned()), fallbacks: no_fallbacks() };
         }
         let text_system = &self.0.text_system;
         let generation = text_system.font_generation();
         let mut slot = self.0.state.borrow_mut();
-        if slot.as_ref().is_none_or(|state| state.generation != generation) {
-            *slot = Some(State::read(text_system, generation));
+        if slot.as_ref().is_none_or(|state| state.generation != generation || state.faces_version != faces.version()) {
+            *slot = Some(State::read(text_system, generation, faces.version()));
         }
         let state = slot.as_mut().expect("the state is read above");
         if let Some(resolved) = state.resolved.get(list) {
             return resolved.clone();
         }
-        let resolved = pick(list, |name| state.installed(text_system, name));
+        let resolved = pick(list, |name| state.installed(text_system, name), |name| faces.family(name));
         state.resolved.insert(list.to_owned(), resolved.clone());
         resolved
+    }
+
+    /// Loads the faces `sheet` declares into the text system, and answers their family names from now on. Whether
+    /// anything a resolution could depend on changed.
+    pub(crate) fn sync_faces(&self, sheet: &Arc<SheetFontFaces>) -> bool {
+        let mut faces = self.0.faces.borrow_mut();
+        faces.sync(sheet, &mut Registering(self))
+    }
+
+    /// Not through the resolution cache: `local()` sources are asked for once, while the table is being built.
+    fn is_installed(&self, name: &str) -> bool {
+        let text_system = &self.0.text_system;
+        State::read(text_system, text_system.font_generation(), 0).installed(text_system, name)
+    }
+}
+
+/// [`FaceState`]'s way to the text system.
+struct Registering<'a>(&'a Fonts);
+
+impl Host for Registering<'_> {
+    fn add(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
+        self.0.add(bytes)
+    }
+
+    fn is_installed(&mut self, name: &str) -> bool {
+        self.0.is_installed(name)
     }
 }
 
 impl State {
-    fn read(text_system: &TextSystem, generation: u64) -> State {
+    fn read(text_system: &TextSystem, generation: u64, faces_version: u64) -> State {
         let fallback_face = text_system.resolve_font(&font(MISSING));
         let fallback_family = text_system
             .get_font_for_id(fallback_face)
             .map(|face| face.family.to_string())
             .unwrap_or_default();
-        State { generation, fallback_face, fallback_family, resolved: HashMap::new() }
+        State { generation, faces_version, fallback_face, fallback_family, resolved: HashMap::new() }
     }
 
     /// `TextSystem::all_font_names` cannot say: it lists the names of GPUI's own fallback stack (Segoe UI, Ubuntu,
@@ -174,12 +209,18 @@ fn needs_resolution(value: &str) -> bool {
         || generic(value).is_some()
 }
 
-fn pick(list: &str, installed: impl Fn(&str) -> bool) -> Resolved {
+/// `face_family` answers the name a sheet's `@font-face` gave a family with the family of its file; it comes before
+/// anything the system has, as a web font does.
+fn pick(list: &str, installed: impl Fn(&str) -> bool, face_family: impl Fn(&str) -> Option<String>) -> Resolved {
     let names = names(list);
-    let mut found: Vec<&str> = Vec::new();
+    let mut found: Vec<String> = Vec::new();
     for name in &names {
-        let candidate = if name.keyword { generic(&name.text).unwrap_or(&name.text) } else { &name.text };
-        if installed(candidate) && !found.iter().any(|known| known.eq_ignore_ascii_case(candidate)) {
+        let generic_family = if name.keyword { generic(&name.text) } else { None };
+        let candidate = match generic_family {
+            Some(generic_family) => generic_family.to_owned(),
+            None => face_family(&name.text).unwrap_or_else(|| name.text.clone()),
+        };
+        if installed(&candidate) && !found.iter().any(|known| known.eq_ignore_ascii_case(&candidate)) {
             found.push(candidate);
         }
     }
@@ -294,11 +335,21 @@ fn generic(name: &str) -> Option<&'static str> {
 }
 
 #[cfg(test)]
+pub(super) fn pick_for_tests(list: &str, installed: &[&str], faces: &[(&str, &str)]) -> (String, Vec<String>) {
+    let resolved = pick(
+        list,
+        |name| installed.contains(&name),
+        |name| faces.iter().find(|(css, _)| css.eq_ignore_ascii_case(name)).map(|(_, family)| (*family).to_owned()),
+    );
+    (resolved.family.to_string(), resolved.fallbacks.fallback_list().to_vec())
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     fn picked(list: &str, installed: &[&str]) -> (String, Vec<String>) {
-        let resolved = pick(list, |name| installed.contains(&name));
+        let resolved = pick(list, |name| installed.contains(&name), |_| None);
         (resolved.family.to_string(), resolved.fallbacks.fallback_list().to_vec())
     }
 

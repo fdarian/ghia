@@ -824,10 +824,15 @@ fn svg_bytes(src: &str) -> Option<Vec<u8>> {
 }
 
 fn decode_image_data_url(src: &str) -> Option<(gpui::ImageFormat, Vec<u8>)> {
+    let (mime_type, bytes) = decode_data_url(src)?;
+    Some((gpui::ImageFormat::from_mime_type(&mime_type)?, bytes))
+}
+
+/// The lowercased media type and the bytes of a `data:` URL, whatever the type is.
+pub(crate) fn decode_data_url(src: &str) -> Option<(String, Vec<u8>)> {
     let (metadata, data) = src.strip_prefix("data:")?.split_once(',')?;
     let mut parts = metadata.split(';');
     let mime_type = parts.next()?.to_ascii_lowercase();
-    let format = gpui::ImageFormat::from_mime_type(&mime_type)?;
     let is_base64 = parts.any(|part| part.eq_ignore_ascii_case("base64"));
     let body = percent_decode(data);
     let bytes = if is_base64 {
@@ -835,7 +840,7 @@ fn decode_image_data_url(src: &str) -> Option<(gpui::ImageFormat, Vec<u8>)> {
     } else {
         body
     };
-    Some((format, bytes))
+    Some((mime_type, bytes))
 }
 
 /// The forgiving-base64 decode of the Infra standard, which a data URL goes

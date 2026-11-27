@@ -12,6 +12,7 @@ pub(crate) mod content_visibility;
 pub(crate) mod contents;
 pub(crate) mod cull;
 pub(crate) mod display;
+pub(crate) mod generated;
 pub mod grid;
 pub mod grid_values;
 pub(crate) mod list_marker;

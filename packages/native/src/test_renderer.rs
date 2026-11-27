@@ -874,6 +874,8 @@ impl TestGpuixRenderer {
                             selection_clone,
                             pointer_requests_clone,
                         );
+                        // The OS's preferences are the machine's; the test window starts with none.
+                        view.set_media_features(crate::media::MediaFeatures::default());
                         view.observe_appearance(window, cx);
                         view.observe_viewport(window, cx);
                         view.force_scroller_style(crate::scrollbar::ScrollerStyle::Overlay);
@@ -2014,15 +2016,24 @@ impl TestGpuixRenderer {
         reduced_motion: Option<bool>,
         increased_contrast: Option<bool>,
         forced_colors: Option<bool>,
-    ) {
-        let event = self
-            .media
-            .lock()
-            .unwrap()
-            .set(reduced_motion, increased_contrast, forced_colors);
+    ) -> Result<()> {
+        let (event, features) = {
+            let mut media = self.media.lock().unwrap();
+            let event = media.set(reduced_motion, increased_contrast, forced_colors);
+            (event, media.features)
+        };
         if let Some(event) = event {
             self.events.lock().unwrap().push(event);
         }
+        // A disposed renderer records the features and has no window to tell, as it always did.
+        if TEST_STATE.with(|cell| cell.try_borrow().is_ok_and(|state| state.is_none())) {
+            return Ok(());
+        }
+        // The stylesheets' media queries follow the preferences whether or not JS listens.
+        update_view_or_defer(move |view, window, cx| {
+            view.set_media_features(features);
+            view.sync_sheet_media(window, cx);
+        })
     }
 
     /// Sets the macOS "Show scroll bars" setting this window reports: `"overlay"` (Automatically
@@ -2970,6 +2981,18 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Records a request to open a link in the system's handler, which a test window must not make.
+    /// `getOpenedUrls` has the requests, in order.
+    #[napi]
+    pub fn open_url(&self, url: String) -> Result<()> {
+        window_call(|_window, cx| crate::open_url::record(cx, &url))?.map_err(Error::from_reason)
+    }
+
+    #[napi]
+    pub fn get_opened_urls(&self) -> Result<Vec<String>> {
+        window_call(|_window, cx| crate::open_url::recorded(cx))
+    }
+
     /// Make the fonts in a TrueType or OpenType file usable by `fontFamily`.
     #[napi]
     pub fn register_font(&self, data: Buffer) -> Result<()> {
@@ -3056,8 +3079,9 @@ impl TestGpuixRenderer {
     /// The values `getComputedStyle` reads of an element, as `[name, value, name, value, ...]`, or
     /// null while the element is not in the document. See `GpuixRenderer::get_computed_style`.
     #[napi]
-    pub fn get_computed_style(&self, element_id: f64, pseudo_element: bool) -> Result<Option<Vec<String>>> {
+    pub fn get_computed_style(&self, element_id: f64, pseudo_element: Option<String>) -> Result<Option<Vec<String>>> {
         let id = to_element_id(element_id)?;
+        let pseudo_element = crate::css::computed_style::pseudo_of(pseudo_element)?;
         let unflushed = take_unflushed();
         if unflushed != Dirty::Clean {
             self.flush_for(unflushed)?;

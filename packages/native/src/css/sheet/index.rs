@@ -14,16 +14,19 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::css::lenient::Declaration;
 
 use super::atoms::Atom;
+use super::conditions::Conditions;
 use super::invalidation::Invalidation;
 use super::layers::{LayerId, LayerOrder};
 use super::matching::{matches, ElementView};
+use super::pseudo::Pseudo;
 use super::selector::{AttrName, ComplexSelector, Simple, Specificity};
 use super::states::{Applies, RuleMatch};
 
 /// What a rule says, which does not depend on where it stands in a document: shared by the parse
 /// cache and every index built from it.
 pub struct RuleBody {
-    /// Without the selectors that name a pseudo-element, and never empty.
+    /// Without the selectors that name a pseudo-element other than `::before` and `::after`, and
+    /// never empty.
     pub selectors: Vec<(ComplexSelector, Specificity)>,
     pub normal: Vec<Declaration>,
     pub important: Vec<Declaration>,
@@ -34,6 +37,9 @@ pub struct RuleBody {
 pub struct DocRule {
     pub body: Arc<RuleBody>,
     pub layer: Option<LayerId>,
+    /// The media queries the rule stands under. A rule whose conditions do not hold is left out
+    /// before the index is built, so [`RuleIndex::build`] takes the rules that apply.
+    pub conditions: Option<Arc<Conditions>>,
 }
 
 pub struct IndexedRule {
@@ -67,14 +73,86 @@ struct Entry {
     self_contained: bool,
 }
 
+/// The rules of one target (an element, or one of its generated boxes) by the feature of the
+/// subject compound each is filed under.
 #[derive(Default)]
-pub struct RuleIndex {
-    pub rules: Vec<IndexedRule>,
+struct Buckets {
     by_id: FxHashMap<Atom, Vec<Entry>>,
     by_class: FxHashMap<Atom, Vec<Entry>>,
     by_attribute: FxHashMap<AttrName, Vec<Entry>>,
     by_tag: FxHashMap<Atom, Vec<Entry>>,
     universal: Vec<Entry>,
+}
+
+impl Buckets {
+    fn add(&mut self, selector: &ComplexSelector, entry: Entry) {
+        match bucket_simple(&selector.compounds[0].simples) {
+            Some(Simple::Id(id)) => self.by_id.entry(*id).or_default().push(entry),
+            Some(Simple::Class(class)) => self.by_class.entry(*class).or_default().push(entry),
+            Some(Simple::Attr(attr)) => self.by_attribute.entry(attr.name).or_default().push(entry),
+            Some(Simple::Tag(tag)) => {
+                // An HTML element looks its tag up lower-cased and an SVG one as given.
+                self.by_tag.entry(tag.lower).or_default().push(entry);
+                if tag.written != tag.lower {
+                    self.by_tag.entry(tag.written).or_default().push(entry);
+                }
+            }
+            _ => self.universal.push(entry),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+            && self.by_class.is_empty()
+            && self.by_attribute.is_empty()
+            && self.by_tag.is_empty()
+            && self.universal.is_empty()
+    }
+
+    fn may_match(&self, id: Option<Atom>, classes: &[Atom]) -> bool {
+        id.is_some()
+            || !classes.is_empty()
+            || !self.by_attribute.is_empty()
+            || !self.by_tag.is_empty()
+            || !self.universal.is_empty()
+    }
+}
+
+/// What a match of the rules is for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Target {
+    Element,
+    /// Every rule that styles the generated box, `content` or not.
+    Box(Pseudo),
+    /// The rules for the generated box that declare `content`: the ones that decide it has any.
+    /// An element none of them matches has no box to build, so the rest are not matched for it
+    /// (a universal `*, ::before, ::after { ... }` without `content` costs the elements nothing).
+    Content(Pseudo),
+}
+
+impl Target {
+    /// What tells a match for one target from a match for another in the sharing memo.
+    pub(super) fn key(self) -> u8 {
+        match self {
+            Target::Element => 0,
+            Target::Box(pseudo) => 1 + pseudo.index() as u8,
+            Target::Content(pseudo) => 3 + pseudo.index() as u8,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct RuleIndex {
+    pub rules: Vec<IndexedRule>,
+    /// The selectors of the rules that style an element.
+    elements: Buckets,
+    /// The selectors that end in `::before` and in `::after`, filed by their originating element.
+    pseudos: [Buckets; 2],
+    /// The selectors of `pseudos` whose rule declares `content`, in the same order.
+    content_pseudos: [Buckets; 2],
+    /// Whether a box has a rule that declares no `content`, which the match of the box adds to the
+    /// ones that do.
+    extra_pseudos: [bool; 2],
     unlayered_rank: u32,
     pub invalidation: Invalidation,
     /// Whether any selector is self-contained: otherwise nothing is shared and the memo is skipped.
@@ -84,6 +162,9 @@ pub struct RuleIndex {
     /// and what a self-contained selector matches on their values.
     html_attributes: Vec<Atom>,
     svg_attributes: Vec<Atom>,
+    /// The attribute names a `content: attr()` of a rule for a generated box reads, lower-cased:
+    /// the box shows the attribute of its element, so a change of one is a change of the box.
+    pub content_attributes: FxHashSet<String>,
 }
 
 impl RuleIndex {
@@ -95,13 +176,24 @@ impl RuleIndex {
         let mut attributes = Attributes::default();
         for rule in rules {
             let number = u32::try_from(index.rules.len()).expect("fewer than 2^32 rules");
+            let declares_content = rule.body.normal.iter().chain(&rule.body.important).any(|declaration| declaration.key == "content");
             for (position, (selector, _)) in rule.body.selectors.iter().enumerate() {
                 index.invalidation.read(selector);
                 attributes.read(selector);
                 let self_contained = is_self_contained(selector, style, &mut self_contained_lists);
                 index.shares |= self_contained;
                 let entry = Entry { rule: number, selector: position as u32, self_contained };
-                index.bucket(selector, entry);
+                index.buckets_mut(selector.pseudo.map_or(Target::Element, Target::Box)).add(selector, entry);
+                if let Some(pseudo) = selector.pseudo {
+                    if declares_content {
+                        index.content_pseudos[pseudo.index()].add(selector, entry);
+                    } else {
+                        index.extra_pseudos[pseudo.index()] = true;
+                    }
+                }
+            }
+            if rule.body.selectors.iter().any(|(selector, _)| selector.pseudo.is_some()) {
+                super::pseudo::read_content_attributes(&rule.body, &mut index.content_attributes);
             }
             index.rules.push(IndexedRule { body: rule.body.clone(), layer_rank: layers.rank(rule.layer) });
         }
@@ -129,41 +221,64 @@ impl RuleIndex {
         }
     }
 
-    fn bucket(&mut self, selector: &ComplexSelector, entry: Entry) {
-        match bucket_simple(&selector.compounds[0].simples) {
-            Some(Simple::Id(id)) => self.by_id.entry(*id).or_default().push(entry),
-            Some(Simple::Class(class)) => self.by_class.entry(*class).or_default().push(entry),
-            Some(Simple::Attr(attr)) => self.by_attribute.entry(attr.name).or_default().push(entry),
-            Some(Simple::Tag(tag)) => {
-                // An HTML element looks its tag up lower-cased and an SVG one as given.
-                self.by_tag.entry(tag.lower).or_default().push(entry);
-                if tag.written != tag.lower {
-                    self.by_tag.entry(tag.written).or_default().push(entry);
-                }
-            }
-            _ => self.universal.push(entry),
+    fn buckets(&self, target: Target) -> &Buckets {
+        match target {
+            Target::Element => &self.elements,
+            Target::Box(pseudo) => &self.pseudos[pseudo.index()],
+            Target::Content(pseudo) => &self.content_pseudos[pseudo.index()],
         }
     }
 
+    fn buckets_mut(&mut self, target: Target) -> &mut Buckets {
+        match target {
+            Target::Element => &mut self.elements,
+            Target::Box(pseudo) => &mut self.pseudos[pseudo.index()],
+            Target::Content(_) => unreachable!("the rules for a box that have content are filed along with the others"),
+        }
+    }
+
+    /// Whether any rule styles the generated box `pseudo`.
+    pub fn has_rules_for(&self, pseudo: Pseudo) -> bool {
+        !self.pseudos[pseudo.index()].is_empty()
+    }
+
+    /// Whether any rule for the generated box `pseudo` declares `content`: without one no element
+    /// has the box.
+    pub fn has_content_rules_for(&self, pseudo: Pseudo) -> bool {
+        !self.content_pseudos[pseudo.index()].is_empty()
+    }
+
+    /// Whether any rule for a generated box declares `content`.
+    pub fn has_content_rules(&self) -> bool {
+        Pseudo::BOTH.into_iter().any(|pseudo| self.has_content_rules_for(pseudo))
+    }
+
+    /// Whether the box `pseudo` has rules that do not declare `content`, which style a box a rule
+    /// that does has made.
+    pub fn has_rules_without_content_for(&self, pseudo: Pseudo) -> bool {
+        self.extra_pseudos[pseudo.index()]
+    }
+
     /// Whether any rule can match an element with this id and these classes: not when every rule
-    /// is keyed by an id or a class and the element has neither.
-    pub fn may_match(&self, id: Option<Atom>, classes: &[Atom]) -> bool {
-        id.is_some()
-            || !classes.is_empty()
-            || !self.by_attribute.is_empty()
-            || !self.by_tag.is_empty()
-            || !self.universal.is_empty()
+    /// is keyed by an id or a class and the element has neither. `target` is the element, or one
+    /// of its generated boxes.
+    pub fn may_match(&self, id: Option<Atom>, classes: &[Atom], target: Target) -> bool {
+        self.buckets(target).may_match(id, classes)
     }
 
     /// The rules that match `element` with the specificity of the most specific selector of each
     /// that does, in cascade order for normal declarations: layer, then specificity, then source.
+    ///
+    /// `target` is what the rules style: the element, or one of its generated boxes, whose rules are
+    /// matched against `element`, the box's originating element.
     pub fn matching<E: ElementView>(
         &self,
         element: &E,
         id: Option<Atom>,
         classes: &[Atom],
+        target: Target,
     ) -> Vec<RuleMatch> {
-        self.matching_in_full(element, id, classes).0
+        self.matching_in_full(element, id, classes, target).0
     }
 
     /// [`Self::matching`], and whether every selector it tried is self-contained, which makes the
@@ -173,8 +288,10 @@ impl RuleIndex {
         element: &E,
         id: Option<Atom>,
         classes: &[Atom],
+        target: Target,
     ) -> (Vec<RuleMatch>, bool) {
         super::share::count_full_match();
+        let buckets = self.buckets(target);
         let mut found: Vec<RuleMatch> = Vec::new();
         let mut self_contained = true;
         let mut visit = |bucket: &[Entry]| {
@@ -191,25 +308,25 @@ impl RuleIndex {
                 }
             }
         };
-        if let Some(bucket) = id.and_then(|id| self.by_id.get(&id)) {
+        if let Some(bucket) = id.and_then(|id| buckets.by_id.get(&id)) {
             visit(bucket);
         }
         for class in classes {
-            if let Some(bucket) = self.by_class.get(class) {
+            if let Some(bucket) = buckets.by_class.get(class) {
                 visit(bucket);
             }
         }
-        for (attribute, bucket) in &self.by_attribute {
+        for (attribute, bucket) in &buckets.by_attribute {
             if element.attr(*attribute).is_some() {
                 visit(bucket);
             }
         }
-        if !self.by_tag.is_empty() {
-            if let Some(bucket) = element.tag().and_then(|tag| self.by_tag.get(&tag)) {
+        if !buckets.by_tag.is_empty() {
+            if let Some(bucket) = element.tag().and_then(|tag| buckets.by_tag.get(&tag)) {
                 visit(bucket);
             }
         }
-        visit(&self.universal);
+        visit(&buckets.universal);
         found.sort_by_key(|found| {
             (self.rules[found.rule as usize].layer_rank, found.specificity, found.rule, found.condition)
         });

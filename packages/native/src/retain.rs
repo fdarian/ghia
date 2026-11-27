@@ -808,7 +808,7 @@ impl Node {
 pub(crate) fn costly(tree: &crate::retained_tree::RetainedTree, element: &crate::retained_tree::RetainedElement) -> bool {
     element.content.is_some()
         || !crate::text::inline::is_host_type(&element.element_type)
-        || element.children.iter().filter_map(|id| tree.elements.get(id)).any(|child| {
+        || crate::layout::generated::layout_children(tree, element).iter().filter_map(|id| tree.elements.get(id)).any(|child| {
             // Solid keeps an empty `#text` where an expression has no value yet: it lays out nothing.
             crate::text::inline::is_inline_wrapper(child)
                 || (crate::text::inline::is_raw_text(child) && child.content.as_deref().is_some_and(|text| !text.trim().is_empty()))
@@ -2020,7 +2020,13 @@ impl Retain {
         // every id it holds had its whole chain walked. Seeding it with `unbuilt` as it is would
         // not be, as the built ancestors of an unbuilt id have left that set.
         let mut spine = FxHashSet::default();
-        for id in self.unbuilt.iter().copied().chain(changed) {
+        // What an element's state restyles includes the boxes it generates, built under ids of their own.
+        let boxes: Vec<u64> = changed
+            .iter()
+            .filter_map(|id| sources.tree.elements.get(id))
+            .flat_map(|element| crate::layout::generated::boxes_of(sources.tree, element))
+            .collect();
+        for id in self.unbuilt.iter().copied().chain(changed).chain(boxes) {
             let mut at = Some(id);
             while let Some(id) = at {
                 if !spine.insert(id) {
@@ -2422,7 +2428,7 @@ impl Retain {
             .is_some_and(|style| crate::events::hover_paint::has_intrinsic_size(style) || crate::events::hover_paint::uses_groups(style));
         let mut root_below = false;
         let mut size = 1;
-        for child in &element.children {
+        for child in crate::layout::generated::layout_children(tree, element).iter() {
             let below = self.scan_patch_root(tree, *child, colors, lengths);
             hovers |= below.hovers;
             lifted_below |= below.lifts;
@@ -2674,7 +2680,7 @@ impl Retain {
             }
             self.patch_root_scans.remove(&next);
             if let Some(element) = tree.elements.get(&next) {
-                pending.extend(element.children.iter().copied());
+                pending.extend(crate::layout::generated::layout_children(tree, element).iter().copied());
             }
         }
     }
@@ -3489,7 +3495,8 @@ impl Retain {
             return Vec::new();
         }
         let mut asleep = Vec::new();
-        let mut pending: Vec<u64> = tree.elements.get(&id).map(|element| element.children.clone()).unwrap_or_default();
+        let mut pending: Vec<u64> =
+            tree.elements.get(&id).map(|element| crate::layout::generated::layout_children(tree, element).into_owned()).unwrap_or_default();
         while let Some(below) = pending.pop() {
             if self.records.get(&below).is_some_and(|record| !record.forced || self.deltas.spine.contains(&below)) {
                 self.records.remove(&below);
@@ -3502,7 +3509,7 @@ impl Retain {
                 asleep.push(below);
             }
             if let Some(element) = tree.elements.get(&below) {
-                pending.extend(&element.children);
+                pending.extend(crate::layout::generated::layout_children(tree, element).iter());
             }
         }
         asleep
@@ -4009,7 +4016,7 @@ fn for_each_unseen_element(
         visit(id);
         if let Some(element) = tree.elements.get(&id) {
             if element.element_type != "virtual-list" {
-                pending.extend(element.children.iter().copied());
+                pending.extend(crate::layout::generated::layout_children(tree, element).iter().copied());
             }
         }
     }
@@ -4130,7 +4137,8 @@ mod tests {
     fn the_fingerprint_names_every_field_of_inherited() {
         // `inherited_fingerprint` lists the fields by hand. Adding one changes this size, and the
         // fingerprint has to learn it or the key will not see it change.
-        assert_eq!(std::mem::size_of::<Inherited>(), 376);
+        // `custom` carries the document's registrations beside its map, which `custom_fingerprint` hashes.
+        assert_eq!(std::mem::size_of::<Inherited>(), 392);
     }
 
     #[test]

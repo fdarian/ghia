@@ -10,6 +10,8 @@
 
 pub mod atomic;
 pub mod empty_box;
+pub(crate) mod font_check;
+pub(crate) mod font_faces;
 pub(crate) mod font_family;
 mod in_place;
 pub mod inline;

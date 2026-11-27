@@ -6,6 +6,7 @@ use std::sync::Arc;
 use super::atoms::Atom;
 use super::has::HasArguments;
 use super::nth::Position;
+use super::pseudo::Pseudo;
 use super::states::State;
 use super::tree_states::TreeState;
 
@@ -31,6 +32,11 @@ pub struct ComplexSelector {
     /// The pointer or focus state the subject needs (`.a:hover`): not something the matcher
     /// reads, the rule applies under it (`states.rs`).
     pub condition: Option<State>,
+    /// The generated box the selector styles (`.a::before`): `compounds` are then the originating
+    /// element's, which the matcher reads, and the box is the target of the rule. A selector that
+    /// is an argument of `:is()` and the like has none, and one that is the parent of a nested rule
+    /// matches nothing.
+    pub pseudo: Option<Pseudo>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -63,8 +69,9 @@ pub enum Simple {
     Has(HasArguments),
     /// Parses, but nothing in a document is a shadow host.
     Host,
-    /// `::x` and the legacy `:before`, `:after`, `:first-line`, `:first-letter`: they style a part
-    /// of an element, so a selector holding one matches no element.
+    /// `::x` other than `::before` and `::after`, and the legacy `:first-line` and `:first-letter`:
+    /// they style a part of an element this engine has no box for, so a selector holding one
+    /// matches nothing ([`ComplexSelector::pseudo`] is the one that does).
     PseudoElement,
 }
 
@@ -171,13 +178,19 @@ impl Specificity {
 
 impl ComplexSelector {
     pub fn specificity(&self) -> Specificity {
-        self.compounds
+        let total = self
+            .compounds
             .iter()
             .flat_map(|compound| &compound.simples)
-            .fold(Specificity::default(), |total, simple| total.add(simple.specificity()))
+            .fold(Specificity::default(), |total, simple| total.add(simple.specificity()));
+        if self.pseudo.is_some() {
+            total.add(Specificity::new(0, 0, 1))
+        } else {
+            total
+        }
     }
 
-    /// Whether the selector can ever match an element.
+    /// Whether the selector names a pseudo-element that is never matched.
     pub fn has_pseudo_element(&self) -> bool {
         self.compounds
             .iter()

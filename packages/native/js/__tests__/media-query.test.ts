@@ -46,6 +46,15 @@ describe("media query parsing and serialization", () => {
     expect(list.matches(environment())).toBe(true)
   })
 
+  it("keeps a block with an unknown feature as general-enclosed when a sibling can still make the item true", () => {
+    expect(parseMediaQueryList("(bogus) or (min-width: 100px)").media).toBe(
+      "(bogus) or (min-width: 100px)"
+    )
+    expect(parseMediaQueryList("not ((bogus) and (min-width: 100px))").media).toBe(
+      "not ((bogus) and (min-width: 100px))"
+    )
+  })
+
   it("turns an unknown feature or an invalid value into not all", () => {
     for (const query of [
       "(unknown-feature)",
@@ -94,6 +103,30 @@ describe("media query parsing and serialization", () => {
 })
 
 describe("media query evaluation", () => {
+  it("treats an unknown feature as unknown: it does not void a true or sibling", () => {
+    expect(matches("(bogus) or (min-width: 800px)")).toBe(true)
+    expect(matches("(min-width: 800px) or (bogus: 1)")).toBe(true)
+    expect(matches("(min-width: red) or (min-width: 800px) or (bogus)")).toBe(true)
+    expect(matches("screen and ((bogus) or (min-width: 800px))")).toBe(true)
+    expect(matches("(bogus) or (min-width: 900px)")).toBe(false)
+    expect(matches("(bogus) and (min-width: 800px)")).toBe(false)
+    expect(matches("not ((bogus) or (min-width: 900px))")).toBe(false)
+    expect(matches("not ((bogus) and (min-width: 900px))")).toBe(true)
+    expect(matches("not screen and (bogus)")).toBe(false)
+    expect(matches("(bogus) or (bogus2), screen")).toBe(true)
+  })
+
+  it("treats a syntax error inside a nested condition as general-enclosed: it does not void a true or sibling", () => {
+    expect(matches("((min-width: 800px) and) or (min-width: 800px)")).toBe(true)
+    expect(matches("(min-width: 800px) or ((min-width: 900px) and (color) or (hover))")).toBe(true)
+    expect(matches("screen and (((min-width: 800px) and) or (min-width: 800px))")).toBe(true)
+    expect(matches("((min-width: 800px) and)")).toBe(false)
+    expect(matches("((min-width: 800px) and) or (min-width: 900px)")).toBe(false)
+    expect(matches("not ((min-width: 800px) and)")).toBe(false)
+    expect(matches("((min-width: 800px) and) and (min-width: 800px)")).toBe(false)
+    expect(matches("((min-width: 800px) and")).toBe(false)
+  })
+
   it("matches media types", () => {
     expect(matches("all")).toBe(true)
     expect(matches("screen")).toBe(true)

@@ -136,6 +136,18 @@ impl FocusStyles {
         Some(folded)
     }
 
+    /// [`Self::folded_for_resets`] for the box of a `::before` or `::after`, which has no focus handle for the
+    /// builders to lay a variant over it with: whichever variants apply are folded into the style.
+    pub fn folded_for_box(&self, id: u64, style: &StyleDesc, focusable: bool) -> Option<Box<StyleDesc>> {
+        let mut folded: Option<Box<StyleDesc>> = None;
+        for declared in self.applying(id, style, focusable) {
+            folded = Some(Box::new(crate::events::state_styles::overlay(folded.as_deref().unwrap_or(style), declared)));
+        }
+        let mut folded = folded?;
+        clear_focus_variants(&mut folded);
+        Some(folded)
+    }
+
     /// The custom properties element `id` computes to below `parent`: the ones `style` declares
     /// with those of the focus variants that apply laid over them, the later variant winning. A
     /// custom property a variant sets is the element's, as in CSS, so its base, its other
@@ -156,7 +168,7 @@ impl FocusStyles {
         }
         match declared.as_ref() {
             Some(declared) => parent.descend(declared),
-            None => parent.clone(),
+            None => parent.inherit(),
         }
     }
 
@@ -942,6 +954,31 @@ impl GpuixView {
             #[cfg(not(target_family = "wasm"))]
             self.focus.push_page_moves(tree, &change);
         }
+    }
+
+    /// Tells the sheets where the focus and the pointer are, for the selectors that read a state
+    /// outside their subject (`.menu:focus-within .item`, `.peer:focus ~ .y`). It runs at the start
+    /// of a build, before anything reads the tree, so the elements it restyles are drawn in this
+    /// frame; the pointer is told as it moves (`listeners::sync_live_pointer`), and the focus is only
+    /// known to have moved when the build notices it. It runs after `sync_focus_handles`, which is
+    /// what applies a pending `focus()` and the blur of a control that lost focusability, so the
+    /// chain it reads is the one this frame draws. A document with no such selector pays one check.
+    pub(crate) fn sync_live_states(&mut self, window: &gpui::Window) {
+        let tree_arc = self.tree.clone();
+        let mut tree = tree_arc.lock().unwrap();
+        if !tree.live_states_wanted() {
+            tree.sync_live_states(&crate::css::sheet::LiveInputs::default());
+            return;
+        }
+        self.observe_focus_in(&tree, window);
+        let focus = self.focus.styles(&tree, false);
+        let pointer = self.pointer.borrow();
+        let (hover, active) = pointer.chains();
+        // What a frame built whole draws, so the dirty answer has nothing to add.
+        tree.sync_live_states(&crate::css::sheet::LiveInputs {
+            pointer: Some(crate::css::sheet::PointerChains { hover, active }),
+            focus: Some(crate::css::sheet::FocusChain { within: &focus.within, visible: focus.visible }),
+        });
     }
 
     /// Sends the focus events a frame noticed once the frame is over. They
