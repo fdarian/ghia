@@ -1801,29 +1801,50 @@ impl GpuixRenderer {
         self.window.lock().unwrap().map(|window| window.window_id())
     }
 
+    /// The handle for a call that needs the window itself (a read, a measurement): once the window
+    /// is gone there is nothing to answer from, and the error says so.
+    fn open_window_handle(&self) -> Result<gpui::WindowHandle<GpuixView>> {
+        let handle = self.window_handle()?;
+        if crate::window_set::is_open(handle.window_id()) {
+            Ok(handle)
+        } else {
+            Err(Error::from_reason("The window is closed"))
+        }
+    }
+
+    /// Runs a setter that only means something for a window that is there: once the window is gone
+    /// (closed by the user, by `closeWindow`, or by the app quitting) it has nothing to set and does
+    /// nothing. A window that went while `set` ran does nothing either.
+    fn unless_closed(&self, set: impl FnOnce() -> Result<()>) -> Result<()> {
+        if self.is_window_closed() {
+            return Ok(());
+        }
+        set().or_else(|error| if self.is_window_closed() { Ok(()) } else { Err(error) })
+    }
+
     fn update_window<R>(
         &self,
         update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) -> R,
     ) -> Result<R> {
-        crate::window_set::update_window_in(self.window_handle()?, update)
+        crate::window_set::update_window_in(self.open_window_handle()?, update)
     }
 
     fn update_window_or_defer(
         &self,
         update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) + 'static,
     ) -> Result<()> {
-        crate::window_set::update_window_or_defer_in(self.window_handle()?, update)
+        self.unless_closed(|| crate::window_set::update_window_or_defer_in(self.window_handle()?, update))
     }
 
     fn update_window_without_view<R>(
         &self,
         update: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> R,
     ) -> Result<R> {
-        crate::window_set::update_window_without_view_in(self.window_handle()?, update)
+        crate::window_set::update_window_without_view_in(self.open_window_handle()?, update)
     }
 
     fn invalidate_window(&self, dirty: Dirty) -> Result<()> {
-        invalidate_window_in(self.window_handle()?, dirty)
+        self.unless_closed(|| invalidate_window_in(self.window_handle()?, dirty))
     }
 }
 
@@ -2964,8 +2985,10 @@ impl GpuixRenderer {
     #[napi]
     pub fn reset_debug_frame_overlay_stats(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window(|_view, window, _cx| {
-            window.reset_debug_frame_overlay_stats();
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, _cx| {
+                window.reset_debug_frame_overlay_stats();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3103,8 +3126,10 @@ impl GpuixRenderer {
             )));
         }
         #[cfg(target_os = "macos")]
-        return self.update_window_without_view(|window, _cx| {
-            window.resize(gpui::size(gpui::px(width as f32), gpui::px(height as f32)));
+        return self.unless_closed(|| {
+            self.update_window_without_view(|window, _cx| {
+                window.resize(gpui::size(gpui::px(width as f32), gpui::px(height as f32)));
+            })
         });
 
         #[cfg(not(target_os = "macos"))]
@@ -3116,9 +3141,11 @@ impl GpuixRenderer {
     #[napi]
     pub fn activate_window(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window(|_view, window, cx| {
-            cx.activate(true);
-            window.activate_window();
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, cx| {
+                cx.activate(true);
+                window.activate_window();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3139,7 +3166,9 @@ impl GpuixRenderer {
     #[napi]
     pub fn minimize_window(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window(|_view, window, _cx| window.minimize_window());
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, _cx| window.minimize_window())
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::MinimizeWindow);
@@ -3159,7 +3188,9 @@ impl GpuixRenderer {
     #[napi]
     pub fn zoom_window(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window(|_view, window, _cx| window.zoom_window());
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, _cx| window.zoom_window())
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::ZoomWindow);
@@ -3179,7 +3210,9 @@ impl GpuixRenderer {
     #[napi]
     pub fn toggle_fullscreen(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window(|_view, window, _cx| window.toggle_fullscreen());
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, _cx| window.toggle_fullscreen())
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::ToggleFullscreen);
@@ -3198,10 +3231,12 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_window_title(&self, title: String) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window(move |view, window, cx| {
-            view.window_title = title;
-            cx.notify();
-            window.refresh();
+        return self.unless_closed(|| {
+            self.update_window(move |view, window, cx| {
+                view.window_title = title;
+                cx.notify();
+                window.refresh();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3418,12 +3453,14 @@ impl GpuixRenderer {
     pub fn blur_element(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return self.update_window_without_view(move |window, cx| {
-            crate::focus::change_focus(window, cx, move |view, window, cx| {
-                view.blur_element(id, window, cx)
-            })
-        })?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |window, cx| {
+                crate::focus::change_focus(window, cx, move |view, window, cx| {
+                    view.blur_element(id, window, cx)
+                })
+            })?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::BlurElement(id));
@@ -3477,8 +3514,10 @@ impl GpuixRenderer {
     #[napi]
     pub fn focus_next(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window_without_view(|window, cx| crate::focus::step_focus(window, cx, false))?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(|window, cx| crate::focus::step_focus(window, cx, false))?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusNext);
@@ -3496,8 +3535,10 @@ impl GpuixRenderer {
     #[napi]
     pub fn focus_previous(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window_without_view(|window, cx| crate::focus::step_focus(window, cx, true))?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(|window, cx| crate::focus::step_focus(window, cx, true))?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusPrevious);
@@ -3541,13 +3582,15 @@ impl GpuixRenderer {
     pub fn focus_next_within(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return self.update_window_without_view(move |window, cx| {
-            crate::focus::change_focus(window, cx, move |view, window, cx| {
-                view.focus_next_within(id, window, cx);
-                cx.notify();
-            })
-        })?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |window, cx| {
+                crate::focus::change_focus(window, cx, move |view, window, cx| {
+                    view.focus_next_within(id, window, cx);
+                    cx.notify();
+                })
+            })?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusNextWithin(id));
@@ -3566,13 +3609,15 @@ impl GpuixRenderer {
     pub fn focus_previous_within(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return self.update_window_without_view(move |window, cx| {
-            crate::focus::change_focus(window, cx, move |view, window, cx| {
-                view.focus_previous_within(id, window, cx);
-                cx.notify();
-            })
-        })?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |window, cx| {
+                crate::focus::change_focus(window, cx, move |view, window, cx| {
+                    view.focus_previous_within(id, window, cx);
+                    cx.notify();
+                })
+            })?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusPreviousWithin(id));
@@ -3591,10 +3636,12 @@ impl GpuixRenderer {
     pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {
         let event_id = to_element_id(event_id)?;
         #[cfg(target_os = "macos")]
-        return self.update_window(move |view, window, cx| {
-            view.routing.set_window_keys(key_down, key_up, event_id);
-            cx.notify();
-            window.refresh();
+        return self.unless_closed(|| {
+            self.update_window(move |view, window, cx| {
+                view.routing.set_window_keys(key_down, key_up, event_id);
+                cx.notify();
+                window.refresh();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3616,7 +3663,9 @@ impl GpuixRenderer {
     #[napi]
     pub fn blur(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window_without_view(move |window, _cx| window.blur());
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |window, _cx| window.blur())
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::Blur);
@@ -3635,10 +3684,12 @@ impl GpuixRenderer {
     pub fn set_window_selection_change(&self, enabled: bool, event_id: f64) -> Result<()> {
         let event_id = to_element_id(event_id)?;
         #[cfg(target_os = "macos")]
-        return self.update_window(move |view, window, cx| {
-            view.set_selection_change_listener(enabled, event_id);
-            cx.notify();
-            window.refresh();
+        return self.unless_closed(|| {
+            self.update_window(move |view, window, cx| {
+                view.set_selection_change_listener(enabled, event_id);
+                cx.notify();
+                window.refresh();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3658,8 +3709,10 @@ impl GpuixRenderer {
     pub fn set_window_appearance_change(&self, enabled: bool, event_id: f64) -> Result<()> {
         let event_id = to_element_id(event_id)?;
         #[cfg(target_os = "macos")]
-        return self.update_window(move |view, _window, _cx| {
-            view.set_appearance_change_listener(enabled, event_id);
+        return self.unless_closed(|| {
+            self.update_window(move |view, _window, _cx| {
+                view.set_appearance_change_listener(enabled, event_id);
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3681,8 +3734,10 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_window_media_change(&self, enabled: bool) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self.update_window(move |view, _window, _cx| {
-            view.set_media_change_listener(enabled);
+        return self.unless_closed(|| {
+            self.update_window(move |view, _window, _cx| {
+                view.set_media_change_listener(enabled);
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3713,7 +3768,9 @@ impl GpuixRenderer {
     pub fn set_appearance(&self, appearance: String) -> Result<()> {
         let appearance = parse_window_appearance(&appearance).map_err(Error::from_reason)?;
         #[cfg(target_os = "macos")]
-        return self.update_window_without_view(move |_window, cx| cx.set_window_appearance(appearance));
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |_window, cx| cx.set_window_appearance(appearance))
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::SetAppearance(appearance));

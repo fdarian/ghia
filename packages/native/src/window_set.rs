@@ -38,13 +38,33 @@ fn open_count() -> usize {
     OPEN.with(|open| open.borrow().len())
 }
 
-/// Records that the platform quit, which `tick()` saw.
+/// Records that the platform quit, which `tick()` saw. GPUI's shutdown drops every window without telling
+/// `on_window_closed`, so the windows still listed here are the ones it took.
 pub(crate) fn note_app_ended() {
     ENDED.set(true);
+    let open: Vec<WindowId> = OPEN.with(|open| open.borrow().iter().copied().collect());
+    for window in open {
+        closed(window);
+    }
 }
 
 pub(crate) fn app_has_ended() -> bool {
     ENDED.get()
+}
+
+/// GPUI answers an update of a window it no longer has with this message (`context("window not found")`).
+#[cfg(target_os = "macos")]
+const WINDOW_NOT_FOUND: &str = "window not found";
+
+/// The error of an update of `window`. The window being gone is learned here when nothing else told
+/// this module (a quit that dropped it, a close in the middle of a call), so `isWindowClosed()` reads
+/// it from then on.
+#[cfg(target_os = "macos")]
+fn update_error(window: WindowId, message: String) -> Error {
+    if message == WINDOW_NOT_FOUND {
+        closed(window);
+    }
+    Error::from_reason(message)
 }
 
 /// `update_window_in` for a change that returns nothing. When it is called while the
@@ -57,7 +77,7 @@ pub(crate) fn update_window_or_defer_in(
     crate::events::sync_dispatch::route(
         update,
         |update| crate::events::sync_dispatch::update_view_of_or_defer(handle, update),
-        Error::from_reason,
+        |message| update_error(handle.window_id(), message),
         |update| update_window_outside(handle, update),
     )
 }
@@ -73,7 +93,7 @@ pub(crate) fn update_window_in<R>(
         crate::events::sync_dispatch::route(
             update,
             |update| crate::events::sync_dispatch::update_view_of(handle, update),
-            Error::from_reason,
+            |message| update_error(handle.window_id(), message),
             |update| update_window_outside(handle, update),
         )
     })
@@ -92,7 +112,7 @@ fn update_window_outside<R>(
         app.update(|cx| {
             handle
                 .update(cx, update)
-                .map_err(|error| Error::from_reason(error.to_string()))
+                .map_err(|error| update_error(handle.window_id(), error.to_string()))
         })
     })
 }
@@ -108,7 +128,7 @@ pub(crate) fn update_window_without_view_in<R>(
         crate::events::sync_dispatch::route(
             update,
             |update| crate::events::sync_dispatch::update_window_of(handle, update),
-            Error::from_reason,
+            |message| update_error(handle.window_id(), message),
             |update| {
                 crate::renderer::GPUI_APP.with(|app| {
                     let app = app.borrow();
@@ -118,7 +138,7 @@ pub(crate) fn update_window_without_view_in<R>(
                     app.update(|cx| {
                         gpui::AnyWindowHandle::from(handle)
                             .update(cx, move |_view, window, cx| update(window, cx))
-                            .map_err(|error| Error::from_reason(error.to_string()))
+                            .map_err(|error| update_error(handle.window_id(), error.to_string()))
                     })
                 })
             },
@@ -203,6 +223,18 @@ mod tests {
         closed(second);
         assert_eq!(open_count(), 1);
         closed(first);
+        assert_eq!(open_count(), 0);
+    }
+
+    /// GPUI's shutdown drops the windows without `on_window_closed`, so the quit is what closes them here.
+    #[test]
+    fn the_app_ending_closes_every_window_it_took() {
+        let (first, second) = (WindowId::from(111), WindowId::from(112));
+        opened(first);
+        opened(second);
+        assert!(!app_has_ended());
+        note_app_ended();
+        assert!(app_has_ended() && !is_open(first) && !is_open(second));
         assert_eq!(open_count(), 0);
     }
 
