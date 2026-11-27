@@ -53,7 +53,8 @@ impl FaceState {
     }
 
     pub(crate) fn has(&self, name: &str) -> bool {
-        self.table.contains_key(&name.to_lowercase())
+        // Asked for every element's font-family: with no `@font-face` rule it must not allocate the lowercase name.
+        !self.table.is_empty() && self.table.contains_key(&name.to_lowercase())
     }
 
     /// The family GPUI loads for the face a rule named `name` has, or `None` when no rule does. A
