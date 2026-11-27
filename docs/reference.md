@@ -7114,11 +7114,11 @@ A `<button>` paints Chrome's default button look: a `2px` outset border, `#efefe
 
 ### The `<a>` tag
 
-An `<a>` with an `href` has the `link` role and is a tab stop; Enter clicks it once per press (a held key does not repeat the click), and with Shift, Ctrl, Alt or Cmd held the click carries them in `event.modifiers`, as in Chrome. An `<a>` without one is neither. It is not underlined or blue; style the link yourself.
+An `<a>` with an `href` has the `link` role and is a tab stop; Enter clicks it once per press (a held key does not repeat the click), and with Shift, Ctrl, Alt or Cmd held the click carries them in `event.modifiers`, as in Chrome. An `<a>` without one is neither. An `<a>` with an `href` is styled as Chrome's `a:-webkit-any-link` does: `color` `#0000ee` (`#9e9eff` where the element's `color-scheme` is dark), `text-decoration-line: underline` and `cursor: pointer`, and the color is `#ff0000` (`#ff9e9e` in a dark scheme) while the link is pressed (`:active`). It is the user agent style, so a rule or an own style of yours is over it, and it goes when the `href` does. No link is visited.
 
 An `<a>` and an `<area>` have the members of the HTML standard's hyperlink utilities. `href` reads the attribute resolved against `location.href` (`""` without one, and the text as written when it is not a URL); assigning it sets the attribute. `origin` (read only), `protocol`, `username`, `password`, `host`, `hostname`, `port`, `pathname`, `search` and `hash` read that URL's parts and, when assigned, change the part and write the resolved URL back to `href` (nothing happens without an `href`). `target`, `download`, `rel`, `hreflang` (`<a>` only), `type` (`<a>` only) and `referrerPolicy` (limited to its keywords) reflect their attributes, `relList` is a live `DOMTokenList` of `rel` (`supports()` knows `noopener`, `noreferrer` and `opener`), and `text` is the `textContent` of an `<a>`. A router that reads `a.href` and compares its origin to `location.origin`, as `@solidjs/router` does on a click, works on them unchanged.
 
-A click that no listener canceled follows the link, once the dispatch is over (a router that handles the click calls `preventDefault()`, so it runs nothing): a URL that differs from the current one in its fragment only is a [fragment navigation](#location-history-and-storage), which adds a history entry and fires `hashchange`; any other URL is not followed, because Ghia has one document. A `console.warn` names it, once per URL, and the click is otherwise a no-op. An `<a download>`, a link without `href` and a click on a `<button>` inside a link do nothing; `target` and the modifier keys change nothing. The click may be a pointer, Enter on the focused link, `a.click()` or a dispatched `MouseEvent`. An inline `<a>` has no accessibility node (no inline box has one), and only an `<a>` with `display: block` or `inline-block` is a `link` in the accessibility tree.
+A click that no listener canceled follows the link, once the dispatch is over (a router that handles the click calls `preventDefault()`, so it runs nothing): a URL that differs from the current one in its fragment only is a [fragment navigation](#location-history-and-storage), which adds a history entry and fires `hashchange`; a link to **another origin** (`http:` and `https:` with an origin other than `location.origin`, and `mailto:` and `tel:`) is opened by the system's default handler (`App::open_url`: the browser, the mail client, the phone handler), once for each click. Any other URL is not followed, because Ghia has one document: a same-origin path or query (a router handles it: `@solidjs/router` calls `preventDefault()` and navigates by `history.pushState`) and a scheme such as `file:` or an app's own, which a document may not hand to the system, get a `console.warn` naming it once per URL, and a `javascript:` URL does nothing at all. The test renderer opens nothing: `renderer.openedUrls()` lists what was asked for, in order. An `<a download>`, a link without `href` and a click on a `<button>` inside a link do nothing; `target` and the modifier keys change nothing. The click may be a pointer, Enter on the focused link, `a.click()` or a dispatched `MouseEvent`. An inline `<a>` has no accessibility node (no inline box has one), and only an `<a>` with `display: block` or `inline-block` is a `link` in the accessibility tree.
 
 ### Lists
 
@@ -7130,9 +7130,8 @@ An `outside` marker takes no part in layout: it ends where the item's border box
 
 ### HTML tag deviations
 
-What differs from Chrome is listed once in [deviations.md](./fork/deviations.md#html-tags) and not repeated here. A tag is the user agent style of one tag, and a rule that needs the element's place or its attributes cannot be one, so:
+What differs from Chrome is listed once in [deviations.md](./fork/deviations.md#html-tags) and not repeated here. A tag is the user agent style of one tag, and a rule that needs the element's place or its attributes (other than the `href` of an `<a>`, the `type` of an `<input>` and `hidden`) cannot be one, so:
 
-- `a` has no link colour or underline (`a:any-link` needs the `href` attribute). Write the style you want.
 - `dialog` is always `display: none`: `open` is not forwarded. Set `display: "block"` yourself to show one.
 - `q` has no quotes, `legend` does not sit on the fieldset's border, `details` has no open state, `abbr[title]` has no dotted underline and a nested `h1` is not smaller.
 - `font-size` has no keywords (`larger`, `xx-large`), so Chrome's monospace size below holds for lengths, `em` and `%` only.
@@ -10464,6 +10463,30 @@ Native parses the sheet, so JS keeps only the text of each rule to answer `cssRu
 
 An observable array of `CSSStyleSheet`: assigning the property, assigning an index or `length`, and `push`, `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, `fill` and `copyWithin` all take effect, and a value that is not a `CSSStyleSheet` throws a `TypeError` before anything changes. Only the last index can be deleted, so the array has no holes. A sheet listed twice counts once, at its last place. It is one array for the document, which spans every window: each window gets the same list, and a window opened later gets it too. A sheet that leaves the list is gone from native, and comes back with its current text when it is adopted again.
 
+### `@font-face`
+
+A sheet registers a face with the window's text system, so `fontFamily` resolves to it as the [`fonts` window option](#custom-fonts) makes a file resolve, under the name the rule gives instead of the one the file declares:
+
+```css
+@font-face {
+  font-family: "Brand";
+  src: url("data:font/ttf;base64,...") format("truetype"), local("Helvetica Neue");
+  font-weight: 400;
+  font-style: normal;
+}
+```
+
+The rule stands where `@keyframes` and `@property` do (the top of a sheet, `@layer`, `@media` and `@supports`) and holds under their conditions: a face inside a `@media` query is registered while the query holds. It takes `font-family` (a name or a string, not a generic family), `src`, `font-weight`, `font-style`, `font-stretch` (`font-width`), `unicode-range` and `font-display`. A rule with no valid `font-family` or no valid `src` is dropped and logged with the reason; a descriptor that is not valid keeps its initial value. Of two rules with the same descriptors the later one wins, as for `@keyframes`.
+
+`src` is a list tried in order; the first source that loads is the face. A source is:
+
+- `url(...)`, read as an [`<img>` `src`](#img) is (and a `url()` in a `background`): an absolute path, a path relative to the process's working directory (there is no document base URL), a `file://` URL or a `data:` URL. A `format()` hint other than `truetype`, `opentype`, `collection`, `truetype-variations` and `opentype-variations` skips the source without reading it. The file has to be TrueType or OpenType (`.ttf`, `.otf`, `.ttc`), with the family, full and PostScript names GPUI needs, as `registerFont()` asks. **WOFF and WOFF2 are not read** (list a `.ttf` source after them), and `http:` and `https:` addresses are not fetched; both are logged.
+- `local(name)`: the installed font family of that name.
+
+A Vite app gets this from a CSS import: `import css from './app.css?inline'` gives the text of the file with each `url()` rewritten by Vite, and `ghia()` makes every font in one (`.ttf`, `.otf`, `.ttc`) a `data:` URL, in `ghia dev` and in `ghia build`, whatever its size (a build would otherwise emit `/assets/name-hash.ttf`, and the dev server answers `/src/name.ttf`, and the document has no base URL that either resolves against). Put the text in a `<style>` element, or a constructed sheet. A bare `import './app.css'` adds nothing in the UI process. Set `build.assetsInlineLimit` on the `ghia` environment to take over the inlining of the build.
+
+Faces are loaded synchronously in the frame that first builds with the rule, and text that names the family is laid out again when the face is there, also when the rule arrives or goes after the text. `font-weight`, `font-style` and `font-stretch` do not select among faces yourself: GPUI matches the weight and style of the files registered under one family name, so give the faces of one family files whose own family names agree. What differs from CSS is in [deviations](./fork/deviations.md#stylesheets).
+
 ### What matches
 
 | | Supported |
@@ -10476,7 +10499,7 @@ An observable array of `CSSStyleSheet`: assigning the property, assigning an ind
 | At-rules | `@layer name { }`, `@layer a, b;`, anonymous `@layer { }`, nested layers (`a.b`); `@media` and `@supports` (below), at the top of a sheet, in an `@layer`, in each other and inside a style rule; `@keyframes` and `@property` (below), at the top of a sheet and in an `@layer`, `@media` or `@supports` |
 | Declarations | `!important`; `var()`; every property of the style prop, with the kebab-case names CSS writes (`background-color`, `-webkit-user-select`) |
 
-Anything else makes the selector invalid and drops its rule (a list is all or nothing, except inside `:is()` and `:where()`): `:nth-child(An+B of S)` and the other pseudo-classes, and the uses of the state pseudo-classes listed below. At-rules that are skipped with their block: `@container`, `@font-face`, `@import`, `@namespace`, and any other at-rule inside a style rule (`@keyframes` and `@property` too, which stand at the top of a sheet and in `@layer`, `@media` and `@supports`). A declaration the style parser rejects (a value Ghia cannot represent, or one CSS would also ignore) is dropped alone and cannot take back an earlier rule's value; the exception is a property's initial value written as a keyword, which acts as `initial` (`z-index: auto`). Each skipped rule is logged once, and the values that are dropped where CSS would keep them are listed in [deviations](./fork/deviations.md#stylesheets). The full list of differences is in [deviations](./fork/deviations.md#stylesheets).
+Anything else makes the selector invalid and drops its rule (a list is all or nothing, except inside `:is()` and `:where()`): `:nth-child(An+B of S)` and the other pseudo-classes, and the uses of the state pseudo-classes listed below. At-rules that are skipped with their block: `@container`, `@import`, `@namespace`, and any other at-rule inside a style rule (`@keyframes`, `@property` and `@font-face` too, which stand at the top of a sheet and in `@layer`, `@media` and `@supports`). A declaration the style parser rejects (a value Ghia cannot represent, or one CSS would also ignore) is dropped alone and cannot take back an earlier rule's value; the exception is a property's initial value written as a keyword, which acts as `initial` (`z-index: auto`). Each skipped rule is logged once, and the values that are dropped where CSS would keep them are listed in [deviations](./fork/deviations.md#stylesheets). The full list of differences is in [deviations](./fork/deviations.md#stylesheets).
 
 **`content`.** Only a rule for `::before` or `::after` reads it (on an element it has no effect, and `getComputedStyle(element).content` is `normal`): `normal` and `none` make no box, a list of strings and `attr(name)` (the attribute of the element, `""` when it has none, and it follows the attribute) make one, drawn as its text. `counter()`, `counters()`, `open-quote` and the other quotes, `url()` and images are valid, are not drawn and are logged once; the items around them are kept. A `content` that only a state block sets makes no box. `content: "x" / "alt"` keeps `"x"`. An invalid value is dropped.
 
