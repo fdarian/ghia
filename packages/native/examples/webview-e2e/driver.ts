@@ -536,7 +536,7 @@ async function inputRouting() {
 async function focus() {
   const group = "focus"
   const focusedId = () => (ownRenderer()?.getFocusedElementId?.() ?? null) as number | null
-  const idOf = (name: string) => element(name).id
+  const idOf = (name: string) => element(name).nativeId
   const responder = () => helper.firstResponder()
   const pageHasKeyboard = (name: string) => {
     const [x, y] = inPage(name, 150, 60)
@@ -607,7 +607,7 @@ async function focus() {
 async function tabbing() {
   const group = "tab"
   const focusedId = () => (ownRenderer()?.getFocusedElementId?.() ?? null) as number | null
-  const idOf = (name: string) => element(name).id
+  const idOf = (name: string) => element(name).nativeId
   const pageHasKeyboard = (name: string) => {
     const [x, y] = inPage(name, 150, 60)
     return helper.pageHasKeyboard(x, y) === 1
