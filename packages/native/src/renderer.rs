@@ -6458,10 +6458,10 @@ pub(crate) struct GpuixView {
     bounds_subscription: Option<gpui::Subscription>,
     media_viewport: gpui::Size<gpui::Pixels>,
     /// The OS preferences the stylesheets' media queries read. The test renderer sets its own.
-    media_features: crate::media::MediaFeatures,
+    pub(crate) media_features: crate::media::MediaFeatures,
     /// Keeps `media_features` current, whether or not JS listens for `mediaChange`.
     #[cfg(target_os = "macos")]
-    sheet_media_observer: Option<crate::media::MediaChangeObserver>,
+    pub(crate) sheet_media_observer: Option<crate::media::MediaChangeObserver>,
     /// Stands in for the platform's pointer lock in the test renderer, whose
     /// offscreen window is never key and so can never take a real one.
     simulated_platform: Option<crate::events::pointer_lock::SimulatedPlatform>,
@@ -7938,55 +7938,6 @@ impl GpuixView {
                 crate::media::emit_media_change(&view.event_callback, "resize");
             }
         }));
-    }
-
-    #[cfg(feature = "test-support")]
-    pub(crate) fn set_media_features(&mut self, features: crate::media::MediaFeatures) {
-        self.media_features = features;
-    }
-
-    fn sheet_media_environment(&self, window: &gpui::Window) -> crate::retained_tree::Dirty {
-        let environment = crate::media::environment(
-            window.viewport_size(),
-            window.scale_factor(),
-            window.appearance(),
-            self.media_features,
-        );
-        crate::media::sync_sheets(&self.tree, environment)
-    }
-
-    /// Gives the stylesheets the window's size, appearance and preferences, which their `@media`
-    /// reads, whether or not JS listens for `mediaChange`. The sheets load again and the window
-    /// draws only when a query flips.
-    pub(crate) fn sync_sheet_media(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
-        let dirty = self.sheet_media_environment(window);
-        let view = cx.entity_id();
-        invalidate_after_mutation(window, cx, view, dirty);
-    }
-
-    /// Follows the OS accessibility options (reduce motion, increase contrast) for the
-    /// stylesheets' `@media`.
-    pub(crate) fn observe_media_features(&mut self, window: &gpui::Window, cx: &mut gpui::Context<Self>) {
-        #[cfg(target_os = "macos")]
-        {
-            let handle = window.window_handle();
-            let app = cx.to_async();
-            self.sheet_media_observer = Some(crate::media::MediaChangeObserver::new(move || {
-                let result = app.clone().update_window(handle, |_, window, cx| {
-                    if let Some(view) = window.root::<GpuixView>().flatten() {
-                        view.update(cx, |view, cx| {
-                            view.media_features = crate::media::read_system_features();
-                            view.sync_sheet_media(window, cx);
-                        });
-                    }
-                });
-                if let Err(error) = result {
-                    eprintln!("gpuix: could not update the stylesheets after the accessibility options changed: {error}");
-                }
-            }));
-        }
-        #[cfg(not(target_os = "macos"))]
-        let _ = (window, cx);
     }
 
     /// Rebuilds the window when the OS "Show scroll bars" setting changes, since the style

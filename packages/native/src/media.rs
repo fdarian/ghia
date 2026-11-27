@@ -14,7 +14,7 @@ use napi_derive::napi;
 
 #[cfg(feature = "test-support")]
 use crate::element_tree::EventPayload;
-use crate::renderer::{emit_event_full, EventCallback};
+use crate::renderer::{emit_event_full, invalidate_after_mutation, EventCallback, GpuixView};
 
 /// Event type of the change notification. JS re-reads everything on it, so the
 /// payload `value` only says what triggered it, for debugging.
@@ -62,6 +62,60 @@ pub(crate) fn sync_sheets(
         tree.take_dirty_restyled()
     } else {
         crate::retained_tree::Dirty::Clean
+    }
+}
+
+/// The window's side of the sheets' `@media`.
+impl GpuixView {
+    #[cfg(feature = "test-support")]
+    pub(crate) fn set_media_features(&mut self, features: crate::media::MediaFeatures) {
+        self.media_features = features;
+    }
+
+    pub(crate) fn sheet_media_environment(&self, window: &gpui::Window) -> crate::retained_tree::Dirty {
+        let environment = crate::media::environment(
+            window.viewport_size(),
+            window.scale_factor(),
+            window.appearance(),
+            self.media_features,
+        );
+        crate::media::sync_sheets(&self.tree, environment)
+    }
+
+    /// Gives the stylesheets the window's size, appearance and preferences, which their `@media`
+    /// reads, whether or not JS listens for `mediaChange`. The sheets load again and the window
+    /// draws only when a query flips.
+    pub(crate) fn sync_sheet_media(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
+        let dirty = self.sheet_media_environment(window);
+        let view = cx.entity_id();
+        invalidate_after_mutation(window, cx, view, dirty);
+    }
+
+    /// Follows the OS accessibility options (reduce motion, increase contrast) for the
+    /// stylesheets' `@media`.
+    pub(crate) fn observe_media_features(&mut self, window: &gpui::Window, cx: &mut gpui::Context<Self>) {
+        #[cfg(target_os = "macos")]
+        {
+            use gpui::AppContext as _;
+
+            let handle = window.window_handle();
+            let app = cx.to_async();
+            self.sheet_media_observer = Some(crate::media::MediaChangeObserver::new(move || {
+                let result = app.clone().update_window(handle, |_, window, cx| {
+                    if let Some(view) = window.root::<GpuixView>().flatten() {
+                        view.update(cx, |view, cx| {
+                            view.media_features = crate::media::read_system_features();
+                            view.sync_sheet_media(window, cx);
+                        });
+                    }
+                });
+                if let Err(error) = result {
+                    log::warn!("could not update the stylesheets after the accessibility options changed: {error}");
+                }
+            }));
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (window, cx);
     }
 }
 
