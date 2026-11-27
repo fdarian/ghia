@@ -428,6 +428,28 @@ describe("startFrameLoop with several windows on one App", () => {
     secondLoop.stop()
   })
 
+  it("keeps the last window in the loop when a closing window's handler closes it, so the queued quit ends the app", async () => {
+    let running = true
+    let terminated = 0
+    const onTerminated = () => (terminated += 1)
+    const first = window(() => running)
+    const second = window(() => running)
+    // What a `pagehide` handler of the first window does: close the other window while the first one leaves.
+    startFrameLoop(first.renderer, { onTerminated, onWindowClosed: () => (second.state.closed = true) })
+    startFrameLoop(second.renderer, { onTerminated })
+    first.state.closed = true
+    first.renderer.wake?.()
+    await nextImmediate()
+    expect(terminated).toBe(0)
+    expect(second.renderer.wake).not.toBeNull()
+    // The quit the last close queued: the next tick reports it.
+    running = false
+    second.renderer.wake?.()
+    await nextImmediate()
+    expect(terminated).toBe(1)
+    expect(second.state.handlerCleared).toBe(true)
+  })
+
   it("ends once for the whole app, running onTerminated once, and releases every window", () => {
     let terminated = 0
     const onTerminated = () => (terminated += 1)

@@ -180,13 +180,19 @@ async function exerciseWindowOpen(): Promise<WindowOpenReport> {
 }
 const windowOpen = name === "window-open" ? await exerciseWindowOpen() : null
 
+// "unload-closes-last": the first window closes and its `pagehide` handler closes the second, so the loop sees both
+// closed in one tick and the app ends with onTerminated, which only the queued quit's tick can run.
+if (name === "unload-closes-last") {
+  window.addEventListener("pagehide", () => beta.closeWindow())
+}
+
 const report: Report = {
   windowsAtStart,
   crossWindowCall,
   alphaHasOwnTree,
   betaHasOwnTree,
   boundsDiffer,
-  closed: name === "quit" || name === "window-open" ? null : closedId,
+  closed: name === "quit" || name === "window-open" || name === "unload-closes-last" ? null : closedId,
   windowsAfterClose: -1,
   closedRendererSawIt: false,
   survivorStillOpen: false,
@@ -197,7 +203,10 @@ const report: Report = {
   windowOpen,
 }
 
-if (name !== "quit" && name !== "window-open") {
+if (name === "unload-closes-last") {
+  alpha.closeWindow()
+  report.closedRendererSawIt = await until(() => alpha.isWindowClosed() && beta.isWindowClosed() && windowClosedCalls.alpha === 1, 3000)
+} else if (name !== "quit" && name !== "window-open") {
   if (name !== "close-button") closing.closeWindow()
   report.closedRendererSawIt = await until(() => closing.isWindowClosed() && windowClosedCalls[closedId] === 1, 3000)
   report.windowsAfterClose = visibleWindows()
@@ -217,7 +226,7 @@ leave(REPORT_FILE, report)
 await sleep(100)
 if (name === "close-all") {
   survivor.closeWindow()
-} else {
+} else if (name !== "unload-closes-last") {
   survivor.simulateKeystrokes("Meta+q")
 }
 // Nothing else to do: the frame loop ends the process through `onTerminated`.

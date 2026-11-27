@@ -277,7 +277,9 @@ hook is the platform's, one per process. Both are shared:
 - **A window leaves.** After a tick with more than one renderer in the loop, those whose `isWindowClosed()` is true leave: the
   sync handler is released, the renderer's teardown runs (`detachRenderer` and the rest of what `tick()` returning false ran) and
   its `onWindowClosed` is called, while the loop goes on for the others. With one renderer the loop asks nothing: the last window
-  closing is the quit.
+  closing is the quit, and the last member never leaves this way even when its window is closed, which a `pagehide` handler of
+  a window that leaves can do to the rest: the quit is queued, only the next `tick()` sees it, and an emptied loop would never run
+  `onTerminated` (or flush storage, or let a Worker go).
 - **The end.** `tick()` returns false once the platform quit, and the loop then releases every renderer, flushes storage and runs
   the `onTerminated` of each renderer that was in the loop once (the same function given for several renderers runs once), then
   stops. A renderer that starts a loop after the end starts a new one.
@@ -745,9 +747,11 @@ drew.
   that `onTerminated` ran and the process ended; the zed side is `gpui_macos` `tests/main_run_loop_wakeups.rs`.
 - `frame-loop.test.ts` "several windows on one App" (7) runs the shared loop against fake renderers: one pump per iteration,
   the first renderer keeps the wake, a joining renderer is ticked, a closed window leaves and the wake moves, the end runs
-  `onTerminated` once, and stopping one handle leaves the loop to the others. The `shared_wake` unit test checks that a second
+  `onTerminated` once, a window whose `onWindowClosed` closes the last other one leaves that one in the loop so the queued quit
+  ends the app, and stopping one handle leaves the loop to the others. The `shared_wake` unit test checks that a second
   entry does not replace the first. The multi-window e2e ([testing.md](testing.md#the-multi-window-e2e)) runs two real windows
-  through close, close of the wake's owner, the close button, the last close and a quit.
+  through close, close of the wake's owner, the close button, the last close, a `pagehide` handler that closes the other window
+  (`unload-closes-last`) and a quit.
 - react `events.test.tsx` "wakes JS once per mouse move, not again when the frame boundary comes" opens a visible window
   with `focus: false`, posts 240 mouse moves from NSEventThread at random points of 120 Hz periods and allows 1.15 wakes
   per move. Without the flush after `sendEvent:` it saw 352 and 339 wakes for 240 moves (1.47 and 1.41).

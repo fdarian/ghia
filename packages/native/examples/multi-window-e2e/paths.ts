@@ -1,7 +1,7 @@
 export { HELPER_PATH, OUT } from "../quit-e2e/paths"
 
 /** What each case does with the two windows, after both are up and checked. */
-export const CASES = ["close-second", "close-first", "close-button", "close-all", "quit", "window-open"] as const
+export const CASES = ["close-second", "close-first", "close-button", "close-all", "quit", "window-open", "unload-closes-last"] as const
 export type CaseName = (typeof CASES)[number]
 
 /** Files the app writes into its case folder, each a JSON object with a wall-clock `time` in ms. */

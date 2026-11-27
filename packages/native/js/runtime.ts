@@ -333,10 +333,13 @@ class SharedFrameLoop {
   }
 
   /** The app goes on while another window is open, so a renderer whose window closed leaves the
-   *  loop; the platform's own quit is the last window's, and `tick()` reports that. */
+   *  loop; the platform's own quit is the last window's, and `tick()` reports that. The last member
+   *  never leaves here, even when its window is closed: the quit is queued and only the next
+   *  `tick()` sees it, so an empty loop would never run `onTerminated`. Checked for each member,
+   *  since a `pagehide` handler of one that leaves can close the window of the rest. */
   private releaseClosedWindows(): void {
-    if (this.members.size < 2) return
     for (const member of [...this.members]) {
+      if (this.members.size < 2) return
       if (!member.renderer.isWindowClosed?.()) continue
       this.members.delete(member)
       this.moveWake(member)

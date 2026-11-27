@@ -91,7 +91,9 @@ async function runCase(name: CaseName): Promise<Result> {
         if (!opened.openerStillShowsUpdate) problems.push("the first window does not show a change made after the opened window closed")
       }
     }
-    if (name !== "quit" && name !== "window-open") {
+    if (name === "unload-closes-last") {
+      if (!report.closedRendererSawIt) problems.push("both windows were not closed, or the first one's onWindowClosed did not run once (the pagehide handler closing the second)")
+    } else if (name !== "quit" && name !== "window-open") {
       if (report.windowsAfterClose !== 1) problems.push(`${report.windowsAfterClose} windows after one was closed, not 1`)
       if (!report.closedRendererSawIt) problems.push("the renderer of the closed window did not hear of it (isWindowClosed, onWindowClosed once)")
       if (!report.survivorStillOpen) problems.push("closing one window closed the other")

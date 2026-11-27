@@ -7,7 +7,8 @@
 # build` in packages/native) and the React package built (`bun run build` in packages/react).
 #
 # `E2E_ONLY=close-second,close-first` runs only those cases: close-second, close-first, close-button, close-all, quit,
-# window-open (the first window opens a third with window.open, checks it and closes it).
+# window-open (the first window opens a third with window.open, checks it and closes it), unload-closes-last (the first
+# window's pagehide handler closes the second: both close in one tick, and the app must still end with onTerminated).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 sh "$here/../quit-e2e/build-helper.sh"
