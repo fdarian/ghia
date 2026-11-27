@@ -33,6 +33,7 @@ mod frame_steps;
 mod focus_emulation;
 mod forms;
 mod html;
+mod invisible_windows;
 mod layout;
 mod list_resize;
 mod list_sizes;
@@ -44,7 +45,6 @@ mod native_event;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod open_url;
 mod platform;
-mod invisible_windows;
 mod observers;
 pub mod perf_counters;
 mod renderer;

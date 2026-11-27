@@ -738,8 +738,10 @@ export function startTestRendererScope(): () => void {
  *     bindTestRendererScope({ beforeEach, afterEach })
  *
  * It also sets `GHIA_TEST_INVISIBLE_WINDOWS=1` (unless the environment sets it), which makes
- * every live window a test opens, here or in a process it spawns, fully transparent and deaf to the
- * mouse, so it never shows on the screen of the person running the suite. `=0` turns it off to look.
+ * every window gpui opens in this process or one it spawns fully transparent, deaf to the mouse
+ * and, where its kind's level is lower, at the floating level, so it never shows on the screen of
+ * the person running the suite. A window opened with `focus: true` still becomes key. `=0` turns
+ * it off to look.
  */
 export function bindTestRendererScope(hooks: {
   beforeEach: (hook: () => void) => void

@@ -73,8 +73,8 @@ each entry or applies it again.
 
 ### A platform can open its windows invisible (zed `gpui_macos`: `MacPlatform::invisible_windows`, `MacWindow::open`; branch `claude/offscreen-live-tests`)
 
-- **Decision.** A test-support change for what Ghia needs (a suite that opens live windows must not show them), opt-in per platform exactly as `keep_window_frames` is; a platform that does not call it is as before. Not something an upstream GPUI app asks for.
-- **What it changes.** A window opened after it is `alphaValue` 0 and ignores the mouse before it is ordered in, and is at `NSFloatingWindowLevel` after its kind's level is set. Ghia calls it only from the `test-support` build when `GHIA_TEST_INVISIBLE_WINDOWS=1`.
+- **Decision.** A test-support change for what Ghia needs (a suite that opens live windows must not show them), opt-in per platform exactly as `keep_window_frames` is; a platform that does not call it is as before. Owner OK'd 2026-11-27 ("open test windows off-screen so they don't flash"), fork-only. Not something an upstream GPUI app asks for.
+- **What it changes.** A window gpui opens after it is `alphaValue` 0 and ignores the mouse before it is ordered in, and is raised to `NSFloatingWindowLevel` after its kind's level is set when that level is lower (never lowered; sheets left alone). AppKit's own panels, alerts and menus are not covered. Ghia calls it when `GHIA_TEST_INVISIBLE_WINDOWS=1` and the addon has the `test-support` feature, which is a default feature and on in the published addon, so the environment variable is the only gate; only `bindTestRendererScope` sets it. Zed `88b718fd16` (on `6b6e5700ad`).
 - **Reasoning.** A display link starts only for a visible window on a screen, so a window on no screen cannot be the answer, and AppKit counts a transparent one as visible. The floating level keeps another app's window from occluding it. See [testing.md](testing.md#live-windows-in-tests-stay-invisible).
 
 ### A node's layout input is normalized before the cache and the computation (zed `third_party/taffy`: `tree/input_norm.rs`, `compute_child_layout` in `tree/taffy_tree.rs`; zed `de983ebaff`, `c72b32891b`)
