@@ -101,6 +101,8 @@ describeNative("the caret of a focused input under a transform", { timeout: TIME
       const root = createTestRoot(WINDOW)
       const renderer = root.renderer
       renderer.clockPause()
+      // Exercises the fallback: a caret the window cannot blink (composed window, effect group) is painted and ticked by the page.
+      renderer.setPaintedCarets(true)
       root.render(<div style={{ position: "relative", width: WINDOW.width, height: WINDOW.height }}>{item.page}</div>)
       await settle(renderer)
       try {

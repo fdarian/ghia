@@ -200,7 +200,9 @@ impl CaretPaint {
     /// Paints the caret `locate` found, above the glyphs. The window blinks it; when it cannot, this
     /// paints it in the phase it is in and the caret ticks until it is painted again.
     pub fn paint(&self, rect: Bounds<Pixels>, window: &mut Window, cx: &App) {
-        if window.paint_caret(rect, self.state.color, self.state.anchor()) {
+        // A patch paints the paragraph alone, outside the effect group around it, so `paint_caret` does not
+        // always know that the window cannot blink the caret: what it presented says.
+        if window.paint_caret(rect, self.state.color, self.state.anchor()) || window.caret_needs_ticks() {
             self.state.keep_blinking(window, cx);
         } else {
             self.state.stop_blinking();

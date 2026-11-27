@@ -2613,7 +2613,9 @@ impl gpui::Element for EditorTextElement {
                     (input.shows_caret(window), input.caret_color, input.blink_anchor)
                 };
                 if shown {
-                    let ticks = window.paint_caret(caret, color, anchor) && prepaint.caret_seen;
+                    // A patch paints the editor alone, outside the effect group around it, so `paint_caret` does not
+                    // always know that the window cannot blink the caret: what it presented says.
+                    let ticks = (window.paint_caret(caret, color, anchor) || window.caret_needs_ticks()) && prepaint.caret_seen;
                     self.input.update(cx, |input, cx| {
                         if ticks {
                             input.keep_blinking(window, cx);
