@@ -791,9 +791,9 @@ impl Node {
         self.lifts_watched(below) || (self.hands_lifts_out(below) && below.lifted_roots)
     }
 
-    /// Whether what runs on the element is a transition that only paints and nothing else (a colour: the hover or the commit
-    /// of a patch starts it), which a root that a patch repaints may hold. The root is built again by each tick of the run, which
-    /// is how a patch frame draws it.
+    /// Whether what runs on the element is a transition and nothing else, and the element only paints (`paints_only`, which
+    /// the colour transitions a patch starts always are): a root that a patch repaints may hold it. The root is built again by
+    /// each tick of the run, which is how a patch frame draws it.
     fn runs_a_paint_transition(&self) -> bool {
         // A run of an opacity or a transform is a frame that re-layers at its start and end (`lift_run`): a unit of its own.
         self.vol.dynamic & !(Dynamic::Transition as u8) == 0 && self.paints_only && !self.lift_run
@@ -2258,28 +2258,37 @@ impl Retain {
     /// What the build since `suspend` found running on the elements it built, `(element, Dynamic bits)`, bits 0 for an
     /// element it built and found nothing on.
     pub(crate) fn take_unrecorded_dynamic(&mut self) -> Vec<(u64, u8)> {
-        self.unrecorded_dynamic.take().map(|built| built.into_iter().collect()).unwrap_or_default()
+        self.unrecorded_dynamic.take().expect("a build was suspended").into_iter().collect()
     }
 
     /// A patch was drawn: what its builds found running (`take_unrecorded_dynamic`) is what the ticks that follow
-    /// build again, as the frame built whole that wrote `dynamic` would have said. Only transitions are taken up: a
-    /// hover or a restyle that paints starts a transition of a colour (`events/hover_paint.rs`), which no frame
-    /// built whole saw start, and the build of a patch finds one that ended as well. The other kinds were
-    /// found by the frame and are not changed by a repaint. A tick looks for the root that holds the element
-    /// ([`Self::preview`]), which is a patch root for one the hover patched.
-    pub(crate) fn land_patch(&mut self, built: &[(u64, u8)]) {
-        const TRANSITION: u8 = Dynamic::Transition as u8;
-        for &(id, bits) in built {
+    /// build again, as the frame built whole that wrote `dynamic` would have said. Only transitions (and the
+    /// `Spliced` that a rebuild re-emits with the bits of the contents) are taken up: a hover or a restyle that paints
+    /// starts a transition of a colour (`events/hover_paint.rs`), which no frame built whole saw start. The other kinds
+    /// were found by the frame and are not changed by a repaint.
+    ///
+    /// `found` is what the patch roots among the units built, which have no frame behind them that found a run: it
+    /// replaces the bits, so a run that ended is cleared. `started` is what every other unit built (a unit, an anchor, a
+    /// box root): it only adds. Their frame found what runs in them, and clears what ended after the run; a patch that
+    /// cleared one would drop what the frame's own records still follow. A tick looks for the root that holds the element
+    /// ([`Self::preview`]).
+    pub(crate) fn land_patch(&mut self, found: &[(u64, u8)], started: &[(u64, u8)]) {
+        const LANDED: u8 = Dynamic::Transition as u8 | Dynamic::Spliced as u8;
+        for &(id, bits) in found {
             let before = self.dynamic.get(&id).copied().unwrap_or(0);
-            let now = (before & !TRANSITION) | (bits & TRANSITION);
-            if now == before {
-                continue;
-            }
-            if now == 0 {
-                self.dynamic.remove(&id);
-            } else {
-                self.dynamic.insert(id, now);
-            }
+            self.land(id, (before & !LANDED) | (bits & LANDED));
+        }
+        for &(id, bits) in started {
+            let before = self.dynamic.get(&id).copied().unwrap_or(0);
+            self.land(id, before | (bits & LANDED));
+        }
+    }
+
+    fn land(&mut self, id: u64, now: u8) {
+        if now == 0 {
+            self.dynamic.remove(&id);
+        } else {
+            self.dynamic.insert(id, now);
         }
     }
 
@@ -3398,8 +3407,7 @@ impl Retain {
         let lifts = node.lift_z.is_some() || lifts_out;
         let overscan = node
             .scroller
-            // A scroll moves a recording without building what it holds, which leaves a run at the instant it was recorded.
-            .filter(|scroller| !blocks_move && !running && scroller.fits(node.id) != Some(false))
+            .filter(|scroller| !blocks_move && scroller.fits(node.id) != Some(false))
             .map(|scroller| scroller.overscan);
         Some(Recording {
             token: own.token,
@@ -3714,10 +3722,13 @@ impl Retain {
     /// record is what puts the way up to it on the spine while it runs.
     ///
     /// `id` is the element the bits are noted on, for a build that records nothing, which has no node to note
-    /// them on (`take_unrecorded_dynamic`).
+    /// them on (`take_unrecorded_dynamic`). Only an element that has something to say is noted: bits, or an entry
+    /// to clear.
     pub(crate) fn dynamic_bits(&mut self, id: u64, bits: u8) {
         if let Some(unrecorded) = self.unrecorded_dynamic.as_mut() {
-            *unrecorded.entry(id).or_default() |= bits;
+            if bits != 0 || self.dynamic.contains_key(&id) {
+                *unrecorded.entry(id).or_default() |= bits;
+            }
             return;
         }
         if bits == 0 {
@@ -6965,15 +6976,42 @@ mod tests {
         retain.dynamic_bits(5, 0);
         retain.resume(recording);
         let built = retain.take_unrecorded_dynamic();
-        assert_eq!(built.len(), 5, "every element the build reached says what runs on it, nothing included");
-        assert!(retain.take_unrecorded_dynamic().is_empty());
+        assert_eq!(built.len(), 4, "an element says what runs on it, or that nothing does where something did");
         assert!(retain.dynamic.get(&4).is_none(), "nothing is noted until the patch is drawn");
-        retain.land_patch(&built);
+        retain.land_patch(&built, &[]);
         assert_eq!(retain.dynamic.get(&1), Some(&(Dynamic::Animation as u8)), "a transition that ended leaves the kinds that are not its own");
         assert_eq!(retain.dynamic.get(&2), None, "a transition that ended and nothing else is gone");
         assert_eq!(retain.dynamic.get(&3), Some(&(Dynamic::InlineMotion as u8 | TRANSITION)));
         assert_eq!(retain.dynamic.get(&4), Some(&TRANSITION), "a transition that started");
         assert_eq!(retain.dynamic.get(&5), None);
+    }
+
+    #[test]
+    fn a_unit_that_is_not_a_patch_root_only_gains_the_transitions_it_started() {
+        const TRANSITION: u8 = Dynamic::Transition as u8;
+        const SPLICED: u8 = Dynamic::Spliced as u8;
+        let mut retain = Retain::new();
+        retain.dynamic.insert(1, TRANSITION | Dynamic::Blink as u8);
+        retain.dynamic.insert(2, Dynamic::Animation as u8);
+        retain.land_patch(&[], &[(1, 0), (2, TRANSITION | Dynamic::Blink as u8), (3, TRANSITION | SPLICED), (4, 0)]);
+        assert_eq!(retain.dynamic.get(&1), Some(&(TRANSITION | Dynamic::Blink as u8)), "a transition that ended in a unit is left to the frame that follows its end");
+        assert_eq!(retain.dynamic.get(&2), Some(&(Dynamic::Animation as u8 | TRANSITION)), "a transition that started, and no other kind of what was built");
+        assert_eq!(retain.dynamic.get(&3), Some(&(TRANSITION | SPLICED)));
+        assert_eq!(retain.dynamic.get(&4), None);
+    }
+
+    #[test]
+    fn a_patch_root_that_a_rebuild_splices_into_follows_the_contents_bits() {
+        const TRANSITION: u8 = Dynamic::Transition as u8;
+        const SPLICED: u8 = Dynamic::Spliced as u8;
+        let mut retain = Retain::new();
+        retain.dynamic.insert(1, SPLICED);
+        retain.dynamic.insert(2, TRANSITION);
+        retain.land_patch(&[(1, TRANSITION | SPLICED), (2, SPLICED | TRANSITION)], &[]);
+        assert_eq!(retain.dynamic.get(&1), Some(&(TRANSITION | SPLICED)));
+        retain.land_patch(&[(1, 0), (2, 0)], &[]);
+        assert_eq!(retain.dynamic.get(&1), None, "a lone Spliced is not kept when the contents no longer run");
+        assert_eq!(retain.dynamic.get(&2), None);
     }
 
     #[test]

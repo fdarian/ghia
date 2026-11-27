@@ -734,9 +734,11 @@ patch builds the root, which starts it, and the ticks of the run build the root 
 
 **The ticks of the run.** The build of a patch's unit records nothing (`Retain::suspend`), so what it found running on each element
 it built is collected by `Retain::dynamic_bits(id, bits)` and handed to `Retain::land_patch` when the patch is drawn
-(`continue_after_patch`): for a patch root, the transition bit of each built element is written into `Retain::dynamic`, or cleared
-where the build found none (a run that ended), as a frame built whole writes it at its end. The units of a run that a frame found
-are left to the frame that follows their end, as before. A tick then finds the element among the dynamic ones and
+(`continue_after_patch`): for a patch root, the transition bit (and the `Spliced` bit a rebuild re-emits with the bits of the contents) of each built
+element is written into `Retain::dynamic`, or cleared where the build found none (a run that ended), as a frame built whole writes it
+at its end. Every other unit that a patch builds (a unit, an anchor, a box root, for a hover inside a focused editor host or a
+`MotionValues` element, or a restyle that a relaid root covers) only gains the transitions it started: its frame found what runs
+in it and clears a run after its end, and a patch that cleared one would drop what the records of that frame still follow. A tick then finds the element among the dynamic ones and
 builds the root that holds it: `Retain::preview` looks for the innermost unit or patch root (`root_holding`), which is a patch root
 for what a hover started. A frame built whole that finds such a run does not give up the root: a patch root may hold running
 transitions that only paint (`Node::runs_a_paint_transition`, `Below::busy`; not a run of an opacity or a transform) and is still

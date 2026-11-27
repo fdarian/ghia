@@ -1029,7 +1029,6 @@ properties! {
 }
 
 impl AnimProp {
-    /// Whether the property's value is a colour.
     pub(super) fn is_colour(self) -> bool {
         matches!(self.kind(), Kind::Color)
     }

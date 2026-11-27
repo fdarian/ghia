@@ -92,8 +92,10 @@ pub(crate) struct Built {
     /// The scrollers among the units, which lay out again: what they write into the registries is
     /// taken as the patch made it, not compared with what the frame wrote.
     anchors: Vec<u64>,
-    /// What the units found running on the elements they built, for `Retain::land_patch`.
+    /// What the patch roots among the units found running on the elements they built, and what the other units found
+    /// (`Retain::land_patch`).
     dynamic: Vec<(u64, u8)>,
+    started: Vec<(u64, u8)>,
     stepped: Stepped,
 }
 
@@ -212,7 +214,7 @@ impl GpuixView {
                 let (handle, viewport, tree) = (window.window_handle(), window.viewport_size(), tree.clone());
                 app.defer(move |cx| crate::observers::sweep_after_translate(handle, viewport, &reports, &tree, &callback, cx));
             }
-            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &built.dynamic, &anchors, &rewritten, cx));
+            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &built.dynamic, &built.started, &anchors, &rewritten, cx));
             true
         };
         window.set_frame_patcher(Some(Rc::new(patcher)));
@@ -291,7 +293,9 @@ impl GpuixView {
         // whole finds the root culled, and what runs in it dormant.
         if !self.retain.dynamic_is_empty() {
             let tree = self.tree.lock().unwrap();
-            let moved = |id: &u64| self.retain.is_patch_root(*id) && self.retain.runs_in_root(&tree, *id) && self.moved_since_built_in(&tree, *id) != gpui::Point::default();
+            let moved = |id: &u64| {
+                self.retain.is_patch_root(*id) && self.moved_since_built_in(&tree, *id) != gpui::Point::default() && self.retain.runs_in_root(&tree, *id)
+            };
             if ids.iter().any(moved) {
                 self.patch.decline(key("RunningMoved".to_owned()));
                 return None;
@@ -318,6 +322,7 @@ impl GpuixView {
         let mut units = Vec::with_capacity(ids.len());
         let mut tapes = Vec::with_capacity(ids.len());
         let mut dynamic = Vec::new();
+        let mut started = Vec::new();
         for id in ids {
             let Some(unit) = self.build_unit(id, now, window, cx) else {
                 self.patch.decline("NotAUnit".to_owned());
@@ -325,13 +330,17 @@ impl GpuixView {
             };
             tapes.push((id, unit.tape));
             units.push((unit.id, unit.element));
-            // A unit's transitions were found by the frame that made it a unit and are cleared by the frame that follows
-            // their end; a root that a hover started a run in has no frame behind it that found them.
+            // A patch root holds the runs that a hover or a commit started in it and that no frame found, so what it
+            // finds is what runs. The other units (a unit, an anchor, a box root) were found by the frame that made them
+            // and are cleared by the frame that follows the end of a run: a patch only adds to them, as a transition
+            // started inside one is a run that no frame found either, and its ticks select the unit.
             if self.retain.is_patch_root(id) {
                 dynamic.extend(unit.dynamic);
+            } else {
+                started.extend(unit.dynamic);
             }
         }
-        Some(Built { units, tapes, anchors, dynamic, stepped })
+        Some(Built { units, tapes, anchors, dynamic, started, stepped })
     }
 
     /// Lays out and prepaints the patch the tree is waiting for, ahead of the draw, so that a read of
@@ -469,12 +478,13 @@ impl GpuixView {
         window: &mut gpui::Window,
         stepped: &Stepped,
         dynamic: &[(u64, u8)],
+        started: &[(u64, u8)],
         anchors: &[u64],
         rewritten: &[u64],
         cx: &mut gpui::Context<Self>,
     ) {
         // A transition the patch started runs on in the ticks that follow, and one it ended does not.
-        self.retain.land_patch(dynamic);
+        self.retain.land_patch(dynamic, started);
         // The elements a hover restyled by paint are drawn: the roots that hold them are older than
         // what is shown, and the frame built whole after the patches builds them again.
         let hovered = self.pointer.borrow().take_paint_pending();
