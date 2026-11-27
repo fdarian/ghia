@@ -6,7 +6,9 @@
 //! document may not hand to the system: `file:` and custom schemes launch other programs. JS
 //! (`js/shell/open-link.ts`) decides which links are other-origin; this is the second check.
 
-use gpui::{App, Global};
+use std::collections::HashMap;
+
+use gpui::{App, Global, WindowId};
 
 const SCHEMES: [&str; 4] = ["http", "https", "mailto", "tel"];
 
@@ -24,20 +26,20 @@ pub(crate) fn open(cx: &mut App, url: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// What the test renderer was asked to open, in order.
+/// What each test window was asked to open, in order.
 #[derive(Default)]
-struct Requests(Vec<String>);
+struct Requests(HashMap<WindowId, Vec<String>>);
 
 impl Global for Requests {}
 
-pub(crate) fn record(cx: &mut App, url: &str) -> Result<(), String> {
+pub(crate) fn record(cx: &mut App, window: WindowId, url: &str) -> Result<(), String> {
     check(url)?;
-    cx.default_global::<Requests>().0.push(url.to_owned());
+    cx.default_global::<Requests>().0.entry(window).or_default().push(url.to_owned());
     Ok(())
 }
 
-pub(crate) fn recorded(cx: &mut App) -> Vec<String> {
-    cx.default_global::<Requests>().0.clone()
+pub(crate) fn recorded(cx: &mut App, window: WindowId) -> Vec<String> {
+    cx.default_global::<Requests>().0.get(&window).cloned().unwrap_or_default()
 }
 
 #[cfg(test)]

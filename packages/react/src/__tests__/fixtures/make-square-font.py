@@ -1,9 +1,11 @@
-# Regenerates gpuix-test-square.ttf and gpuix-test-nameless.ttf (needs `pip install fonttools`).
+# Regenerates gpuix-test-square.ttf and gpuix-test-nameless.ttf, and their .woff and .woff2 forms
+# (needs `pip install fonttools brotli`).
 #
 # "A" and "m" are one em wide, "B" is two. Each is a filled square, so text
 # measured with this font has widths no system font produces.
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont
 
 NAME = "GpuixTestSquare"
 UPM = 1000
@@ -50,3 +52,9 @@ build(
 # Valid, but without the full and PostScript names. GPUI aborts the process
 # when it loads such a font, so registerFont has to refuse it.
 build("gpuix-test-nameless.ttf", {"familyName": "GpuixTestNameless", "styleName": "Regular"})
+
+for base in ("gpuix-test-square", "gpuix-test-nameless"):
+    for flavor in ("woff", "woff2"):
+        font = TTFont(f"{base}.ttf")
+        font.flavor = flavor
+        font.save(f"{base}.{flavor}")

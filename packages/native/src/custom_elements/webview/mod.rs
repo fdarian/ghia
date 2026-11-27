@@ -121,7 +121,7 @@ impl Shared {
             .map_err(|error| error.to_string())?
             .downcast::<usize>()
             .map_err(|_| "the surface of this window has no content view".to_string())?;
-        let backend = backend::create_backend(self.id, *content, self.emitter.clone(), focus_exit(window, cx), cx)?;
+        let backend = backend::create_backend(window.window_handle().window_id(), self.id, *content, self.emitter.clone(), focus_exit(window, cx), cx)?;
         self.surface = Some(surface);
         self.backend = Some(backend);
         Ok(())

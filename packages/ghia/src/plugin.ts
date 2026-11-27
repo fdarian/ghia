@@ -68,9 +68,9 @@ const APP_ID_IMPORT = `import ${JSON.stringify(APP_ID_MODULE)};`
 // Read by `@ghia/native` (js/shell/storage.ts) when `localStorage` is first used.
 const APP_ID_SLOT_KEY = "@ghia/native/app-id"
 
-const FONT_FILE = /\.(?:ttf|otf|ttc)$/i
+const FONT_FILE = /\.(?:ttf|otf|ttc|woff2?)$/i
 /** A `url()` of a font by a path from the Vite root, as the CSS of `?inline` text holds it in a JS string: its quotes may be escaped. */
-const DEV_FONT_URL = /url\(\s*(\\?["']?)(\/[^"'\\)\s?]+\.(?:ttf|otf|ttc))\1\s*\)/gi
+const DEV_FONT_URL = /url\(\s*(\\?["']?)(\/[^"'\\)\s?]+\.(?:ttf|otf|ttc|woff2?))\1\s*\)/gi
 
 const UI_CONDITIONS = ["browser", "import", "module", "default"]
 const NATIVE_PACKAGE = "@ghia/native"

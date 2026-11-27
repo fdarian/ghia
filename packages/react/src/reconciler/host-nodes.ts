@@ -11,7 +11,7 @@ import {
   defineScrollMembers,
   DocumentFragment,
   SentWrites,
-  document,
+  documentOf,
   DOM_BINDING,
   focusHostElement,
   HOST_BINDING,
@@ -40,6 +40,7 @@ import type {
   KeyframesInput,
   Node,
   NodeBinding,
+  NodeRoot,
   ParentBinding,
   StyleDesc,
   TextBinding,
@@ -103,6 +104,11 @@ export function stateFor(node: HostNode | HostFragment): HostNodeState {
     throw new Error(`GPUIX host node ${node.nativeId} does not belong to a root`)
   }
   return state
+}
+
+/** An element React made: what `ref`, `document.body` and `createRoot(container)` hand around. */
+export function isHostInstance(value: unknown): value is Instance {
+  return typeof value === "object" && value !== null && "elementType" in value && hostNodeStates.has(value as HostNode)
 }
 
 export function containerFor(node: HostNode): Container {
@@ -285,11 +291,11 @@ class ElementDomBinding implements ElementBinding {
     private readonly state: HostNodeState
   ) {}
 
-  /** A mounted `<html>` is in the document, which is the top of every mounted tree; a destroyed one is in nothing. */
+  /** A mounted `<html>` is in the document of its window, which is the top of that window's tree; a destroyed one is in nothing. */
   get parent(): NodeBinding["parent"] {
     const parent = this.state.parent
     if (parent !== null) return parent
-    return this.state.container.html === this.instance && isConnected(this.instance) ? document : null
+    return this.state.container.html === this.instance && isConnected(this.instance) ? documentOf(this.state.container.nativeRenderer) : null
   }
 
   get children(): NodeBinding["children"] {
@@ -300,7 +306,7 @@ class ElementDomBinding implements ElementBinding {
     return isConnected(this.instance)
   }
 
-  get root(): object | null {
+  get root(): NodeRoot | null {
     return this.state.container
   }
 
@@ -372,7 +378,7 @@ class FragmentDomBinding implements ParentBinding {
     return this.state.children
   }
 
-  get root(): object | null {
+  get root(): NodeRoot | null {
     return this.state.container
   }
 
@@ -420,7 +426,7 @@ class TextDomBinding implements TextBinding {
     return parent !== null && "elementType" in parent && isConnected(parent)
   }
 
-  get root(): object | null {
+  get root(): NodeRoot | null {
     return this.state.container
   }
 

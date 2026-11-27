@@ -262,6 +262,8 @@ export interface Container {
   head: Instance
   /** The `<body>` in `html`, where the app's top-level nodes are. */
   body: Instance
+  /** Unmounts the roots `createRoot(element)` made in this window, which its own root unmounting takes along. Shared by a portal container. */
+  elementRoots: Set<() => void>
   windowKeyEventHandlers: WindowKeyEventHandlers
   windowKeyEventId: number
   windowSelectionEventId: number

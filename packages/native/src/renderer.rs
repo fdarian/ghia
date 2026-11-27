@@ -46,6 +46,7 @@ use crate::text::font_family::Fonts;
 use crate::text::white_space::StyledWhiteSpace as _;
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection};
 use crate::theme::Theme;
+use crate::window_map::WindowMap;
 
 /// The Window menu items act on the focused window, and the root element is the
 /// only place in GPUIX that has one. `crate::app_menu` owns everything else.
@@ -136,9 +137,7 @@ thread_local! {
     #[cfg(target_os = "macos")]
     static MAC_PLATFORM: RefCell<Option<Rc<gpui_macos::MacPlatform>>> = const { RefCell::new(None) };
     #[cfg(target_os = "macos")]
-    static GPUI_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
-    #[cfg(target_os = "macos")]
-    static GPUI_WINDOW: RefCell<Option<gpui::WindowHandle<GpuixView>>> = const { RefCell::new(None) };
+    pub(crate) static GPUI_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static WEB_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -162,17 +161,16 @@ thread_local! {
     /// ScrollHandle is Rc<RefCell<...>> so its methods (set_offset, offset,
     /// scroll_to_item) work without an App context.
     ///
-    /// NOTE: This is a singleton — if multiple renderers/windows coexist,
-    /// the last one to render wins. Acceptable for now (single-window only).
-    /// TODO: Scope by renderer/window ID when multi-window support is added.
-    static SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
-    static VIRTUAL_LIST_STATES: RefCell<HashMap<u64, gpui::ListState>> = RefCell::new(HashMap::new());
+    /// Per window: host ids are allocated by each renderer, so two windows have an element with the
+    /// same id.
+    static SCROLL_HANDLES: RefCell<WindowMap<gpui::ScrollHandle>> = RefCell::new(WindowMap::default());
+    static VIRTUAL_LIST_STATES: RefCell<WindowMap<gpui::ListState>> = RefCell::new(WindowMap::default());
     /// The `visibleRange` reporters of the lists in `VIRTUAL_LIST_STATES`, for a write that moves one.
-    static VIRTUAL_LIST_REPORTERS: RefCell<HashMap<u64, Rc<crate::visible_range::RangeReporter>>> = RefCell::new(HashMap::new());
+    static VIRTUAL_LIST_REPORTERS: RefCell<WindowMap<Rc<crate::visible_range::RangeReporter>>> = RefCell::new(WindowMap::default());
     /// `SCROLL_HANDLES` and `VIRTUAL_LIST_STATES` as the last forced pass of a read left them: a frame that
     /// skips the content it forced drops the scrollers in it from both, see [`keep_scroll_state`].
-    static KEPT_SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
-    static KEPT_VIRTUAL_LIST_STATES: RefCell<HashMap<u64, gpui::ListState>> = RefCell::new(HashMap::new());
+    static KEPT_SCROLL_HANDLES: RefCell<WindowMap<gpui::ScrollHandle>> = RefCell::new(WindowMap::default());
+    static KEPT_VIRTUAL_LIST_STATES: RefCell<WindowMap<gpui::ListState>> = RefCell::new(WindowMap::default());
     /// Virtual-list scrolls queued for the next `GpuixView::render`, applied
     /// AFTER `VirtualListEntry::sync` splices that frame's child changes.
     ///
@@ -180,8 +178,18 @@ thread_local! {
     /// just committed, but that commit only reaches `gpui::ListState` when the
     /// next render splices it in. An eager `scroll_to` would be shifted a
     /// second time by `splice_focusable` and land on the wrong row.
-    static PENDING_VIRTUAL_LIST_SCROLLS: RefCell<HashMap<u64, gpui::ListOffset>> =
-        RefCell::new(HashMap::new());
+    static PENDING_VIRTUAL_LIST_SCROLLS: RefCell<WindowMap<gpui::ListOffset>> =
+        RefCell::new(WindowMap::default());
+}
+
+/// Drops what the scroll mirrors hold for a window that closed.
+pub(crate) fn forget_scroll_state(window: gpui::WindowId) {
+    SCROLL_HANDLES.with(|cell| cell.borrow_mut().forget(window));
+    VIRTUAL_LIST_STATES.with(|cell| cell.borrow_mut().forget(window));
+    VIRTUAL_LIST_REPORTERS.with(|cell| cell.borrow_mut().forget(window));
+    KEPT_SCROLL_HANDLES.with(|cell| cell.borrow_mut().forget(window));
+    KEPT_VIRTUAL_LIST_STATES.with(|cell| cell.borrow_mut().forget(window));
+    PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().forget(window));
 }
 
 const SELECTION_SCROLL_TICK_MS: u64 = 24;
@@ -230,10 +238,11 @@ fn list_local_pointer(
 /// Queue a virtual-list scroll for the next render. `offset_in_item` may be
 /// negative: gpui then anchors the viewport top above the item, which is what
 /// keeps a row pixel-stable while unmeasured rows are spliced in above it.
-pub(crate) fn queue_virtual_list_scroll(id: u64, index: usize, offset_in_item: f32) {
-    crate::scroll_write::forget_list_write(id);
+pub(crate) fn queue_virtual_list_scroll(window: gpui::WindowId, id: u64, index: usize, offset_in_item: f32) {
+    crate::scroll_write::forget_list_write(window, id);
     PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| {
         cell.borrow_mut().insert(
+            window,
             id,
             gpui::ListOffset {
                 item_ix: index,
@@ -244,16 +253,16 @@ pub(crate) fn queue_virtual_list_scroll(id: u64, index: usize, offset_in_item: f
 }
 
 /// A pixel write to the list `id` supersedes the scroll to a row queued before it.
-pub(crate) fn cancel_queued_list_scroll(id: u64) {
-    PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&id));
+pub(crate) fn cancel_queued_list_scroll(window: gpui::WindowId, id: u64) {
+    PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(window, id));
 }
 
 /// The DOM scroll position `[scrollLeft, scrollTop]` of the virtual list or scroll container
 /// `id`, or `None` for anything else.
-fn scroll_element_position(id: u64) -> Option<[f64; 2]> {
+fn scroll_element_position(window: gpui::WindowId, id: u64) -> Option<[f64; 2]> {
     VIRTUAL_LIST_STATES
-        .with(|cell| cell.borrow().get(&id).map(crate::scroll::list_position))
-        .or_else(|| SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).map(crate::scroll::handle_position)))
+        .with(|cell| cell.borrow().get(window, id).map(crate::scroll::list_position))
+        .or_else(|| SCROLL_HANDLES.with(|cell| cell.borrow().get(window, id).map(crate::scroll::handle_position)))
 }
 
 /// Scrolls the virtual list or scroll container `id` to the DOM scroll position `left`, `top`, an
@@ -270,10 +279,10 @@ fn scroll_element_to(
     behavior: crate::scroll::Behavior,
 ) -> bool {
     let list = VIRTUAL_LIST_STATES.with(|cell| {
-        cell.borrow().get(&id).map(|state| {
+        cell.borrow().get(window, id).map(|state| {
             VIRTUAL_LIST_REPORTERS.with(|reporters| {
                 let reporters = reporters.borrow();
-                let reporter = reporters.get(&id).map(|reporter| reporter.as_ref());
+                let reporter = reporters.get(window, id).map(|reporter| reporter.as_ref());
                 crate::scroll_write::write_list(window, metrics_current, id, state, reporter, top)
             })
         })
@@ -283,40 +292,41 @@ fn scroll_element_to(
     }
     SCROLL_HANDLES.with(|cell| {
         cell.borrow()
-            .get(&id)
+            .get(window, id)
             .is_some_and(|handle| crate::scroll_write::write_container(window, metrics_current, id, handle, left, top, behavior))
     })
 }
 
 fn scroll_write_lays_out_first(
+    window: gpui::WindowId,
     metrics_current: bool,
     id: u64,
     top: Option<f64>,
     behavior: crate::scroll::Behavior,
 ) -> bool {
     use crate::scroll_write::ScrollerState;
-    let is_list = VIRTUAL_LIST_STATES.with(|cell| cell.borrow().contains_key(&id));
+    let is_list = VIRTUAL_LIST_STATES.with(|cell| cell.borrow().contains(window, id));
     SCROLL_HANDLES.with(|cell| {
         let handles = cell.borrow();
-        let state = match handles.get(&id) {
+        let state = match handles.get(window, id) {
             _ if is_list => ScrollerState::List,
             Some(handle) => ScrollerState::Container(handle),
             None => ScrollerState::Unbuilt,
         };
-        crate::scroll_write::lays_out_first(metrics_current, id, state, top, behavior)
+        crate::scroll_write::lays_out_first(window, metrics_current, id, state, top, behavior)
     })
 }
 
 /// Makes the scroll writes recorded since the last render, before it builds (see `scroll_write`).
 pub(crate) fn settle_scroll_writes(window: gpui::WindowId) {
-    SCROLL_HANDLES.with(|cell| crate::scroll_write::settle_containers(window, &cell.borrow()));
+    SCROLL_HANDLES.with(|cell| crate::scroll_write::settle_containers(window, cell.borrow().of(window)));
 }
 
 /// The room `id` reserves for classic scrollbars as of its last layout: the width on its right and
 /// the height at its bottom. Nothing for an element that does not scroll.
-pub(crate) fn reserved_scrollbar(id: u64) -> (f32, f32) {
+pub(crate) fn reserved_scrollbar(window: gpui::WindowId, id: u64) -> (f32, f32) {
     SCROLL_HANDLES.with(|cell| {
-        cell.borrow().get(&id).map_or((0.0, 0.0), |handle| {
+        cell.borrow().get(window, id).map_or((0.0, 0.0), |handle| {
             let bars = handle.scrollbar_size();
             (f32::from(bars.width), f32::from(bars.height))
         })
@@ -330,23 +340,23 @@ pub(crate) fn reserved_scrollbar(id: u64) -> (f32, f32) {
 pub(crate) fn scroll_metrics(window: gpui::WindowId, id: u64) -> Option<[f64; 6]> {
     let kept = crate::automation::is_reading_kept();
     let list = VIRTUAL_LIST_STATES
-        .with(|cell| cell.borrow().get(&id).map(|state| state.dom_scroll()))
-        .or_else(|| kept.then(|| KEPT_VIRTUAL_LIST_STATES.with(|cell| cell.borrow().get(&id).map(|state| state.dom_scroll()))).flatten());
+        .with(|cell| cell.borrow().get(window, id).map(|state| state.dom_scroll()))
+        .or_else(|| kept.then(|| KEPT_VIRTUAL_LIST_STATES.with(|cell| cell.borrow().get(window, id).map(|state| state.dom_scroll()))).flatten());
     if let Some(list) = list {
         return crate::scroll::list_metrics(list);
     }
     let painted = crate::automation::get_bounds(window, id);
     let handle = SCROLL_HANDLES
-        .with(|cell| cell.borrow().get(&id).cloned())
-        .or_else(|| kept.then(|| KEPT_SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).cloned())).flatten());
+        .with(|cell| cell.borrow().get(window, id).cloned())
+        .or_else(|| kept.then(|| KEPT_SCROLL_HANDLES.with(|cell| cell.borrow().get(window, id).cloned())).flatten());
     crate::scroll::metrics(handle.as_ref(), painted)
 }
 
-/// Notes the scrollers as the forced pass that just ran left them, for a read that shares the pass
+/// Notes the scrollers of `window` as the forced pass that just ran left them, for a read that shares the pass
 /// (`automation::reading_kept`): the frames after it skip the content and do not have them.
-pub(crate) fn keep_scroll_state() {
-    SCROLL_HANDLES.with(|cell| KEPT_SCROLL_HANDLES.with(|kept| kept.borrow_mut().clone_from(&cell.borrow())));
-    VIRTUAL_LIST_STATES.with(|cell| KEPT_VIRTUAL_LIST_STATES.with(|kept| kept.borrow_mut().clone_from(&cell.borrow())));
+pub(crate) fn keep_scroll_state(window: gpui::WindowId) {
+    SCROLL_HANDLES.with(|cell| KEPT_SCROLL_HANDLES.with(|kept| kept.borrow_mut().copy_window_from(window, &cell.borrow())));
+    VIRTUAL_LIST_STATES.with(|cell| KEPT_VIRTUAL_LIST_STATES.with(|kept| kept.borrow_mut().copy_window_from(window, &cell.borrow())));
 }
 
 fn parse_debug_frame_overlay_mode_str(
@@ -425,80 +435,61 @@ fn recv_ui_response<T>(receiver: std::sync::mpsc::Receiver<T>, operation: &str) 
     }
 }
 
-/// `update_window` for a change that returns nothing. When it is called while the
-/// root view is already being updated, it runs once that update has returned.
+/// What a window of a renderer is opened from.
 #[cfg(target_os = "macos")]
-fn update_window_or_defer(
-    update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) + 'static,
-) -> Result<()> {
-    crate::events::sync_dispatch::route(
-        update,
-        crate::events::sync_dispatch::update_root_view_or_defer,
-        Error::from_reason,
-        update_window,
+pub(crate) struct WindowRequest {
+    width: f64,
+    height: f64,
+    title: String,
+    window_options: WindowOptions,
+    window_kind: gpui::WindowKind,
+    displays: Vec<crate::screen::Display>,
+    tree: Arc<Mutex<RetainedTree>>,
+    callback: Option<EventCallback>,
+    selection: SharedSelection,
+    pointer_requests: crate::events::state::PointerRequests,
+}
+
+/// Opens the window of one renderer on the App, with the root view that draws its tree.
+#[cfg(target_os = "macos")]
+pub(crate) fn open_gpuix_window(
+    cx: &mut gpui::App,
+    request: &WindowRequest,
+) -> std::result::Result<gpui::WindowHandle<GpuixView>, String> {
+    let bounds = gpui::Bounds::centered(
+        None,
+        gpui::size(gpui::px(request.width as f32), gpui::px(request.height as f32)),
+        cx,
+    );
+    cx.open_window(
+        to_gpui_window_options(&request.window_options, request.window_kind.clone(), bounds, &request.displays),
+        |window, cx| {
+            cx.new(|cx| {
+                let mut view = GpuixView::new(
+                    request.tree.clone(),
+                    request.callback.clone(),
+                    request.title.clone(),
+                    request.selection.clone(),
+                    request.pointer_requests.clone(),
+                );
+                view.observe_appearance(window, cx);
+                // Emulation first: turning it on notifies activation observers at once, and ours
+                // would update the view that is still being built here. Registered after, it only
+                // sees later activation changes.
+                crate::focus_emulation::apply(window, cx);
+                view.observe_window_activity(window, cx);
+                view.observe_viewport(window, cx);
+                view.observe_scroller_style(cx);
+                view.observe_media_features(window, cx);
+                view.set_frameless(request.window_options.frameless());
+                crate::events::enable_dom_hit_testing(window);
+                crate::layout::container::allow_redraw_passes(window);
+                view.install_key_interception(window, cx);
+                view
+            })
+        },
     )
-}
-
-#[cfg(target_os = "macos")]
-fn update_window<R>(
-    update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) -> R,
-) -> Result<R> {
-    crate::events::sync_dispatch::native_call(|| {
-        crate::events::sync_dispatch::route(
-            update,
-            crate::events::sync_dispatch::update_root_view,
-            Error::from_reason,
-            |update| {
-                let window = GPUI_WINDOW
-                    .with(|window| *window.borrow())
-                    .ok_or_else(|| Error::from_reason("GPUI window is not initialized"))?;
-
-                GPUI_APP.with(|app| {
-                    let app = app.borrow();
-                    let app = app.as_ref().ok_or_else(|| {
-                        Error::from_reason("GPUI application is not initialized")
-                    })?;
-                    app.update(|cx| {
-                        window
-                            .update(cx, update)
-                            .map_err(|error| Error::from_reason(error.to_string()))
-                    })
-                })
-            },
-        )
-    })
-}
-
-#[cfg(target_os = "macos")]
-// A sync input handler can reach the view through its own renderer calls, so the work that
-// only needs the window runs without leasing the root view.
-fn update_window_without_view<R>(
-    update: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> R,
-) -> Result<R> {
-    crate::events::sync_dispatch::native_call(|| {
-        crate::events::sync_dispatch::route(
-            update,
-            crate::events::sync_dispatch::update_active_window,
-            Error::from_reason,
-            |update| {
-                let window = GPUI_WINDOW
-                    .with(|window| *window.borrow())
-                    .ok_or_else(|| Error::from_reason("GPUI window is not initialized"))?;
-
-                GPUI_APP.with(|app| {
-                    let app = app.borrow();
-                    let app = app.as_ref().ok_or_else(|| {
-                        Error::from_reason("GPUI application is not initialized")
-                    })?;
-                    app.update(|cx| {
-                        gpui::AnyWindowHandle::from(window)
-                            .update(cx, move |_view, window, cx| update(window, cx))
-                            .map_err(|error| Error::from_reason(error.to_string()))
-                    })
-                })
-            },
-        )
-    })
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -557,22 +548,23 @@ pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui
     if dirty == Dirty::Clean {
         return;
     }
+    let window_id = window.window_handle().window_id();
     discard_prepared_patch(window, cx, view, PendingLayout::Waiting);
     // The batches before this one that moved boxes are still owed their layout, and this one does not take that away.
-    let dirty = dirty.merge(layout_owed(view));
+    let dirty = dirty.merge(layout_owed(window_id));
     match dirty {
         Dirty::Clean => {}
         Dirty::PaintPatchable => window.request_tick(),
         Dirty::LayoutPatchable => {
-            LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Waiting));
+            LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(window_id, OwedLayout { view, state: PendingLayout::Waiting }));
             window.request_tick();
         }
         Dirty::Paint => {
-            note_pending(view, PendingLayout::Notified);
+            note_pending(window_id, PendingLayout::Notified);
             cx.notify_paint_only(view)
         }
         Dirty::Layout => {
-            note_pending(view, PendingLayout::Notified);
+            note_pending(window_id, PendingLayout::Notified);
             invalidate_after_commit(cx, view)
         }
     }
@@ -580,8 +572,8 @@ pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui
 
 /// What the layout the view is owed asks of the window, as the batches that owe it did: [`Dirty::LayoutPatchable`] while a read has
 /// not prepared the patch for them, [`Dirty::Layout`] once the view is invalidated.
-fn layout_owed(view: gpui::EntityId) -> Dirty {
-    LAYOUT_PENDING.with(|pending| match pending.borrow().get(&view) {
+fn layout_owed(window: gpui::WindowId) -> Dirty {
+    LAYOUT_PENDING.with(|pending| match pending.borrow().get(&window).map(|owed| owed.state) {
         None => Dirty::Clean,
         Some(PendingLayout::Waiting | PendingLayout::Prepared) => Dirty::LayoutPatchable,
         Some(PendingLayout::Notified) => Dirty::Layout,
@@ -597,14 +589,14 @@ pub(crate) fn discard_prepared_patch(window: &mut gpui::Window, cx: &mut gpui::A
         return;
     }
     window.discard_prepared_patch(cx);
-    note_pending(view, then);
+    note_pending(window.window_handle().window_id(), then);
 }
 
-/// Says what the pending layout of `view` is now, if it has one.
-fn note_pending(view: gpui::EntityId, state: PendingLayout) {
+/// Says what the pending layout of `window` is now, if it has one.
+fn note_pending(window: gpui::WindowId, state: PendingLayout) {
     LAYOUT_PENDING.with(|pending| {
-        if let Some(held) = pending.borrow_mut().get_mut(&view) {
-            *held = state;
+        if let Some(held) = pending.borrow_mut().get_mut(&window) {
+            held.state = state;
         }
     });
 }
@@ -620,12 +612,31 @@ pub(crate) enum PendingLayout {
     Notified,
 }
 
+/// The layout a window's root view is owed, and what a read has done about it.
+#[derive(Clone, Copy)]
+struct OwedLayout {
+    view: gpui::EntityId,
+    state: PendingLayout,
+}
+
 thread_local! {
-    /// The views that have a patch of anchors to draw, which moved boxes: the layout is older than the tree.
-    static LAYOUT_PENDING: std::cell::RefCell<rustc_hash::FxHashMap<gpui::EntityId, PendingLayout>> = Default::default();
-    /// The views whose list was written to quietly (`invalidate_after_scroll`) and not drawn since: the boxes of the rows are
-    /// where the write put the offset only in a layout, which a read of boxes runs.
-    static LIST_WRITTEN: std::cell::RefCell<rustc_hash::FxHashSet<gpui::EntityId>> = Default::default();
+    /// By window (a window has one root view): the windows that have a patch of anchors to draw, which moved boxes, so the layout
+    /// is older than the tree. A read of one window settles its own entry and leaves the others' to the reads and frames of theirs.
+    static LAYOUT_PENDING: std::cell::RefCell<rustc_hash::FxHashMap<gpui::WindowId, OwedLayout>> = Default::default();
+    /// By window: the root views whose list was written to quietly (`invalidate_after_scroll`) and not drawn since: the boxes of the
+    /// rows are where the write put the offset only in a layout, which a read of boxes runs.
+    static LIST_WRITTEN: std::cell::RefCell<rustc_hash::FxHashMap<gpui::WindowId, gpui::EntityId>> = Default::default();
+}
+
+/// The window closed: what it was owed goes, and a window that is opened with the id later owes nothing.
+pub(crate) fn forget_pending_layout(window: gpui::WindowId) {
+    LAYOUT_PENDING.with(|pending| pending.borrow_mut().remove(&window));
+    LIST_WRITTEN.with(|written| written.borrow_mut().remove(&window));
+}
+
+#[cfg(test)]
+pub(crate) fn holds_pending_layout(window: gpui::WindowId) -> bool {
+    LAYOUT_PENDING.with(|pending| pending.borrow().contains_key(&window)) || LIST_WRITTEN.with(|written| written.borrow().contains_key(&window))
 }
 
 /// What a read of geometry does before it lays out. A view with a patch of anchors waiting has its
@@ -634,58 +645,61 @@ thread_local! {
 /// draw (patch-frames.md, "Contained-layout patches"). When the patch cannot be prepared (gpui
 /// declines it, or the tree is not a patch any more) the view is invalidated, as a commit that lays
 /// out invalidates it, so the read sees the tree's boxes, and the tick that was asked for is drawn whole.
+///
+/// Only the reading window's own layout is settled: another window's write that waits for a read of its own keeps its patch.
 pub(crate) fn settle_pending_layout(window: &mut gpui::Window, cx: &mut gpui::App) {
+    let window_id = window.window_handle().window_id();
     // A read of boxes after a write to a list's offset sees the rows where the write put them, as a browser's does: the view is
     // notified as a `div` scroller's write notifies it, which a patch that was prepared does not survive.
-    let written: Vec<gpui::EntityId> = LIST_WRITTEN.with(|written| written.borrow_mut().drain().collect());
-    for view in written {
+    let written = LIST_WRITTEN.with(|written| written.borrow_mut().remove(&window_id));
+    if let Some(view) = written {
         discard_prepared_patch(window, cx, view, PendingLayout::Notified);
-        note_pending(view, PendingLayout::Notified);
+        note_pending(window_id, PendingLayout::Notified);
         cx.notify_scroll_only(view);
     }
-    let views: Vec<(gpui::EntityId, PendingLayout)> =
-        LAYOUT_PENDING.with(|pending| pending.borrow().iter().map(|(view, state)| (*view, *state)).collect());
-    let root = window.root::<GpuixView>().flatten();
-    for (view, state) in views {
-        let ours = root.as_ref().filter(|root| root.entity_id() == view);
-        match (state, ours) {
-            (PendingLayout::Prepared, Some(_)) if window.prepared_patch_units().is_some() => continue,
-            (PendingLayout::Waiting, Some(root)) if GpuixView::prepare_for_read(root, window, cx) => {
-                LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Prepared));
-                continue;
-            }
-            _ => {}
+    let Some(owed) = LAYOUT_PENDING.with(|pending| pending.borrow().get(&window_id).copied()) else {
+        return;
+    };
+    let root = window.root::<GpuixView>().flatten().filter(|root| root.entity_id() == owed.view);
+    match (owed.state, root) {
+        (PendingLayout::Prepared, Some(_)) if window.prepared_patch_units().is_some() => return,
+        (PendingLayout::Waiting, Some(root)) if GpuixView::prepare_for_read(&root, window, cx) => {
+            note_pending(window_id, PendingLayout::Prepared);
+            return;
         }
-        invalidate_after_commit(cx, view);
-        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Notified));
+        _ => {}
     }
+    invalidate_after_commit(cx, owed.view);
+    note_pending(window_id, PendingLayout::Notified);
 }
 
 /// [`settle_pending_layout`] for a read that has no window to prepare in: the view is invalidated.
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 pub(crate) fn notify_pending_layout(cx: &mut gpui::App) {
-    let views: Vec<gpui::EntityId> = LAYOUT_PENDING.with(|pending| pending.borrow().keys().copied().collect());
-    for view in views {
+    let owed: Vec<(gpui::WindowId, gpui::EntityId)> =
+        LAYOUT_PENDING.with(|pending| pending.borrow().iter().map(|(window, owed)| (*window, owed.view)).collect());
+    for (window, view) in owed {
         invalidate_after_commit(cx, view);
-        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Notified));
+        note_pending(window, PendingLayout::Notified);
     }
 }
 
 /// Whether a commit that moved boxes in anchors waits for a read to prepare its patch: no layout
 /// invalidation was counted for it, yet the scroll metrics are older than the tree.
-pub(crate) fn layout_awaits_a_read() -> bool {
-    LAYOUT_PENDING.with(|pending| pending.borrow().values().any(|state| *state == PendingLayout::Waiting))
+/// A commit of another window does not count: its scroll metrics are its own.
+pub(crate) fn layout_awaits_a_read(window: gpui::WindowId) -> bool {
+    LAYOUT_PENDING.with(|pending| pending.borrow().get(&window).is_some_and(|owed| owed.state == PendingLayout::Waiting))
 }
 
-/// A frame is being built: the view's layout is no older than the tree.
-pub(crate) fn layout_is_drawn(view: gpui::EntityId) {
-    LAYOUT_PENDING.with(|pending| pending.borrow_mut().remove(&view));
-    list_writes_drawn(view);
+/// A frame is being built: the window's layout is no older than the tree.
+pub(crate) fn layout_is_drawn(window: gpui::WindowId) {
+    LAYOUT_PENDING.with(|pending| pending.borrow_mut().remove(&window));
+    list_writes_drawn(window);
 }
 
 /// The draw that follows a quiet write to a list's offset is done.
-pub(crate) fn list_writes_drawn(view: gpui::EntityId) {
-    LIST_WRITTEN.with(|written| written.borrow_mut().remove(&view));
+pub(crate) fn list_writes_drawn(window: gpui::WindowId) {
+    LIST_WRITTEN.with(|written| written.borrow_mut().remove(&window));
 }
 
 /// What a read of geometry does about the content of the skipped ancestors of its element.
@@ -813,7 +827,7 @@ pub(crate) fn read_after_layout<R>(
     invalidate_after_commit(cx, view.ok_or_else(no_view)?);
     if laid_out {
         crate::automation::keep_bounds(window_id);
-        keep_scroll_state();
+        keep_scroll_state(window_id);
         let held = window.root::<GpuixView>().flatten().and_then(|view| view.read(cx).held_instant());
         relevance.remember_forced_read(forcing, window.layout_stamp(), window, held);
     }
@@ -871,8 +885,8 @@ impl Repaint {
     }
 }
 
-pub(crate) fn is_virtual_list(id: u64) -> bool {
-    VIRTUAL_LIST_STATES.with(|cell| cell.borrow().contains_key(&id))
+pub(crate) fn is_virtual_list(window: gpui::WindowId, id: u64) -> bool {
+    VIRTUAL_LIST_STATES.with(|cell| cell.borrow().contains(window, id))
 }
 
 /// [`invalidate_after_commit`] for a scroll write of a `div` scroller or a virtual list, clamped
@@ -887,7 +901,7 @@ pub(crate) fn is_virtual_list(id: u64) -> bool {
 pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, list: bool) {
     if list && crate::retain::scroll_gate::list_write_is_quiet(view) {
         window.note_list_scrolled(view);
-        LIST_WRITTEN.with(|written| written.borrow_mut().insert(view));
+        LIST_WRITTEN.with(|written| written.borrow_mut().insert(window.window_handle().window_id(), view));
         return;
     }
     // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole. A layout still owed
@@ -898,11 +912,13 @@ pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::
 }
 
 #[cfg(target_os = "macos")]
-fn invalidate_window(dirty: Dirty) -> Result<()> {
-    if crate::events::sync_dispatch::in_sync_call() {
+fn invalidate_window_in(handle: gpui::WindowHandle<GpuixView>, dirty: Dirty) -> Result<()> {
+    if crate::events::sync_dispatch::in_sync_call()
+        && crate::events::sync_dispatch::active_window_is(handle.window_id())
+    {
         return crate::events::sync_dispatch::invalidate_root_view(dirty).map_err(Error::from_reason);
     }
-    update_window(move |_view, window, cx| {
+    crate::window_set::update_window_in(handle, move |_view, window, cx| {
         let view = cx.entity_id();
         invalidate_after_mutation(window, cx, view, dirty);
     })
@@ -1225,7 +1241,7 @@ async fn run_ui_commands(
                 top,
                 behavior,
             } => window.update(cx, move |_view, window, cx| {
-                if scroll_write_lays_out_first(crate::scroll_write::metrics_current(window), id, top, behavior) {
+                if scroll_write_lays_out_first(window.window_handle().window_id(), crate::scroll_write::metrics_current(window), id, top, behavior) {
                     { crate::renderer::notify_pending_layout(cx); window.draw_if_scroll_metrics_dirty(cx) };
                 }
                 let was_current = crate::scroll_write::metrics_current(window);
@@ -1235,15 +1251,16 @@ async fn run_ui_commands(
                 }
             }),
             UiCommand::ScrollToItem { id, index, offset } => {
+                let window_id = window.window_id();
                 if !VIRTUAL_LIST_STATES.with(|cell| {
-                    if !cell.borrow().contains_key(&id) {
+                    if !cell.borrow().contains(window_id, id) {
                         return false;
                     }
-                    queue_virtual_list_scroll(id, index, offset);
+                    queue_virtual_list_scroll(window_id, id, index, offset);
                     true
                 }) {
                     SCROLL_HANDLES.with(|cell| {
-                        if let Some(handle) = cell.borrow().get(&id) {
+                        if let Some(handle) = cell.borrow().get(window_id, id) {
                             handle.scroll_to_item(index);
                         }
                     });
@@ -1329,12 +1346,12 @@ async fn run_ui_commands(
                 })
             }
             UiCommand::GetScrollOffset { id, response } => {
-                response.send(scroll_element_position(id)).ok();
+                response.send(scroll_element_position(window.window_id(), id)).ok();
                 Ok(())
             }
             UiCommand::GetListScrollTop { id, response } => {
                 let top = VIRTUAL_LIST_STATES.with(|cell| {
-                    cell.borrow().get(&id).map(|state| {
+                    cell.borrow().get(window.window_id(), id).map(|state| {
                         let top = state.logical_scroll_top();
                         [
                             top.item_ix as f64,
@@ -1637,16 +1654,16 @@ static INPUT_FRAME_OFF: std::sync::LazyLock<std::sync::atomic::AtomicBool> =
     });
 
 #[cfg(target_os = "macos")]
-type FrameWakeHook = Arc<dyn Fn() + Send + Sync>;
+type FrameWakeHook = crate::shared_wake::WakeHook;
 
 /// The run-loop wake path. The wake means the main run loop has work (input, a main-queue
-/// block such as the display link's frame step, a timer). `pending` is set by the wake that
-/// queues JS work and cleared only when `tick()` returns, so a wake that lands during a frame
+/// block such as the display link's frame step, a timer). The hook and its `pending` flag are
+/// shared by every renderer on the App (`crate::shared_wake`): `pending` is set by the wake that
+/// queues JS work and cleared only when a `tick()` returns, so a wake that lands during a frame
 /// is dropped instead of queued behind it.
 #[cfg(target_os = "macos")]
-#[derive(Default)]
 pub(crate) struct FrameWake {
-    pending: Arc<std::sync::atomic::AtomicBool>,
+    owner: u64,
     /// The closure the run-loop watch calls, kept here so the test thread calls the same one.
     hook: Arc<Mutex<Option<FrameWakeHook>>>,
     #[cfg(feature = "test-support")]
@@ -1656,43 +1673,48 @@ pub(crate) struct FrameWake {
 }
 
 #[cfg(target_os = "macos")]
-impl FrameWake {
-    /// Makes `callback` what the run-loop watch wakes, at most once until `tick_finished`.
-    pub(crate) fn install(&self, callback: Function<(), ()>) -> Result<()> {
-        use std::sync::atomic::Ordering;
+impl Default for FrameWake {
+    fn default() -> Self {
+        static NEXT_OWNER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self {
+            owner: NEXT_OWNER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            hook: Arc::default(),
+            #[cfg(feature = "test-support")]
+            simulator: Mutex::default(),
+            #[cfg(feature = "test-support")]
+            tick_delay_ms: std::sync::atomic::AtomicU32::new(0),
+        }
+    }
+}
 
-        let pending = self.pending.clone();
-        pending.store(false, Ordering::Release);
+#[cfg(target_os = "macos")]
+impl FrameWake {
+    /// Makes `callback` what the run-loop watch wakes for this renderer, at most once until
+    /// `tick_finished`. The callbacks of other renderers stay.
+    pub(crate) fn install(&self, callback: Function<(), ()>) -> Result<()> {
         let wake = callback
             .build_threadsafe_function::<()>()
             .callee_handled::<false>()
             .weak::<true>()
             .build_callback(|_| Ok(()))?;
-        let hook: FrameWakeHook = Arc::new(move || {
-            if !pending.swap(true, Ordering::AcqRel)
-                && wake.call((), ThreadsafeFunctionCallMode::NonBlocking) != napi::Status::Ok
-            {
-                pending.store(false, Ordering::Release);
-            }
-        });
-        *self.hook.lock().unwrap() = Some(hook.clone());
-        gpui_macos::set_run_loop_wake_hook(Some(hook));
+        let hook = crate::shared_wake::register(
+            self.owner,
+            Arc::new(move || wake.call((), ThreadsafeFunctionCallMode::NonBlocking) == napi::Status::Ok),
+        );
+        *self.hook.lock().unwrap() = Some(hook);
         Ok(())
     }
 
     /// After the frame, on every path: a wake that landed during it was dropped, and the
     /// watch only wakes again once it is told the run loop was pumped.
     pub(crate) fn tick_finished(&self) {
-        self.pending
-            .store(false, std::sync::atomic::Ordering::Release);
-        gpui_macos::run_loop_pumped();
+        crate::shared_wake::tick_finished();
     }
 
+    /// Takes this renderer's callback out. The watch stops when no renderer has one.
     pub(crate) fn clear(&self) {
-        gpui_macos::set_run_loop_wake_hook(None);
+        crate::shared_wake::unregister(self.owner);
         self.hook.lock().unwrap().take();
-        self.pending
-            .store(false, std::sync::atomic::Ordering::Release);
         #[cfg(feature = "test-support")]
         self.stop_simulator();
     }
@@ -1745,6 +1767,10 @@ impl WakeSimulator {
 pub struct GpuixRenderer {
     #[cfg(target_os = "macos")]
     frame_wake: FrameWake,
+    /// This renderer's window, which `init` opens on the thread's App. Every call that needs the
+    /// window goes through it, so renderers on one App each act on their own.
+    #[cfg(target_os = "macos")]
+    window: Mutex<Option<gpui::WindowHandle<GpuixView>>>,
     event_callback: Mutex<Option<Arc<ThreadsafeFunction<EventPayload>>>>,
     sync_handler: crate::events::sync_dispatch::SyncHandlerOwner,
     tree: Arc<Mutex<RetainedTree>>,
@@ -1763,6 +1789,66 @@ pub struct GpuixRenderer {
     ui_running: Arc<AtomicBool>,
 }
 
+#[cfg(all(target_os = "macos", not(all(target_arch = "wasm32", target_os = "unknown"))))]
+impl GpuixRenderer {
+    fn window_handle(&self) -> Result<gpui::WindowHandle<GpuixView>> {
+        (*self.window.lock().unwrap())
+            .ok_or_else(|| Error::from_reason("GPUI window is not initialized"))
+    }
+
+    /// The window of this renderer, `None` before `init`.
+    fn window_id(&self) -> Option<gpui::WindowId> {
+        self.window.lock().unwrap().map(|window| window.window_id())
+    }
+
+    /// The handle for a call that needs the window itself (a read, a measurement): once the window
+    /// is gone there is nothing to answer from, and the error says so.
+    fn open_window_handle(&self) -> Result<gpui::WindowHandle<GpuixView>> {
+        let handle = self.window_handle()?;
+        if crate::window_set::is_open(handle.window_id()) {
+            Ok(handle)
+        } else {
+            Err(Error::from_reason("The window is closed"))
+        }
+    }
+
+    /// Runs a setter that only means something for a window that is there: once the window is gone
+    /// (closed by the user, by `closeWindow`, or by the app quitting) it has nothing to set and does
+    /// nothing. A window that went while `set` ran does nothing either; an error of a window that is
+    /// still there (one only in the middle of its own update) is the caller's.
+    fn unless_closed(&self, set: impl FnOnce() -> Result<()>) -> Result<()> {
+        if self.is_window_closed() {
+            return Ok(());
+        }
+        set().or_else(|error| if self.is_window_closed() { Ok(()) } else { Err(error) })
+    }
+
+    fn update_window<R>(
+        &self,
+        update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) -> R,
+    ) -> Result<R> {
+        crate::window_set::update_window_in(self.open_window_handle()?, update)
+    }
+
+    fn update_window_or_defer(
+        &self,
+        update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) + 'static,
+    ) -> Result<()> {
+        self.unless_closed(|| crate::window_set::update_window_or_defer_in(self.window_handle()?, update))
+    }
+
+    fn update_window_without_view<R>(
+        &self,
+        update: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> R,
+    ) -> Result<R> {
+        crate::window_set::update_window_without_view_in(self.open_window_handle()?, update)
+    }
+
+    fn invalidate_window(&self, dirty: Dirty) -> Result<()> {
+        self.unless_closed(|| invalidate_window_in(self.window_handle()?, dirty))
+    }
+}
+
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 impl GpuixRenderer {
     fn apply_text_selection(
@@ -1771,7 +1857,7 @@ impl GpuixRenderer {
         request: crate::custom_elements::text_selection::SelectionRequest,
     ) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(move |view, window, cx| {
+        return self.update_window(move |view, window, cx| {
             view.set_text_selection(id, request, window, cx)
         })?
         .map_err(Error::from_reason);
@@ -1934,7 +2020,7 @@ impl GpuixRenderer {
         if !*self.initialized.lock().unwrap() {
             return Ok(None);
         }
-        update_window_without_view(|window, cx| {
+        self.update_window_without_view(|window, cx| {
             pass(window, cx);
             window.window_handle().window_id()
         })
@@ -2001,7 +2087,7 @@ impl GpuixRenderer {
             if !*self.initialized.lock().unwrap() {
                 return Ok(None);
             }
-            return update_window_without_view(|window, cx| {
+            return self.update_window_without_view(|window, cx| {
                 read_after_layout(
                     &self.tree,
                     id,
@@ -2078,7 +2164,7 @@ impl GpuixRenderer {
         };
 
         #[cfg(target_os = "macos")]
-        return update_window(apply)?.map_err(Error::from_reason);
+        return self.update_window(apply)?.map_err(Error::from_reason);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
@@ -2111,7 +2197,7 @@ impl GpuixRenderer {
     /// that only macOS implements, and there GPUI runs on the JS thread.
     fn settle_pointer_lock(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window_or_defer(|view, window, cx| view.apply_pointer_lock(window, cx));
+        return self.update_window_or_defer(|view, window, cx| view.apply_pointer_lock(window, cx));
 
         #[cfg(not(target_os = "macos"))]
         self.request_invalidate()
@@ -2124,7 +2210,7 @@ impl GpuixRenderer {
     /// Asks for a frame for what `dirty` says changed. The other renderers have one kind of frame.
     fn request_invalidate_for(&self, dirty: Dirty) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return invalidate_window(dirty);
+        return self.invalidate_window(dirty);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::Invalidate);
@@ -2152,6 +2238,8 @@ impl GpuixRenderer {
             pointer_requests: Default::default(),
             #[cfg(target_os = "macos")]
             frame_wake: FrameWake::default(),
+            #[cfg(target_os = "macos")]
+            window: Mutex::new(None),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -2182,6 +2270,8 @@ impl GpuixRenderer {
         return self.init_threaded(options);
     }
 
+    /// The first renderer on a thread creates the GPUI App and its window. Every renderer after
+    /// it opens another window on that App (`window_set`).
     #[cfg(target_os = "macos")]
     fn init_macos(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
@@ -2192,14 +2282,17 @@ impl GpuixRenderer {
                 return Err(Error::from_reason("Renderer is already initialized"));
             }
         }
-        if MAC_PLATFORM.with(|platform| platform.borrow().is_some()) {
+        // `MAC_PLATFORM`, not `GPUI_APP`, says whether an App exists: thread-locals are destroyed
+        // in the order they were first used, and the App (in `GPUI_APP`) has to go before the
+        // profiler journal's thread-local that its windows write to when they drop, so `GPUI_APP`
+        // must not be touched before the first window is open.
+        let has_app = MAC_PLATFORM.with(|platform| platform.borrow().is_some());
+        if has_app && (crate::window_set::app_has_ended() || GPUI_APP.with(|app| app.borrow().is_none())) {
             return Err(Error::from_reason(
-                "A GPUI application already exists on this thread",
+                "The GPUI application of this thread has ended, so it cannot open a window",
             ));
         }
 
-        let width = options.width.unwrap_or(800.0);
-        let height = options.height.unwrap_or(600.0);
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
         // `focus: false` must also skip `cx.activate`: the window flag only
@@ -2209,20 +2302,31 @@ impl GpuixRenderer {
             &window_kind,
             options.focus.unwrap_or(true),
         );
-        let window_options = options.clone();
         let appearance = appearance_override(&options).map_err(Error::from_reason)?;
-        let displays = crate::screen::all_displays()?;
+        let request = WindowRequest {
+            width: options.width.unwrap_or(800.0),
+            height: options.height.unwrap_or(600.0),
+            displays: crate::screen::all_displays()?,
+            window_kind,
+            window_options: options,
+            title,
+            tree: self.tree.clone(),
+            callback: self.event_callback_for_view(),
+            selection: self.selection.clone(),
+            pointer_requests: self.pointer_requests.clone(),
+        };
+
+        if has_app {
+            let window_handle = crate::window_set::open_another(&request, appearance, activate)?;
+            return self.finish_init(window_handle);
+        }
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
         // Key handlers run JS, and each key needs its own microtask checkpoint: see
         // docs/fork/frames-and-wakes.md.
         platform.set_yield_after_key_event(true);
 
-        let tree = self.tree.clone();
-        let callback = self.event_callback_for_view();
-
-        let selection = self.selection.clone();
-        let pointer_requests = self.pointer_requests.clone();
+        let app_name_for_app = app_name;
         let opened_window = Rc::new(RefCell::new(None));
         let startup_error = Rc::new(RefCell::new(None));
         let opened_window_for_app = opened_window.clone();
@@ -2237,38 +2341,11 @@ impl GpuixRenderer {
             crate::events::clipboard::init(cx);
             // After the other bindings: `set_menus` reads key equivalents out of
             // the keymap, so every binding must exist before it runs.
-            crate::app_menu::init(&app_name, cx);
+            crate::app_menu::init(&app_name_for_app, cx);
+            crate::window_set::observe_closes(cx);
             cx.set_window_appearance(appearance);
-            let bounds = gpui::Bounds::centered(
-                None,
-                gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
-                cx,
-            );
 
-            match cx.open_window(
-                to_gpui_window_options(&window_options, window_kind, bounds, &displays),
-                |window, cx| {
-                    cx.new(|cx| {
-                        let mut view = GpuixView::new(
-                            tree.clone(),
-                            callback.clone(),
-                            title,
-                            selection.clone(),
-                            pointer_requests.clone(),
-                        );
-                        view.observe_appearance(window, cx);
-                        view.observe_viewport(window, cx);
-                        view.observe_scroller_style(cx);
-                        view.observe_media_features(window, cx);
-                        view.set_frameless(window_options.frameless());
-                        crate::events::enable_dom_hit_testing(window);
-                        crate::focus_emulation::apply(window, cx);
-                        crate::layout::container::allow_redraw_passes(window);
-                        view.install_key_interception(window, cx);
-                        view
-                    })
-                },
-            ) {
+            match open_gpuix_window(cx, &request) {
                 Ok(window_handle) => {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
                     if activate {
@@ -2276,7 +2353,7 @@ impl GpuixRenderer {
                     }
                 }
                 Err(error) => {
-                    *startup_error_for_app.borrow_mut() = Some(error.to_string());
+                    *startup_error_for_app.borrow_mut() = Some(error);
                 }
             }
         });
@@ -2309,9 +2386,13 @@ impl GpuixRenderer {
         GPUI_APP.with(|a| {
             *a.borrow_mut() = Some(app_handle);
         });
-        GPUI_WINDOW.with(|w| {
-            *w.borrow_mut() = Some(window_handle);
-        });
+        self.finish_init(window_handle)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn finish_init(&self, window_handle: gpui::WindowHandle<GpuixView>) -> Result<()> {
+        crate::window_set::opened(window_handle.window_id());
+        *self.window.lock().unwrap() = Some(window_handle);
         self.sync_handler.bind_window(window_handle.window_id());
 
         *self.initialized.lock().unwrap() = true;
@@ -2417,12 +2498,16 @@ impl GpuixRenderer {
                                             pointer_requests,
                                         );
                                         view.observe_appearance(window, cx);
+                                        // Emulation first: turning it on notifies activation observers at once, and ours
+                                        // would update the view that is still being built here. Registered after, it only
+                                        // sees later activation changes.
+                                        crate::focus_emulation::apply(window, cx);
+                                        view.observe_window_activity(window, cx);
                                         view.observe_viewport(window, cx);
                                         view.observe_scroller_style(cx);
                                         view.observe_media_features(window, cx);
                                         view.set_frameless(window_options.frameless());
                                         crate::events::enable_dom_hit_testing(window);
-                                        crate::focus_emulation::apply(window, cx);
                                         crate::layout::container::allow_redraw_passes(window);
                                         view.install_key_interception(window, cx);
                                         view
@@ -2498,6 +2583,11 @@ impl GpuixRenderer {
         let tree_id = tree.id();
         drop(tree);
         crate::custom_elements::nativeview::teardown::tell_destroyed(tree_id, &destroyed)?;
+        // A closed window still takes the batch, which is what unmounting the root of a window the
+        // user closed sends: the tree is the renderer's, and there is no window left to draw or focus.
+        if self.is_window_closed() {
+            return Ok(destroyed);
+        }
         // A re-render that changed nothing sends a batch of identical resends.
         // Waking the window for it makes it rebuild and diff the whole element
         // tree to draw the frame it already has.
@@ -2514,7 +2604,7 @@ impl GpuixRenderer {
     /// synchronously; there the next frame focuses the element.
     fn commit_auto_focus(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window_without_view(|window, cx| {
+        return self.update_window_without_view(|window, cx| {
             crate::focus::change_focus(window, cx, |view, window, cx| {
                 view.commit_auto_focus(window, cx)
             })
@@ -2548,6 +2638,9 @@ impl GpuixRenderer {
                         .map(|platform| platform.pump_events_reporting_step())
                 });
                 let running = pumped.is_some_and(|outcome| outcome.is_some());
+                if !running {
+                    crate::window_set::note_app_ended();
+                }
                 #[cfg(feature = "test-support")]
                 {
                     let delay = self
@@ -2587,6 +2680,49 @@ impl GpuixRenderer {
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.initialized.lock().unwrap()
+    }
+
+    /// Whether the window this renderer opened is gone: the user closed it, `closeWindow()` did, or
+    /// the app quit. The App goes on for the windows that are left, and `tick()` keeps pumping it
+    /// and answering `true` until the last one closes. False before `init`.
+    #[napi]
+    pub fn is_window_closed(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.window_id().is_some_and(|window| !crate::window_set::is_open(window))
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            *self.initialized.lock().unwrap() && !self.ui_running.load(Ordering::Acquire)
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            false
+        }
+    }
+
+    /// Closes this renderer's window and no other. The App ends when the last window closes (the
+    /// quit `tick()` reports), as when the user closes it. Closing a window that is already gone
+    /// does nothing.
+    #[napi]
+    pub fn close_window(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            if self.window_id().is_none_or(|window| !crate::window_set::is_open(window)) {
+                return Ok(());
+            }
+            return self.update_window_without_view(|window, _cx| window.remove_window());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("closeWindow is only implemented on macOS"))
     }
 
     /// Whether a display link started since it last drew still waits for its first step, so the
@@ -2734,7 +2870,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| {
+        return self.update_window(|_view, window, _cx| {
             let size = window.viewport_size();
             WindowSize {
                 width: f32::from(size.width) as f64,
@@ -2763,7 +2899,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn get_window_insets(&self) -> Result<WindowInsets> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| WindowInsets::from_gpui(window.insets()));
+        return self.update_window(|_view, window, _cx| WindowInsets::from_gpui(window.insets()));
 
         #[cfg(not(target_os = "macos"))]
         Ok(WindowInsets::default())
@@ -2774,7 +2910,7 @@ impl GpuixRenderer {
     pub fn set_debug_frame_overlay(&self, mode: String) -> Result<String> {
         let mode = parse_debug_frame_overlay_mode(&mode)?;
         #[cfg(target_os = "macos")]
-        return update_window(move |_view, window, _cx| {
+        return self.update_window(move |_view, window, _cx| {
             window.set_debug_frame_overlay_mode(mode);
             debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).to_string()
         });
@@ -2798,7 +2934,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn cycle_debug_frame_overlay(&self) -> Result<String> {
         #[cfg(target_os = "macos")]
-        return update_window(move |_view, window, _cx| {
+        return self.update_window(move |_view, window, _cx| {
             window.cycle_debug_frame_overlay_mode();
             debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).to_string()
         });
@@ -2826,7 +2962,7 @@ impl GpuixRenderer {
 
     fn debug_frame_overlay_mode(&self) -> Result<String> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| {
+        return self.update_window(|_view, window, _cx| {
             debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).to_string()
         });
 
@@ -2850,8 +2986,10 @@ impl GpuixRenderer {
     #[napi]
     pub fn reset_debug_frame_overlay_stats(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| {
-            window.reset_debug_frame_overlay_stats();
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, _cx| {
+                window.reset_debug_frame_overlay_stats();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -2870,7 +3008,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn get_debug_frame_overlay_stats(&self) -> Result<DebugFrameOverlayStats> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| {
+        return self.update_window(|_view, window, _cx| {
             debug_frame_overlay_stats_js(window.debug_frame_overlay_stats())
         });
 
@@ -2903,7 +3041,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn get_patch_counters(&self) -> Result<PatchCounters> {
         #[cfg(target_os = "macos")]
-        return update_window(|view, window, _cx| patch_counters_js(view, window));
+        return self.update_window(|view, window, _cx| patch_counters_js(view, window));
 
         #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("getPatchCounters needs macOS"))
@@ -2915,7 +3053,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn get_painted_frame_count(&self) -> Result<f64> {
         #[cfg(target_os = "macos")]
-        return update_window(|view, _window, _cx| view.painted_frame_count() as f64);
+        return self.update_window(|view, _window, _cx| view.painted_frame_count() as f64);
 
         #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("getPaintedFrameCount needs macOS"))
@@ -2927,7 +3065,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn is_window_visible(&self) -> Result<bool> {
         #[cfg(target_os = "macos")]
-        return update_window_without_view(|window, _cx| crate::window_key::is_visible(window))?;
+        return self.update_window_without_view(|window, _cx| crate::window_key::is_visible(window))?;
 
         #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("isWindowVisible needs macOS"))
@@ -2940,10 +3078,63 @@ impl GpuixRenderer {
     #[napi]
     pub fn is_window_key(&self) -> Result<bool> {
         #[cfg(target_os = "macos")]
-        return update_window_without_view(|window, _cx| crate::window_key::is_key(window))?;
+        return self.update_window_without_view(|window, _cx| crate::window_key::is_key(window))?;
 
         #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("isWindowKey needs macOS"))
+    }
+
+    /// The window's device pixels per CSS px: `devicePixelRatio`. It follows the display the
+    /// window is on, so read it again after a `mediaChange`.
+    #[napi]
+    pub fn get_scale_factor(&self) -> Result<f64> {
+        self.update_window_without_view(|window, _cx| f64::from(window.scale_factor()))
+    }
+
+    /// Where the window's top-left corner is, in CSS px in the global space `getAllDisplays()`
+    /// reports (`screenX` and `screenY`). macOS only.
+    #[napi]
+    pub fn get_window_position(&self) -> Result<WindowPosition> {
+        #[cfg(target_os = "macos")]
+        {
+            let (local, display) = self.update_window_without_view(|window, cx| {
+                let bounds = window.bounds();
+                let display = window.display(cx).map(|display| u64::from(display.id()));
+                (bounds.origin, display)
+            })?;
+            let displays = crate::screen::all_displays()?;
+            // A window on no display (still opening) is placed against the primary one, whose origin is the global one.
+            let origin = display
+                .and_then(|id| displays.iter().find(|candidate| u64::from(candidate.id) == id))
+                .map_or((0.0, 0.0), |display| (display.bounds.x, display.bounds.y));
+            return Ok(WindowPosition {
+                x: origin.0 + f64::from(f32::from(local.x)),
+                y: origin.1 + f64::from(f32::from(local.y)),
+            });
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("getWindowPosition needs macOS"))
+    }
+
+    /// Sets the size of the window's content in CSS px, as the user dragging an edge would
+    /// (`window.resizeTo`). The window is not clamped to the display. macOS only.
+    #[napi]
+    pub fn set_window_size(&self, width: f64, height: f64) -> Result<()> {
+        if !(width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0) {
+            return Err(Error::from_reason(format!(
+                "The window size has to be positive, got {width} x {height}"
+            )));
+        }
+        #[cfg(target_os = "macos")]
+        return self.unless_closed(|| {
+            self.update_window_without_view(|window, _cx| {
+                window.resize(gpui::size(gpui::px(width as f32), gpui::px(height as f32)));
+            })
+        });
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("setWindowSize needs macOS"))
     }
 
     /// Bring the window forward and give it focus. This is how a window opened
@@ -2951,9 +3142,11 @@ impl GpuixRenderer {
     #[napi]
     pub fn activate_window(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, cx| {
-            cx.activate(true);
-            window.activate_window();
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, cx| {
+                cx.activate(true);
+                window.activate_window();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -2974,7 +3167,9 @@ impl GpuixRenderer {
     #[napi]
     pub fn minimize_window(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| window.minimize_window());
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, _cx| window.minimize_window())
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::MinimizeWindow);
@@ -2994,7 +3189,9 @@ impl GpuixRenderer {
     #[napi]
     pub fn zoom_window(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| window.zoom_window());
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, _cx| window.zoom_window())
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::ZoomWindow);
@@ -3014,7 +3211,9 @@ impl GpuixRenderer {
     #[napi]
     pub fn toggle_fullscreen(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| window.toggle_fullscreen());
+        return self.unless_closed(|| {
+            self.update_window(|_view, window, _cx| window.toggle_fullscreen())
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::ToggleFullscreen);
@@ -3033,10 +3232,12 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_window_title(&self, title: String) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(move |view, window, cx| {
-            view.window_title = title;
-            cx.notify();
-            window.refresh();
+        return self.unless_closed(|| {
+            self.update_window(move |view, window, cx| {
+                view.window_title = title;
+                cx.notify();
+                window.refresh();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3163,7 +3364,7 @@ impl GpuixRenderer {
         let action = crate::custom_elements::webview::WebviewAction::parse(&command, argument)
             .map_err(Error::from_reason)?;
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, _cx| view.webview_do(id, action))?
+        return self.update_window(move |view, _window, _cx| view.webview_do(id, action))?
             .map_err(Error::from_reason);
 
         #[cfg(not(target_os = "macos"))]
@@ -3181,7 +3382,7 @@ impl GpuixRenderer {
     ) -> Result<crate::custom_elements::webview::js_api::WebviewStateReading> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, _cx| view.webview_state(id))?
+        return self.update_window(move |view, _window, _cx| view.webview_state(id))?
             .map(Into::into)
             .map_err(Error::from_reason);
 
@@ -3206,7 +3407,7 @@ impl GpuixRenderer {
         #[cfg(target_os = "macos")]
         {
             let done = settle.completion();
-            if let Err(error) = update_window(move |view, _window, _cx| view.webview_execute_javascript(id, &code, done)) {
+            if let Err(error) = self.update_window(move |view, _window, _cx| view.webview_execute_javascript(id, &code, done)) {
                 settle.reject(error.reason.clone());
             }
         }
@@ -3228,7 +3429,7 @@ impl GpuixRenderer {
             return Ok(false);
         }
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::focus::change_focus(window, cx, move |view, window, cx| {
                 view.request_focus(id, window, cx)
             })
@@ -3253,12 +3454,14 @@ impl GpuixRenderer {
     pub fn blur_element(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
-            crate::focus::change_focus(window, cx, move |view, window, cx| {
-                view.blur_element(id, window, cx)
-            })
-        })?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |window, cx| {
+                crate::focus::change_focus(window, cx, move |view, window, cx| {
+                    view.blur_element(id, window, cx)
+                })
+            })?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::BlurElement(id));
@@ -3279,11 +3482,11 @@ impl GpuixRenderer {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
         {
-            let matches = update_window(move |view, window, _cx| {
+            let matches = self.update_window(move |view, window, _cx| {
                 view.matches_focus(id, &selector, window)
             })?
             .map_err(Error::from_reason)?;
-            update_window_without_view(crate::focus::settle_focus)?.map_err(Error::from_reason)?;
+            self.update_window_without_view(crate::focus::settle_focus)?.map_err(Error::from_reason)?;
             return Ok(matches);
         }
 
@@ -3312,8 +3515,10 @@ impl GpuixRenderer {
     #[napi]
     pub fn focus_next(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window_without_view(|window, cx| crate::focus::step_focus(window, cx, false))?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(|window, cx| crate::focus::step_focus(window, cx, false))?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusNext);
@@ -3331,8 +3536,10 @@ impl GpuixRenderer {
     #[napi]
     pub fn focus_previous(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window_without_view(|window, cx| crate::focus::step_focus(window, cx, true))?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(|window, cx| crate::focus::step_focus(window, cx, true))?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusPrevious);
@@ -3350,7 +3557,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn get_focused_element_id(&self) -> Result<Option<f64>> {
         #[cfg(target_os = "macos")]
-        return update_window(|view, window, _cx| {
+        return self.update_window(|view, window, _cx| {
             view.focused_element_id(window).map(|id| id as f64)
         });
 
@@ -3376,13 +3583,15 @@ impl GpuixRenderer {
     pub fn focus_next_within(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
-            crate::focus::change_focus(window, cx, move |view, window, cx| {
-                view.focus_next_within(id, window, cx);
-                cx.notify();
-            })
-        })?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |window, cx| {
+                crate::focus::change_focus(window, cx, move |view, window, cx| {
+                    view.focus_next_within(id, window, cx);
+                    cx.notify();
+                })
+            })?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusNextWithin(id));
@@ -3401,13 +3610,15 @@ impl GpuixRenderer {
     pub fn focus_previous_within(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
-            crate::focus::change_focus(window, cx, move |view, window, cx| {
-                view.focus_previous_within(id, window, cx);
-                cx.notify();
-            })
-        })?
-        .map_err(Error::from_reason);
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |window, cx| {
+                crate::focus::change_focus(window, cx, move |view, window, cx| {
+                    view.focus_previous_within(id, window, cx);
+                    cx.notify();
+                })
+            })?
+            .map_err(Error::from_reason)
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusPreviousWithin(id));
@@ -3426,10 +3637,12 @@ impl GpuixRenderer {
     pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {
         let event_id = to_element_id(event_id)?;
         #[cfg(target_os = "macos")]
-        return update_window(move |view, window, cx| {
-            view.routing.set_window_keys(key_down, key_up, event_id);
-            cx.notify();
-            window.refresh();
+        return self.unless_closed(|| {
+            self.update_window(move |view, window, cx| {
+                view.routing.set_window_keys(key_down, key_up, event_id);
+                cx.notify();
+                window.refresh();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3451,7 +3664,9 @@ impl GpuixRenderer {
     #[napi]
     pub fn blur(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, _cx| window.blur());
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |window, _cx| window.blur())
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::Blur);
@@ -3470,10 +3685,12 @@ impl GpuixRenderer {
     pub fn set_window_selection_change(&self, enabled: bool, event_id: f64) -> Result<()> {
         let event_id = to_element_id(event_id)?;
         #[cfg(target_os = "macos")]
-        return update_window(move |view, window, cx| {
-            view.set_selection_change_listener(enabled, event_id);
-            cx.notify();
-            window.refresh();
+        return self.unless_closed(|| {
+            self.update_window(move |view, window, cx| {
+                view.set_selection_change_listener(enabled, event_id);
+                cx.notify();
+                window.refresh();
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3493,8 +3710,10 @@ impl GpuixRenderer {
     pub fn set_window_appearance_change(&self, enabled: bool, event_id: f64) -> Result<()> {
         let event_id = to_element_id(event_id)?;
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, _cx| {
-            view.set_appearance_change_listener(enabled, event_id);
+        return self.unless_closed(|| {
+            self.update_window(move |view, _window, _cx| {
+                view.set_appearance_change_listener(enabled, event_id);
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3516,8 +3735,10 @@ impl GpuixRenderer {
     #[napi]
     pub fn set_window_media_change(&self, enabled: bool) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, _cx| {
-            view.set_media_change_listener(enabled);
+        return self.unless_closed(|| {
+            self.update_window(move |view, _window, _cx| {
+                view.set_media_change_listener(enabled);
+            })
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -3548,7 +3769,9 @@ impl GpuixRenderer {
     pub fn set_appearance(&self, appearance: String) -> Result<()> {
         let appearance = parse_window_appearance(&appearance).map_err(Error::from_reason)?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |_window, cx| cx.set_window_appearance(appearance));
+        return self.unless_closed(|| {
+            self.update_window_without_view(move |_window, cx| cx.set_window_appearance(appearance))
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::SetAppearance(appearance));
@@ -3568,7 +3791,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn get_appearance(&self) -> Result<String> {
         #[cfg(target_os = "macos")]
-        return update_window(|_view, window, _cx| {
+        return self.update_window(|_view, window, _cx| {
             appearance_name(window.appearance()).to_string()
         });
 
@@ -4023,10 +4246,10 @@ impl GpuixRenderer {
         let behavior =
             crate::scroll::Behavior::parse(behavior.as_deref()).map_err(Error::from_reason)?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             // Nothing is laid out for most writes (see `scroll_write`): a write the layout is behind
             // is clamped by the layout that comes next, and a read after it lays out first.
-            if scroll_write_lays_out_first(crate::scroll_write::metrics_current(window), id, top, behavior) {
+            if scroll_write_lays_out_first(window.window_handle().window_id(), crate::scroll_write::metrics_current(window), id, top, behavior) {
                 { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
             }
             let was_current = crate::scroll_write::metrics_current(window);
@@ -4072,22 +4295,24 @@ impl GpuixRenderer {
         let index = index as usize;
         let offset = offset_in_item.unwrap_or(0.0) as f32;
         #[cfg(target_os = "macos")]
-        if !VIRTUAL_LIST_STATES.with(|cell| {
-            if !cell.borrow().contains_key(&id) {
-                return false;
-            }
-            queue_virtual_list_scroll(id, index, offset);
-            true
-        }) {
-            SCROLL_HANDLES.with(|cell| {
-                let handles = cell.borrow();
-                if let Some(handle) = handles.get(&id) {
-                    handle.scroll_to_item(index);
+        {
+            let window = self.window_handle()?.window_id();
+            if !VIRTUAL_LIST_STATES.with(|cell| {
+                if !cell.borrow().contains(window, id) {
+                    return false;
                 }
-            });
+                queue_virtual_list_scroll(window, id, index, offset);
+                true
+            }) {
+                SCROLL_HANDLES.with(|cell| {
+                    let handles = cell.borrow();
+                    if let Some(handle) = handles.get(window, id) {
+                        handle.scroll_to_item(index);
+                    }
+                });
+            }
+            return self.invalidate_window(Dirty::Layout);
         }
-        #[cfg(target_os = "macos")]
-        return invalidate_window(Dirty::Layout);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::ScrollToItem { id, index, offset });
@@ -4114,14 +4339,16 @@ impl GpuixRenderer {
     pub fn get_list_scroll_top(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return Ok(VIRTUAL_LIST_STATES.with(|cell| {
-            cell.borrow().get(&id).map(|state| {
-                let top = state.logical_scroll_top();
-                vec![
-                    top.item_ix as f64,
-                    f64::from(f32::from(top.offset_in_item)),
-                    f64::from(f32::from(state.viewport_bounds().size.height)),
-                ]
+        return Ok(self.window_id().and_then(|window| {
+            VIRTUAL_LIST_STATES.with(|cell| {
+                cell.borrow().get(window, id).map(|state| {
+                    let top = state.logical_scroll_top();
+                    vec![
+                        top.item_ix as f64,
+                        f64::from(f32::from(top.offset_in_item)),
+                        f64::from(f32::from(state.viewport_bounds().size.height)),
+                    ]
+                })
             })
         }));
 
@@ -4150,12 +4377,15 @@ impl GpuixRenderer {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
         {
-            if crate::scroll_write::has_pending_container(id) {
-                update_window_without_view(|window, cx| {
+            let Some(window) = self.window_id() else {
+                return Ok(None);
+            };
+            if crate::scroll_write::has_pending_container(window, id) {
+                self.update_window_without_view(|window, cx| {
                     { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) };
                 })?;
             }
-            return Ok(scroll_element_position(id).map(|position| position.to_vec()));
+            return Ok(scroll_element_position(window, id).map(|position| position.to_vec()));
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4195,7 +4425,7 @@ impl GpuixRenderer {
         {
             // Before `update_window_or_defer`, which leases the view the draw needs.
             self.draw_pending_changes()?;
-            update_window_or_defer(move |view, window, cx| {
+            self.update_window_or_defer(move |view, window, cx| {
                 if view.scroll_element_into_view(window, id, options) {
                     cx.notify();
                     window.refresh();
@@ -4226,7 +4456,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn scroll_by_key(&self, key: String, shift: bool) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window_or_defer(move |view, window, cx| {
+        return self.update_window_or_defer(move |view, window, cx| {
             if view.scroll_by_key(&key, shift, window) {
                 cx.notify();
                 window.refresh();
@@ -4261,7 +4491,7 @@ impl GpuixRenderer {
             if !*self.initialized.lock().unwrap() {
                 return Ok(None);
             }
-            return update_window_without_view(|window, cx| {
+            return self.update_window_without_view(|window, cx| {
                 read_after_layout(
                     &self.tree,
                     id,
@@ -4302,7 +4532,7 @@ impl GpuixRenderer {
             if !*self.initialized.lock().unwrap() {
                 return Ok(None);
             }
-            return update_window_without_view(|window, cx| {
+            return self.update_window_without_view(|window, cx| {
                 crate::css::computed_style::read_in_window(&self.tree, id, pseudo_element, window, cx)
             })?;
         }
@@ -4327,7 +4557,7 @@ impl GpuixRenderer {
             if !*self.initialized.lock().unwrap() {
                 return Ok(false);
             }
-            update_window_or_defer(|view, window, _cx| view.request_animation_frame(window))?;
+            self.update_window_or_defer(|view, window, _cx| view.request_animation_frame(window))?;
             return Ok(true);
         }
 
@@ -4412,7 +4642,7 @@ impl GpuixRenderer {
     pub fn click_element(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::events::activation::click_element(id, window, cx)
         })?
         .map_err(Error::from_reason);
@@ -4441,7 +4671,7 @@ impl GpuixRenderer {
     pub fn activate_element(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::events::activation::activate_element(id, window, cx)
         })?
         .map_err(Error::from_reason);
@@ -4472,7 +4702,7 @@ impl GpuixRenderer {
         let bytes = pixels.to_vec();
         #[cfg(target_os = "macos")]
         {
-            return update_window(move |view, window, cx| {
+            return self.update_window(move |view, window, cx| {
                 view.set_image_pixels(id, width, height, bytes, format, window, cx)
             })?
             .map_err(Error::from_reason);
@@ -4510,7 +4740,7 @@ impl GpuixRenderer {
         let bytes = bytes.to_vec();
         #[cfg(target_os = "macos")]
         {
-            return update_window(move |view, window, cx| {
+            return self.update_window(move |view, window, cx| {
                 view.set_encoded_image(id, bytes, window, cx)
             })?
             .map_err(Error::from_reason);
@@ -4544,7 +4774,7 @@ impl GpuixRenderer {
         let bytes = bytes.to_vec();
         #[cfg(target_os = "macos")]
         {
-            return update_window(move |_, window, cx| {
+            return self.update_window(move |_, window, cx| {
                 crate::background_images::deliver_to_view(&url, bytes, window, cx)
             })?
             .map_err(Error::from_reason);
@@ -4562,7 +4792,7 @@ impl GpuixRenderer {
     pub fn fail_style_image(&self, url: String, message: String) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
-            return update_window(move |_, window, cx| {
+            return self.update_window(move |_, window, cx| {
                 crate::background_images::fail_in_view(&url, message, window, cx)
             })?
             .map_err(Error::from_reason);
@@ -4614,7 +4844,7 @@ impl GpuixRenderer {
     ) -> Result<crate::custom_elements::text_selection::TextSelection> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, cx| view.text_selection(id, cx))?
+        return self.update_window(move |view, _window, cx| view.text_selection(id, cx))?
             .map_err(Error::from_reason);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4640,7 +4870,7 @@ impl GpuixRenderer {
     pub fn get_text_value(&self, element_id: f64) -> Result<String> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, cx| view.text_control_value(id, cx))?
+        return self.update_window(move |view, _window, cx| view.text_control_value(id, cx))?
             .map_err(Error::from_reason);
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -4676,7 +4906,7 @@ impl GpuixRenderer {
     pub fn pre_activate_element(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::events::activation::pre_activate_element(id, window, cx)
         })?
         .map_err(Error::from_reason);
@@ -4694,7 +4924,7 @@ impl GpuixRenderer {
     pub fn cancel_activation(&self, element_id: f64) -> Result<()> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::events::activation::cancel_element(id, window, cx)
         })?
         .map_err(Error::from_reason);
@@ -4715,7 +4945,7 @@ impl GpuixRenderer {
         #[cfg(target_os = "macos")]
         {
             let tree = self.tree.clone();
-            return update_window_without_view(move |window, cx| {
+            return self.update_window_without_view(move |window, cx| {
                 crate::events::input_state::write_flag(&tree, id, &name, value, window, cx)
             })?
             .map_err(Error::from_reason);
@@ -4736,7 +4966,7 @@ impl GpuixRenderer {
         #[cfg(target_os = "macos")]
         {
             let tree = self.tree.clone();
-            return update_window_without_view(move |window, cx| {
+            return self.update_window_without_view(move |window, cx| {
                 crate::events::input_state::write_range_value(&tree, id, &value, window, cx)
             })?
             .map_err(Error::from_reason);
@@ -4758,7 +4988,7 @@ impl GpuixRenderer {
         #[cfg(target_os = "macos")]
         {
             let tree = self.tree.clone();
-            return update_window_without_view(move |window, cx| {
+            return self.update_window_without_view(move |window, cx| {
                 crate::events::input_state::restore_controlled(&tree, id, window, cx)
             })?
             .map_err(Error::from_reason);
@@ -4779,7 +5009,7 @@ impl GpuixRenderer {
         let id = to_element_id(element_id)?;
         let submitter = submitter_id.map(to_element_id).transpose()?;
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::forms::request_submit(window, cx, id, submitter)
         })?
         .map_err(Error::from_reason);
@@ -4806,7 +5036,7 @@ impl GpuixRenderer {
     pub fn open_url(&self, url: String) -> Result<()> {
         #[cfg(target_os = "macos")]
         // Only the App is needed, so it does not lease the root view: a link handler can run inside a sync input handler.
-        return update_window_without_view(move |_window, cx| crate::open_url::open(cx, &url))?
+        return self.update_window_without_view(move |_window, cx| crate::open_url::open(cx, &url))?
             .map_err(Error::from_reason);
 
         #[cfg(not(target_os = "macos"))]
@@ -4825,7 +5055,7 @@ impl GpuixRenderer {
         let bytes = data.to_vec();
         #[cfg(target_os = "macos")]
         {
-            return update_window(move |view, window, cx| view.register_font(bytes, window, cx))?
+            return self.update_window(move |view, window, cx| view.register_font(bytes, window, cx))?
                 .map_err(Error::from_reason);
         }
 
@@ -4973,7 +5203,7 @@ impl GpuixRenderer {
             // An update per event, as AppKit sends them: what a keydown defers (the editor's `input`)
             // is delivered before the keyup, not after the whole sequence.
             for step in crate::automation::keystroke_steps(&keystrokes).map_err(Error::from_reason)? {
-                update_window_without_view(move |window, cx| step.dispatch(window, cx))?;
+                self.update_window_without_view(move |window, cx| step.dispatch(window, cx))?;
             }
             return Ok(());
         }
@@ -5001,7 +5231,7 @@ impl GpuixRenderer {
         let is_held = is_held.unwrap_or(false);
 
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::automation::dispatch_key_down(window, cx, &keystroke, is_held)
         })?
         .map_err(Error::from_reason);
@@ -5025,7 +5255,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn simulate_key_up(&self, keystroke: String) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::automation::dispatch_key_up(window, cx, &keystroke)
         })?
         .map_err(Error::from_reason);
@@ -5058,7 +5288,7 @@ impl GpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::automation::dispatch_click(window, cx, x, y, button, modifiers);
         });
 
@@ -5096,7 +5326,7 @@ impl GpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers);
         });
 
@@ -5134,7 +5364,7 @@ impl GpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::automation::dispatch_mouse_up(window, cx, x, y, button, modifiers);
         });
 
@@ -5171,7 +5401,7 @@ impl GpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button, modifiers);
         });
 
@@ -5219,7 +5449,7 @@ impl GpuixRenderer {
         let phase = crate::scroll::parse_touch_phase(phase.as_deref()).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
-        return update_window_without_view(move |window, cx| {
+        return self.update_window_without_view(move |window, cx| {
             crate::automation::dispatch_scroll_wheel(
                 window, cx, x, y, delta_x, delta_y, modifiers, phase,
             );
@@ -5252,7 +5482,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn clock_pause(&self) -> Result<f64> {
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, cx| {
+        return self.update_window(move |view, _window, cx| {
             let now_ms = view.clock.pause();
             cx.notify();
             now_ms
@@ -5273,7 +5503,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn clock_set(&self, now_ms: f64) -> Result<f64> {
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, cx| {
+        return self.update_window(move |view, _window, cx| {
             let now_ms = view.clock.set_ms(now_ms);
             cx.notify();
             now_ms
@@ -5297,7 +5527,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn clock_fast_forward(&self, delta_ms: f64) -> Result<f64> {
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, cx| {
+        return self.update_window(move |view, _window, cx| {
             let now_ms = view.clock.fast_forward_ms(delta_ms);
             cx.notify();
             now_ms
@@ -5321,7 +5551,7 @@ impl GpuixRenderer {
     #[napi]
     pub fn clock_resume(&self) -> Result<f64> {
         #[cfg(target_os = "macos")]
-        return update_window(move |view, _window, cx| {
+        return self.update_window(move |view, _window, cx| {
             let now_ms = view.clock.resume();
             cx.notify();
             now_ms
@@ -5343,7 +5573,7 @@ impl GpuixRenderer {
     pub fn capture_screenshot(&self, path: String) -> Result<()> {
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
-            let image = update_window(move |_view, window, cx| {
+            let image = self.update_window(move |_view, window, cx| {
                 cx.notify();
                 window.refresh();
                 window.render_to_image()
@@ -5420,7 +5650,7 @@ impl GpuixRenderer {
             use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
             let kind = crate::native_event::Kind::parse(&kind, x, y)?;
-            let ns_view = update_window_without_view(|window, _cx| {
+            let ns_view = self.update_window_without_view(|window, _cx| {
                 let handle = HasWindowHandle::window_handle(window)
                     .map_err(|error| Error::from_reason(error.to_string()))?;
                 match handle.as_raw() {
@@ -5932,7 +6162,8 @@ impl WebGpuixRenderer {
         let id = web_element_id(element_id)?;
         let behavior = crate::scroll::Behavior::parse(behavior.as_deref())
             .map_err(|message| wasm_bindgen::JsValue::from_str(&message))?;
-        if scroll_element_to(false, id, x, y, behavior) {
+        let window = web_window_id().ok_or_else(|| wasm_bindgen::JsValue::from_str("GPUI window is not initialized"))?;
+        if scroll_element_to(window, false, id, x, y, behavior) {
             notify_web();
         }
         Ok(())
@@ -5948,15 +6179,16 @@ impl WebGpuixRenderer {
         let id = web_element_id(element_id)?;
         let index = index as usize;
         let offset = offset_in_item.unwrap_or(0.0) as f32;
+        let window = web_window_id().ok_or_else(|| wasm_bindgen::JsValue::from_str("GPUI window is not initialized"))?;
         if !VIRTUAL_LIST_STATES.with(|states| {
-            if !states.borrow().contains_key(&id) {
+            if !states.borrow().contains(window, id) {
                 return false;
             }
-            queue_virtual_list_scroll(id, index, offset);
+            queue_virtual_list_scroll(window, id, index, offset);
             true
         }) {
             SCROLL_HANDLES.with(|handles| {
-                if let Some(handle) = handles.borrow().get(&id) {
+                if let Some(handle) = handles.borrow().get(window, id) {
                     handle.scroll_to_item(index);
                 }
             });
@@ -6169,8 +6401,9 @@ impl WebGpuixRenderer {
         element_id: f64,
     ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
+        let window = web_window_id().ok_or_else(|| wasm_bindgen::JsValue::from_str("GPUI window is not initialized"))?;
         let top = VIRTUAL_LIST_STATES.with(|states| {
-            states.borrow().get(&id).map(|state| {
+            states.borrow().get(window, id).map(|state| {
                 let top = state.logical_scroll_top();
                 [
                     top.item_ix as f64,
@@ -6191,7 +6424,8 @@ impl WebGpuixRenderer {
         element_id: f64,
     ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
-        let offset = scroll_element_position(id);
+        let window = web_window_id().ok_or_else(|| wasm_bindgen::JsValue::from_str("GPUI window is not initialized"))?;
+        let offset = scroll_element_position(window, id);
         let Some([x, y]) = offset else {
             return Ok(wasm_bindgen::JsValue::NULL);
         };
@@ -6427,12 +6661,8 @@ impl Drop for GpuixRenderer {
     fn drop(&mut self) {
         #[cfg(target_os = "macos")]
         {
-            if *self.initialized.lock().unwrap() {
-                gpui_macos::set_run_loop_wake_hook(None);
-            }
-            self.frame_wake.hook.lock().unwrap().take();
-            #[cfg(feature = "test-support")]
-            self.frame_wake.stop_simulator();
+            // Takes only this renderer's entry: another renderer on the App may still want wakes.
+            self.frame_wake.clear();
         }
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         self.ui_commands.lock().unwrap().take();
@@ -6443,6 +6673,8 @@ impl Drop for GpuixRenderer {
 
 pub(crate) struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
+    /// `RetainedTree::id` of `tree`, for what is kept by it after the window is gone (`Drop`).
+    tree_id: u64,
     pub(crate) event_callback: Option<EventCallback>,
     pub(crate) window_title: String,
     /// The title this view last gave its platform window. `render` sets the window's title only when
@@ -6456,6 +6688,8 @@ pub(crate) struct GpuixView {
     window_appearance_change: bool,
     window_appearance_event_id: u64,
     appearance_subscription: Option<gpui::Subscription>,
+    /// Tells JS when the window becomes or stops being the active one: see `window_activity`.
+    pub(crate) activity_subscription: Option<gpui::Subscription>,
     bounds_subscription: Option<gpui::Subscription>,
     media_viewport: gpui::Size<gpui::Pixels>,
     /// The OS preferences the stylesheets' media queries read. The test renderer sets its own.
@@ -7232,6 +7466,12 @@ fn resolve_highlight(
     Some((context, Some(total)))
 }
 
+impl Drop for GpuixView {
+    fn drop(&mut self) {
+        crate::accessibility::links::forget_tree(self.tree_id);
+    }
+}
+
 impl GpuixView {
     /// The instant the animations of `element` are read and commanded at: the time of the last
     /// frame, the timeline's, or the clock's `now` for an element that is dormant, since no frame
@@ -7552,8 +7792,10 @@ impl GpuixView {
         pointer_requests: crate::events::state::PointerRequests,
     ) -> Self {
         let routing = crate::events::keyboard::InputRouting::default();
+        let tree_id = tree.lock().unwrap().id();
         Self {
             tree,
+            tree_id,
             event_callback,
             window_title,
             applied_window_title: crate::window_title::AppliedWindowTitle::default(),
@@ -7564,6 +7806,7 @@ impl GpuixView {
             window_appearance_change: false,
             window_appearance_event_id: 0,
             appearance_subscription: None,
+            activity_subscription: None,
             bounds_subscription: None,
             media_viewport: gpui::Size::default(),
             media_features: crate::media::read_system_features(),
@@ -7726,8 +7969,7 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> std::result::Result<(), String> {
-        crate::text::font_check::check_font(&bytes)?;
-        crate::text::font_family::Fonts::of(cx).add(bytes).map_err(|error| error.to_string())?;
+        crate::text::font_family::Fonts::of(cx).register(bytes)?;
         cx.notify();
         window.refresh();
         Ok(())
@@ -7837,7 +8079,7 @@ impl GpuixView {
                         )
                     });
                     if let Some(offset) = offset {
-                        scrolled |= self.scroll_virtual_list_to_item(ancestor_id, index, offset);
+                        scrolled |= self.scroll_virtual_list_to_item(window_id, ancestor_id, index, offset);
                         // The row moves when the list does, and the list applies that on the
                         // next frame, so the scrollers around it have no box to align yet.
                         target = None;
@@ -8111,7 +8353,7 @@ impl GpuixView {
         let focus_styles = self.focus.styles(&tree, tree.keyboard_focus_dim());
         let pointer_state = self.pointer.clone();
         let pointer = pointer_state.borrow();
-        crate::layout::box_generation::hold_display(self.css_transitions.held_displays());
+        crate::layout::box_generation::hold_display(&tree, self.css_transitions.held_displays());
         let (motion_animating, motion_settled) =
             self.sync_motions_for_build(&tree, window, now, &focus_styles, &pointer, Some(expected_child_id));
         let motion_active = !motion_animating.is_empty();
@@ -8220,6 +8462,7 @@ impl GpuixView {
 
     pub(crate) fn scroll_virtual_list_to_item(
         &self,
+        window: gpui::WindowId,
         id: u64,
         index: usize,
         offset_in_item: f32,
@@ -8227,7 +8470,7 @@ impl GpuixView {
         if !self.virtual_lists.contains_key(&id) {
             return false;
         }
-        queue_virtual_list_scroll(id, index, offset_in_item);
+        queue_virtual_list_scroll(window, id, index, offset_in_item);
         true
     }
 
@@ -8270,7 +8513,7 @@ impl GpuixView {
         Some(crate::scroll::list_position(&self.virtual_lists.get(&id)?.state))
     }
 
-    pub(crate) fn reveal_virtual_list_ancestor(&self, id: u64) -> bool {
+    pub(crate) fn reveal_virtual_list_ancestor(&self, window: gpui::WindowId, id: u64) -> bool {
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         let mut current = id;
@@ -8292,7 +8535,7 @@ impl GpuixView {
         let Some((list_id, index)) = location else {
             return false;
         };
-        self.scroll_virtual_list_to_item(list_id, index, 0.0)
+        self.scroll_virtual_list_to_item(window, list_id, index, 0.0)
     }
 }
 
@@ -9281,7 +9524,7 @@ impl VirtualListEntry {
 
 impl GpuixView {
     pub(crate) fn request_focus(&mut self, id: u64, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
-        self.reveal_virtual_list_ancestor(id);
+        self.reveal_virtual_list_ancestor(window.window_handle().window_id(), id);
         if let Some(handle) = self.focus_handles.get(&id) {
             self.pending_focus_element = None;
             self.focus.note_programmatic();
@@ -10175,7 +10418,9 @@ impl GpuixView {
         self.with_sources(window, now, |sources, gliding| {
             self.retain.preview(
                 sources,
-                crate::scroll::animating() || crate::scrollbar::needs_frames() || crate::scrollbar::stale_at(now),
+                crate::scroll::animating_in(window.window_handle().window_id())
+                    || crate::scrollbar::needs_frames(window.window_handle().window_id())
+                    || crate::scrollbar::stale_at(window.window_handle().window_id(), now),
                 gliding,
             )
         })
@@ -10230,7 +10475,7 @@ impl GpuixView {
             focusable: &self.focus_handles,
             scrolls: &self.scroll_handles,
             measured: self.measurements.peek_changed(),
-            links: crate::accessibility::links::peek_changed(),
+            links: crate::accessibility::links::peek_changed(tree.id()),
             commanded,
             relevance: tree.relevance.pending(),
             customs: self.custom_registry.retain_states(),
@@ -10642,7 +10887,7 @@ impl gpui::Render for GpuixView {
         self.paint_reports.borrow_mut().scrolls.begin_pass();
         self.note_pass(window);
         self.apply_pointer_lock(window, cx);
-        layout_is_drawn(cx.entity_id());
+        layout_is_drawn(window.window_handle().window_id());
         self.install_patcher(window, cx);
         self.sync_commit_patching();
         let verifies = self.retain.verifies_frames();
@@ -10759,8 +11004,10 @@ impl gpui::Render for GpuixView {
         // sampled at `now` and not stepped, so building again at the same instant gives the same
         // state.
         let now = self.pass_instant(window);
-        crate::scroll::begin_frame(|id| tree.elements.contains_key(&id));
+        crate::scroll::begin_frame(window.window_handle().window_id(), |id| tree.elements.contains_key(&id));
+        crate::layout::anchor_size::begin_frame(window.window_handle().window_id(), |id| tree.elements.contains_key(&id));
         crate::scrollbar::begin_frame(
+            window.window_handle().window_id(),
             now,
             &self.clock,
             self.scroller_style
@@ -10768,7 +11015,7 @@ impl gpui::Render for GpuixView {
             window.draw_pass(),
         );
         // Stepped by the frame steps, before the frame that paints it.
-        let scroll_animating = crate::scroll::animating();
+        let scroll_animating = crate::scroll::animating_in(window.window_handle().window_id());
         // Before the motion sync reads them, so an element that stopped being
         // measured does not seed its motion from a size laid out long ago.
         self.measurements
@@ -10778,7 +11025,7 @@ impl gpui::Render for GpuixView {
         let pointer_state = self.pointer.clone();
         let pointer = pointer_state.borrow();
         // Before the motions are synced, which ask what has a box: the builds below read the same.
-        crate::layout::box_generation::hold_display(self.css_transitions.held_displays());
+        crate::layout::box_generation::hold_display(&tree, self.css_transitions.held_displays());
         // An element that went `display: none` is not built again, so this is where its subtree is told.
         for id in tree.take_pending_hides() {
             self.css_transitions.hide(&tree, id, now);
@@ -10851,7 +11098,7 @@ impl gpui::Render for GpuixView {
             focusable: &self.focus_handles,
             scrolls: &self.scroll_handles,
             measured: self.measurements.take_changed(),
-            links: crate::accessibility::links::take_changed(),
+            links: crate::accessibility::links::take_changed(tree.id()),
             commanded,
             relevance: tree.relevance.pending(),
             customs: self.custom_registry.retain_states(),
@@ -11039,8 +11286,10 @@ impl gpui::Render for GpuixView {
 
         // Sync scroll handles to thread_local so napi methods (scrollTo,
         // getScrollOffset) can access them without an App context.
+        let window_id = window.window_handle().window_id();
         SCROLL_HANDLES.with(|cell| {
-            let mut handles = cell.borrow_mut();
+            let mut cell = cell.borrow_mut();
+            let handles = cell.of_mut(window_id);
             handles.clear();
             for (&id, handle) in &self.scroll_handles {
                 if !crate::scroll::has_scrolling_box(&tree, id) {
@@ -11050,7 +11299,8 @@ impl gpui::Render for GpuixView {
             }
         });
         VIRTUAL_LIST_STATES.with(|cell| {
-            let mut states = cell.borrow_mut();
+            let mut cell = cell.borrow_mut();
+            let states = cell.of_mut(window_id);
             states.clear();
             for (&id, entry) in &self.virtual_lists {
                 states.insert(id, entry.state.clone());
@@ -11059,9 +11309,10 @@ impl gpui::Render for GpuixView {
         // One-shot: a queued scroll for a list that did not build this frame
         // would otherwise fire on some later frame, against child indices that
         // no longer match what JS meant.
-        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().clear());
+        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().clear(window_id));
         VIRTUAL_LIST_REPORTERS.with(|cell| {
-            let mut reporters = cell.borrow_mut();
+            let mut cell = cell.borrow_mut();
+            let reporters = cell.of_mut(window_id);
             reporters.clear();
             for (&id, entry) in &self.virtual_lists {
                 reporters.insert(id, entry.reporter.clone());
@@ -11069,7 +11320,7 @@ impl gpui::Render for GpuixView {
         });
         VIRTUAL_LIST_STATES.with(|states| {
             VIRTUAL_LIST_REPORTERS.with(|reporters| {
-                crate::scroll_write::settle_lists(window.window_handle().window_id(), &states.borrow(), &reporters.borrow())
+                crate::scroll_write::settle_lists(window_id, states.borrow().of(window_id), reporters.borrow().of(window_id))
             })
         });
 
@@ -12202,7 +12453,7 @@ fn build_element_unpumped(
         .map(|overlay| current_style.unwrap_or(&EMPTY_STYLE).with_inherited_overlay(overlay));
     let style = overlaid_style.as_deref().or(current_style);
     let anchored_style = anchor_scope.and_then(|anchored_id| {
-        style.and_then(|style| crate::layout::anchor_size::resolve(anchored_id, style))
+        style.and_then(|style| crate::layout::anchor_size::resolve(window.window_handle().window_id(), anchored_id, style))
     });
     let style = anchored_style.as_ref().or(style);
     let natural_width_style = (measured
@@ -12762,7 +13013,7 @@ fn build_virtual_list(
     // changes, so the indices JS computed against its committed child list are
     // the indices the splice-adjusted ListState sees.
     let queued_scroll =
-        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&element.id));
+        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(window.window_handle().window_id(), element.id));
     let listens = element.events().contains("visibleRange");
     reporter.listen(&ctx.event_callback, listens);
     let range_report = queued_scroll.filter(|_| listens).map(|_| {
@@ -12849,6 +13100,7 @@ fn build_virtual_list(
     let default_style = StyleDesc::default();
     crate::scrollbar::attach_to_list(
         list,
+        window.window_handle().window_id(),
         element.id,
         crate::scrollbar::Source::List(scroll_state, reporter.clone()),
         element.style.as_deref().unwrap_or(&default_style),
@@ -13009,7 +13261,7 @@ pub(crate) fn build_host_container(
         resolve_collapsed_borders(ctx, CollapsedTable::Element(element, style), window.scale_factor());
     }
     el = crate::layout::table::apply(el, ctx.tree, element, style, &ctx.inherited.table, &ctx.collapsed);
-    el = crate::scroll::apply_container(el, element.id, style, &ctx.inherited.colors, ctx.scroll_handles);
+    el = crate::scroll::apply_container(el, window.window_handle().window_id(), element.id, style, &ctx.inherited.colors, ctx.scroll_handles);
     let outer_scroller = ctx.scroller;
     if let Some(handle) = ctx.scroll_handles.get(&element.id) {
         // Its offset is part of what the build read (the key sees it move), and so is where its
@@ -14975,6 +15227,14 @@ impl Task for PromptForPathsTask {
 pub struct WindowSize {
     pub width: f64,
     pub height: f64,
+}
+
+/// A window's top-left corner in CSS px, in the global space of `getAllDisplays()`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct WindowPosition {
+    pub x: f64,
+    pub y: f64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -20134,5 +20394,76 @@ mod running_motion_tests {
         assert!(states[&3].is_animating(now) && states[&4].is_animating(now), "both run");
         let running = running_motion(&tree, &states, None, (&Default::default(), &Default::default()), &Default::default(), now);
         assert_eq!(running, vec![4], "3 is under the host that skips its content, 4 is drawn");
+    }
+}
+
+/// A read of one window settles that window's layout and no other's.
+#[cfg(test)]
+mod layout_scope_tests {
+    use super::*;
+
+    fn page(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<GpuixView> {
+        let tree = Arc::new(Mutex::new(RetainedTree::new()));
+        {
+            let mut tree = tree.lock().unwrap();
+            tree.create_element(1, "div".to_owned());
+            tree.set_root(1);
+        }
+        let window = cx.add_window(|window, _| {
+            crate::events::enable_dom_hit_testing(window);
+            crate::layout::container::allow_redraw_passes(window);
+            GpuixView::new(
+                tree,
+                None,
+                "test".to_owned(),
+                SharedSelection::default(),
+                crate::events::state::PointerRequests::default(),
+            )
+        });
+        cx.update_window(window.into(), |_, window, app| {
+            window.refresh();
+            window.draw(app).clear(app);
+        })
+        .unwrap();
+        window
+    }
+
+    fn view_of(cx: &mut gpui::TestAppContext, window: gpui::WindowHandle<GpuixView>) -> gpui::EntityId {
+        cx.update_window(window.into(), |_, window, _| window.root::<GpuixView>().flatten().unwrap().entity_id()).unwrap()
+    }
+
+    fn state_of(window: gpui::WindowId) -> Option<PendingLayout> {
+        LAYOUT_PENDING.with(|pending| pending.borrow().get(&window).map(|owed| owed.state))
+    }
+
+    fn settle(cx: &mut gpui::TestAppContext, window: gpui::WindowHandle<GpuixView>) {
+        cx.update_window(window.into(), |_, window, app| settle_pending_layout(window, app)).unwrap();
+    }
+
+    #[gpui::test]
+    fn a_read_in_one_window_leaves_the_layout_another_window_owes_for_its_own_read(cx: &mut gpui::TestAppContext) {
+        let (first, second) = (page(cx), page(cx));
+        let (first_id, second_id) = (first.window_id(), second.window_id());
+        let (first_view, second_view) = (view_of(cx, first), view_of(cx, second));
+        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(first_id, OwedLayout { view: first_view, state: PendingLayout::Prepared }));
+        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(second_id, OwedLayout { view: second_view, state: PendingLayout::Waiting }));
+        LIST_WRITTEN.with(|written| written.borrow_mut().insert(second_id, second_view));
+        assert!(layout_awaits_a_read(second_id));
+        assert!(!layout_awaits_a_read(first_id), "the scroll metrics of a window do not wait on another window's commit");
+
+        settle(cx, first);
+
+        // The second window still owes its patch to a read of its own, and its quiet list write is not drawn yet.
+        assert_eq!(state_of(second_id), Some(PendingLayout::Waiting));
+        assert!(LIST_WRITTEN.with(|written| written.borrow().contains_key(&second_id)));
+        assert!(layout_awaits_a_read(second_id));
+
+        settle(cx, second);
+        assert_ne!(state_of(second_id), Some(PendingLayout::Waiting));
+        assert!(!LIST_WRITTEN.with(|written| written.borrow().contains_key(&second_id)));
+
+        forget_pending_layout(first_id);
+        forget_pending_layout(second_id);
+        assert!(!holds_pending_layout(first_id) && !holds_pending_layout(second_id));
     }
 }

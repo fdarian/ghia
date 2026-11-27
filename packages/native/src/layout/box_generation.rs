@@ -1,23 +1,30 @@
-use std::cell::RefCell;
 use std::collections::HashSet;
 
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
-thread_local! {
-    static DISPLAY_HELD: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
-}
-
 /// The elements a `display` transition keeps rendered although their style says
 /// `display: none`. Set before each frame builds; every reader of
 /// [`is_display_none`] sees the same set, so the parent, the inline planner and
-/// the element agree on whether it has a box.
-pub(crate) fn hold_display(ids: HashSet<u64>) {
-    DISPLAY_HELD.with(|held| *held.borrow_mut() = ids);
+/// the element agree on whether it has a box. It is flagged on the elements of `tree`: the
+/// windows of an App have trees of their own, whose ids coincide.
+pub(crate) fn hold_display(tree: &RetainedTree, ids: HashSet<u64>) {
+    let mut held = tree.display_held.borrow_mut();
+    for id in held.difference(&ids) {
+        if let Some(element) = tree.elements.get(id) {
+            element.display_held.set(false);
+        }
+    }
+    for id in &ids {
+        if let Some(element) = tree.elements.get(id) {
+            element.display_held.set(true);
+        }
+    }
+    *held = ids;
 }
 
-/// Whether a `display` transition keeps any element rendered.
-pub(crate) fn any_display_held() -> bool {
-    DISPLAY_HELD.with(|held| !held.borrow().is_empty())
+/// Whether a `display` transition keeps any element of `tree` rendered.
+pub(crate) fn any_display_held(tree: &RetainedTree) -> bool {
+    !tree.display_held.borrow().is_empty()
 }
 
 /// Whether a child produces a box at all: `display: none` generates none.
@@ -40,7 +47,7 @@ pub(crate) fn declares_display_none(element: &RetainedElement) -> bool {
 
 /// `display: none` generates no box, and neither do its descendants.
 pub(crate) fn is_display_none(element: &RetainedElement) -> bool {
-    declares_display_none(element) && !DISPLAY_HELD.with(|held| held.borrow().contains(&element.id))
+    declares_display_none(element) && !element.display_held.get()
 }
 
 /// Whether `element` or an ancestor is `display: none` and not kept shown by a `display` transition.

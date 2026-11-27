@@ -899,7 +899,7 @@ loop alive (a `Bun.serve`).
 | `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
 | `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
 | `x` / `y` | CSS px | Where the window's top-left opens, in the global space [`screen`](#displays) reports: origin at the primary display's top-left, y down, so a display to the left of or above it is negative. The window opens on the display that contains the point, else the nearest. Both are needed, otherwise the window is centred on the primary display. With `fullscreen: true` it goes fullscreen on that display. As in Electron |
-| `fonts` | string[] | Font files (`.ttf`, `.otf`) read and passed to [`registerFont()`](#custom-fonts) right after the window opens, so `fontFamily: "Inter"` resolves without a system-wide install. Ghia ships no fonts: the app supplies its own files. Paths resolve against the process's current working directory, so pass absolute ones, e.g. `fileURLToPath(new URL("./fonts/Inter-Regular.ttf", import.meta.url))`. An unreadable path makes `render()` throw. On macOS a variable font follows `fontWeight` and `fontVariationSettings`; elsewhere it only renders its default instance, so pass one static file per weight |
+| `fonts` | string[] | Font files (`.ttf`, `.otf`, `.woff`, `.woff2`) read and passed to [`registerFont()`](#custom-fonts) right after the window opens, so `fontFamily: "Inter"` resolves without a system-wide install. Ghia ships no fonts: the app supplies its own files. Paths resolve against the process's current working directory, so pass absolute ones, e.g. `fileURLToPath(new URL("./fonts/Inter-Regular.ttf", import.meta.url))`. An unreadable path makes `render()` throw. On macOS a variable font follows `fontWeight` and `fontVariationSettings`; elsewhere it only renders its default instance, so pass one static file per weight |
 
 Call it again after a save and it remounts the tree on the same window.
 
@@ -963,10 +963,30 @@ id, and one event map, so `createRoot()` throws if that renderer already has a
 mounted root. Call `unmount()` on the first root before you create another;
 `render()` already does that for you.
 
+**`createRoot(container)`** is React DOM's: `container` is an element of a mounted window, and the root renders into it beside
+what it holds, as a portal root. It is how an app renders into a window `window.open('')` gave it ([below](#windowopen-and-the-window-object)):
+
+```tsx
+const win = window.open('', 'inspector', 'width=480,height=320')
+const root = createRoot(win.document.body as PublicInstance)
+root.render(<Inspector />)
+```
+
+The root belongs to that element's window: `useGpuix()` answers with its renderer, and the window's own root unmounting (the
+window closing) unmounts it first, running the effects' cleanups. `root.unmount()` unmounts it alone. The second argument takes
+only `onUncaughtError`; the window-level handlers (`onKeyDown`, `onSelectionChange`, ...) belong to the window's own root. The
+element must be in a window with a mounted root, or `createRoot` throws a `TypeError`. A call with a renderer, as before, is that
+renderer's window root.
+
+Every `createRoot(renderer)` and `render()` registers, for the window, the factory `window.open` asks for an empty root, so
+`window.open('')` works from any React app ([window.open](#windowopen-and-the-window-object)). `render()` keeps one slot for each
+renderer it is given (`render(node, { renderer })`), and one for the window it opens itself; the runtime-error overlay and
+`resetRender()` work on each.
+
 **An element outlives its window.** A library keeps elements past the unmount of
 their root and reaches them from a timer or a microtask: Base UI returns focus,
 floating-ui measures. Once the window is gone (the test renderer after
-`dispose()` or after the next test renderer replaced it, a live renderer after
+`dispose()`, a live renderer after
 its last window closed) the members an element reaches answer as a node that is not in
 a document does in a browser, instead of throwing: `getBoundingClientRect()` is a zero
 rect, `getComputedStyle` reads `""`, `focus()`, `blur()`, `scrollIntoView()` and the
@@ -1030,6 +1050,49 @@ function WindowControls() {
 `minimizeWindow()`, `zoomWindow()`, and `toggleFullscreen()` work on macOS,
 Windows, Linux, and FreeBSD. `zoomWindow()` uses the platform's native zoom or
 maximize operation. These methods are not available in the browser renderer.
+
+`closeWindow()` closes this renderer's window and no other (macOS). The app
+ends with its last window, as it does when the user closes it, and a window that
+is already gone is a no-op. `isWindowClosed()` says whether the window is gone,
+whether the user closed it (the close button, `⌘W`), `closeWindow()` did, or the
+app quit; it is `false` before `init()`. `startFrameLoop` calls the
+`onWindowClosed` option of the renderer whose window closed while the app goes on
+for the others, and `onTerminated` once when the app ends.
+
+A renderer whose window is gone behaves as closed: `applyBatch` only updates the
+tree (so unmounting the root of a closed window works), a setter that only means
+something for a window that is there (`setWindowTitle`, `setWindowSize`,
+`activateWindow`, the window event listeners, `focusNext`, `blur`) does nothing,
+and a native call that needs the window to answer (the window's size, bounds,
+`captureScreenshot`, simulated input) throws `The window is closed`.
+
+### Several windows on one app
+
+Every `GpuixRenderer` that calls `init()` on a thread gets a window of its own
+on the one app of that thread (macOS). The first creates the app and the menu
+bar; the next ones open another window with the same options (`title`, `width`,
+`height`, `x`, `y`, `kind`, `focus`, and the rest). Each renderer acts on its own
+window only: its tree, scroll offsets, focus and events are its own, and the
+element ids of two renderers may coincide. An `appearance` option on a window
+after the first sets the app's override; a window that names none leaves it. One
+frame loop serves all of them: `startFrameLoop(renderer)` for each renderer joins
+it, the platform is pumped once per iteration, and `frameMs`, when given, is the
+first renderer's.
+
+```ts
+const a = createNativeRenderer()
+const b = createNativeRenderer()
+a.init({ title: "A", width: 300, height: 200, x: 80, y: 120 })
+b.init({ title: "B", width: 400, height: 260, x: 460, y: 120 })
+startFrameLoop(a, { onTerminated: () => process.exit(0) })
+startFrameLoop(b, { onTerminated: () => process.exit(0), onWindowClosed: () => console.log("B closed") })
+```
+
+Each window has its own `document` and window target: `documentOf(renderer)` and `windowOf(renderer)` from
+`@ghia/native/host` (and `@ghia/native/testing`) give them, see [A document per window](#a-document-per-window). The global
+`document` and `window` are the first window's. `window.open()` opens one from script ([below](#windowopen-and-the-window-object));
+the adapters render into the windows it opens (`render(code, container)` in Solid, `createRoot(container)` in React), and a window
+that an app makes itself with its own renderer gets its root with `createRoot(renderer)`, see [window.md](./fork/window.md#several-windows).
 
 ### Window drag regions
 
@@ -1224,9 +1287,9 @@ one bound to the window your component is rendered in:
 | OS reduced motion | `useReducedMotion()` | `createReducedMotion()` |
 
 Code with no component to ask can import `matchMedia` from the adapter. It uses
-the window of the most recently mounted root that is still mounted, and throws
-when no root is mounted. Outside an adapter, `matchMediaFor(renderer)` from `@ghia/native/host`
-binds to a renderer.
+the global window, which is the first window that mounted, and throws when no root
+is mounted in it. Outside an adapter, `matchMediaFor(renderer)` from `@ghia/native/host`
+binds to a renderer, and `windowOf(renderer).matchMedia(query)` is the same for another window.
 
 Supported syntax is Media Queries Level 4: `and`, `or`, `not`, `only`, comma
 lists, parentheses, and range syntax such as `(400px <= width < 800px)`. The
@@ -1363,8 +1426,8 @@ background daemon, run the app from a `launchd` agent in
 ### Custom fonts
 
 `registerFont()` makes a font that is not installed on the machine available to
-`fontFamily`. It takes the bytes of a **TrueType or OpenType** file (`.ttf` or
-`.otf`).
+`fontFamily`. It takes the bytes of a **TrueType, OpenType, WOFF or WOFF2** file
+(`.ttf`, `.otf`, `.woff` or `.woff2`).
 
 ```tsx
 import { readFileSync } from 'node:fs'
@@ -1394,7 +1457,8 @@ GPUI aborts the process on a font without the names, and silently drops a font
 without the glyph, so `registerFont()` throws for both and for bytes that are
 not a font. Fonts load into the process and last until it exits.
 
-WOFF and WOFF2 are not supported ([deviations](./fork/deviations.md#text)); convert them to TrueType first. The browser
+A WOFF or WOFF2 file is unpacked and named by the platform's font loader (Core Text on macOS), so
+it needs the same names and glyph, and a file the loader cannot read throws. The browser
 renderer does not have this method, use `FontFace` there.
 
 ### Let an agent drive the app
@@ -5252,7 +5316,7 @@ A host element (a React ref, a Solid `HostElement`) has the members a library wr
 |---|---|
 | `addEventListener(type, listener, options?)`, `removeEventListener(type, listener, options?)` | For any event type, with the DOM's arguments: `listener` is a function or an object with `handleEvent`, `options` is `{ capture, once, passive, signal }` or the `capture` boolean. The same function in the same phase is added once. `once` removes it before it runs, `passive` makes `event.preventDefault()` do nothing while it runs, and a `signal` removes it when it aborts (an aborted one adds nothing). A listener is called with the element as `this`. A type native never emits (`touchstart`, `touchend`, `touchcancel`) is accepted and never fires. |
 | `dispatchEvent(event)` | Dispatches an event the app built (`new Event`, `new CustomEvent`, one of the [event classes](#event-classes)) at the element and returns `false` when a listener called `preventDefault()` on a cancelable event. The event walks the path the element has in the tree: `window` and `document` capture, the ancestors' capture handlers from the top down, the target, then the bubble phase if `bubbles` is true (an event that does not bubble reaches the capturers and the target only), then `document` and `window`. `onClick`-style props, Solid handlers and `addEventListener` listeners hear it in the order a delivered event gives, with `target`, `currentTarget`, `eventPhase`, `composedPath()` and `isTrusted` (`false`) set, and `stopPropagation()`, `stopImmediatePropagation()` and `cancelBubble = true` end it. It keys handlers by `event.type` as native does, so a dispatched `focusin` reaches React's `onFocus` and a dispatched `focus` Solid's. A dispatched `focus` or `blur` does not move focus. It throws a `TypeError` for something that is not an event and an `InvalidStateError` `DOMException` for an event that is being dispatched (a listener passing it on), before anything else happens, so a rejected `click` toggles no checkbox; once the dispatch ends the event can be dispatched again, and `currentTarget` is `null`, `eventPhase` 0 and `target` stays. A listener that throws is reported to `onError` and the rest run. An element that is not connected is heard by its own path alone, not by `document` and `window`. An uncanceled `click` that is a `MouseEvent` then runs the element's activation behaviour, see below. |
-| `ownerDocument` | The `document` object the adapters export. Its `defaultView` is the global `window` (`globalThis`), which has `setTimeout`, `requestAnimationFrame` and `ResizeObserver`, so `element.ownerDocument.defaultView` works as the window of a library that asks for it. |
+| `ownerDocument` | The `document` of the window the element is in; before it is mounted, the document whose `createElement` made it, else the global `document`. For an element of the first window that is the `document` the adapters export, whose `defaultView` is the global `window` (`globalThis`), which has `setTimeout`, `requestAnimationFrame` and `ResizeObserver`, so `element.ownerDocument.defaultView` works as the window of a library that asks for it. For an element of another window it is that window's own document, whose `defaultView` is that window's target ([A document per window](#a-document-per-window)). |
 | `isConnected` | True while the element is in the tree of a mounted root. |
 | `type` | On an `<input>`, `<button>` and `<textarea>`, as in the DOM: an input's `type` attribute lower-cased (`"text"` for a missing or unknown keyword), a button's `submit`, `reset` or `button` (`"submit"` by default and for any other text), `"textarea"` on a `<textarea>` (read-only; assigning throws a `TypeError`). Assigning writes the `type` attribute. `undefined` on any other element: the element's tag is its `localName`, and `elementType` on an adapter's host node (it was `type` before, which hid this member). |
 | `getAttribute(name)` | The prop whose attribute name is `name` as a string (a prop is an attribute under the name the DOM gives it: lowercase on an HTML element, so `tabIndex={0}` is `tabindex` and `getAttribute("tabIndex")` finds it, `className` is `class` and `htmlFor` is `for`; an SVG element keeps the case of its props, `viewBox`, and matches names exactly), or `null` when the element was not given it or its value is a function or an object (`onClick`). `getAttribute("style")` is the text of the element's live style, `width: 10px; --dnd-top: 4px;` as Chrome writes `cssText` and as a `[style]` selector reads it (a `null` or empty value is no declaration, a number on a property that is not unitless and not zero has `px`), `""` once code has written the style and left nothing in it (`cssText = ""`, `setAttribute('style', '')`, removing the last property), and `null` while it has no declaration and after `removeAttribute('style')` ([Style from code](#style-and-id-from-code)). `data-index={5}` reads `"5"`; `false`, `null` and `undefined` read `null` and `true` reads `""`, except for `data-*` and `aria-*`, where `false` reads `"false"` and `true` `"true"`. |
@@ -5323,10 +5387,10 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `tagName`, `localName` | `localName` is the element type as written. `tagName` is it uppercased for an HTML element (`DIV`, `VIRTUAL-LIST`) and as written for an SVG one (`linearGradient`). |
 | `parentNode`, `parentElement`, `childNodes`, `firstChild`, `lastChild`, `previousSibling`, `nextSibling`, `hasChildNodes()` | The tree as the framework built it, text included. `childNodes` is a copy: an array, not a live `NodeList`. |
 | `children`, `childElementCount`, `firstElementChild`, `lastElementChild`, `previousElementSibling`, `nextElementSibling` | The same, elements only. `children` is an array, not an `HTMLCollection`. |
-| `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is `document` for a mounted node and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
+| `contains(node)`, `getRootNode()`, `compareDocumentPosition(node)` | `contains` includes the node itself. `getRootNode()` is the `document` of the window a mounted node is in and the top of its tree otherwise. `compareDocumentPosition` gives the `DOCUMENT_POSITION_*` bits (`DISCONNECTED`, `PRECEDING`, `FOLLOWING`, `CONTAINS`, `CONTAINED_BY`); two trees that are not in one document are `DISCONNECTED` and `IMPLEMENTATION_SPECIFIC` with a stable order. `document.contains(node)` is `node.isConnected`. |
 | `textContent` | The text of the node and its descendants. Setting it on an element replaces its children with one `Text` (`""` or `null` removes them all); on a `Text` it sets its data. |
 | `matches(selector)`, `closest(selector)` | A real selector, as in the DOM: type, class, id, attribute (`=`, `~=`, `\|=`, `^=`, `$=`, `*=`, with `i` and `s`), the combinators (space, `>`, `+`, `~`), selector lists, and `:not()`, `:is()`, `:where()`, `:has()`, `:root`, `:empty`, `:scope`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()` and the `-of-type` forms, `:lang()`, `:disabled`, `:enabled` (read from the attributes), and `:checked` and `:indeterminate` (the live state of a checkbox or radio). `closest` starts at the element itself and walks up through the parents. `:scope` is the element the method is called on. `:focus`, `:focus-visible`, `:focus-within`, `:hover` and `:active` ask the window, so they answer for the focus and pointer as they are at that moment (and are `false` for an element that is not mounted). `:popover-open` matches a [popover](#popover) that is showing. All of them work on an element that is not inserted yet and on a subtree built with `appendChild` before it is inserted. A selector the engine cannot parse, or a pseudo-class or pseudo-element it does not have, throws a `SyntaxError` `DOMException`; see [the deviations](fork/deviations.md#dom-selectors). Tag names are compared without case (`P` matches a `<p>`), as an HTML document does. |
-| `querySelector(selector)`, `querySelectorAll(selector)` | On an element, on `document` and on a `DocumentFragment`. The elements below the node that match, in document order: the node itself is not one, but the whole selector is matched against the tree, so `el.querySelectorAll('main p')` finds a `p` in `el` whose `main` is above it. `querySelectorAll` returns a static `NodeList` (`length`, `item(index)`, `list[index]`, `forEach`, `keys`, `values`, `entries` and iteration; `instanceof NodeList` holds, and it has no `map` or `filter`, as in a browser: `Array.from(list)` makes an array) that does not follow later changes to the tree, and `querySelector` the first or `null`. `document.querySelector(…)` searches the `<html>` of every window, so an app's elements and a portal into `document.body` are both found; with nothing mounted it finds the stand-in `<html>`, `<head>` and `<body>` and nothing else. `:scope` in a query on `document` is `<html>`. A selector is compiled once and kept by its text, so asking the same question on every focus change (a focus trap's tabbable list, `a[href], button:not([disabled]), [tabindex]`) walks the tree and parses nothing. |
+| `querySelector(selector)`, `querySelectorAll(selector)` | On an element, on `document` and on a `DocumentFragment`. The elements below the node that match, in document order: the node itself is not one, but the whole selector is matched against the tree, so `el.querySelectorAll('main p')` finds a `p` in `el` whose `main` is above it. `querySelectorAll` returns a static `NodeList` (`length`, `item(index)`, `list[index]`, `forEach`, `keys`, `values`, `entries` and iteration; `instanceof NodeList` holds, and it has no `map` or `filter`, as in a browser: `Array.from(list)` makes an array) that does not follow later changes to the tree, and `querySelector` the first or `null`. `document.querySelector(…)` searches the `<html>` of the document's window, so an app's elements and a portal into `document.body` are both found; with nothing mounted it finds the stand-in `<html>`, `<head>` and `<body>` and nothing else. `:scope` in a query on `document` is `<html>`. A selector is compiled once and kept by its text, so asking the same question on every focus change (a focus trap's tabbable list, `a[href], button:not([disabled]), [tabindex]`) walks the tree and parses nothing. |
 | `getElementsByTagName(name)`, `getElementsByClassName(names)`, `document.getElementsByName(name)` | On an element and on `document` (`getElementsByName` on `document` only). The elements below the node, in document order, as a **live** list: it searches the tree again when the tree or an attribute has changed since its last access (one counter for the whole document, moved by every insert, remove, root mount and unmount, and prop write) and otherwise answers from what it found (the next change to the tree drops that, so a list nobody reads again does not keep its elements alive), so a loop over `length` and `list[index]` walks the tree once and `length`, `item(index)`, `list[index]`, `namedItem(id or name)` (an `HTMLCollection` also answers `list.someId`) and iteration follow later changes to the tree, as in a browser. `getElementsByTagName` compares the lowercased name with an HTML element's tag and the name as written with an SVG element's, and `"*"` is every element; `getElementsByClassName` takes the whitespace-separated classes an element must all carry (an empty list is no element); `getElementsByName` is the HTML elements whose `name` attribute is the text, as a `NodeList` (no `namedItem`). `HTMLCollection` and `NodeList` are globals, `instanceof` works on them (and holds for `querySelectorAll`'s result, not for `children` and `childNodes`, which are arrays: [deviations](fork/deviations.md#dom-selectors)), and they cannot be constructed. They work on `document.head`, `document.body` and `document.documentElement` before a root mounts as well as after. Base UI's ScrollArea calls `document.head.getElementsByTagName("style")`. |
 | `document.createTreeWalker(root, whatToShow = NodeFilter.SHOW_ALL, filter = null)`, `TreeWalker`, `NodeFilter` | The DOM's tree walker, as focus scopes, `ariaHideOutside` and menus use it. `NodeFilter` is a global with `SHOW_ALL`, `SHOW_ELEMENT`, `SHOW_TEXT` and the other `SHOW_*` masks and `FILTER_ACCEPT`, `FILTER_REJECT` and `FILTER_SKIP`. The walker has `root`, `whatToShow`, `filter` (a function or an object with `acceptNode`, called on the object), `currentNode` (settable to any node, even outside `root`), `parentNode()`, `firstChild()`, `lastChild()`, `previousSibling()`, `nextSibling()`, `previousNode()` and `nextNode()`, with the standard's algorithms: `FILTER_SKIP` drops a node and still walks its children, `FILTER_REJECT` drops its subtree (for `parentNode()` it is the same as skip), and `previousNode()` can end at `root` itself. It walks the nodes Ghia has, elements and text (there are no comments, so `SHOW_COMMENT` matches nothing). A filter that uses the walker it is running in throws `InvalidStateError`. `createNodeIterator` does not exist. |
 | `className`, `classList`, `hasAttribute(name)`, `getAttributeNames()`, `dataset` | Read from the props: `className` is the `class` attribute (`""` without one; `class` wins over `className`, as `getAttribute("class")` does) and assigning it is `setAttribute("class", value)`, an attribute exists where `getAttribute` is not `null`, and `getAttributeNames()` lists the attribute names (`tabindex`, `class`, `for` on HTML; the props' own case on SVG, except `tabindex` and `autofocus`, which are lowercase there as in Chrome). `attributeNameOf(prop, svg)` from `@ghia/native/host` is the one function that turns a prop name into its attribute name. `dataset` is a live `DOMStringMap` of the `data-*` attributes with the names in camel case (`data-row-id` is `rowId`): a read goes through `getAttribute`, and an assignment or a `delete` through `setAttribute` and `removeAttribute`, so Base UI's `element.dataset.tabindex = ...` works. `classList` is a live `DOMTokenList` (global `DOMTokenList`) of the `class` attribute, the same object every time: `add`, `remove`, `toggle(token, force?)`, `replace`, `contains`, `item`, `length`, `value` (assignable, as is `element.classList = text`), `toString()`, `forEach`, `keys`, `values`, `entries`, iteration and `list[0]`. A write goes through `setAttribute('class', ...)`, so a stylesheet's `.name` rules, a `MutationObserver` and the framework's `class` handling see it, and it works on elements made by `document.createElement` and on the stand-in `<html>` before the first `render()`. A bad token throws `SyntaxError` (empty) or `InvalidCharacterError` (white space), `supports()` throws `TypeError` as for `classList`, and removing the last token leaves `class=""` while removing from an element with no `class` attribute leaves none. |
@@ -5335,9 +5399,9 @@ Host elements and text are real DOM-shaped nodes. `el instanceof HTMLElement`, `
 | `setAttribute(name, value)`, `removeAttribute(name)`, `toggleAttribute(name, force?)` | Write the prop the attribute stands for through the framework's own prop path, so native applies it as if the app had rendered that prop, at once (the mutations are flushed before the call returns; `setAttribute('style', text)` is the exception, which waits for the next flush as every write of `element.style` does), and `getAttribute` gives it back. This is what `@floating-ui`'s `markOthers` and Base UI's focus manager do: `setAttribute('aria-hidden', 'true')` leaves the element out of the accessibility tree, `setAttribute('inert', '')` makes the subtree inert, `setAttribute('tabindex', '-1')` makes the element focusable and `'0'` a tab stop (`removeAttribute('tabindex')` undoes it), and `setAttribute(name, '')` reads back `""` with `hasAttribute(name)` true. `popover` goes through the same path as the `popover` property and a framework's prop: a showing popover whose kind the write changes, or that loses the attribute, is hidden with its events. Names are lowercased on HTML elements, as in the DOM, and an empty name or one with a space, `/`, `>`, `=` or NUL throws `InvalidCharacterError`. The value is text: `tabindex`, `colspan`, `rowspan`, `span` and `maxlength` hold the integer the text is (text that is no integer is kept as it is, and native ignores it); `inert`, `disabled`, `hidden` (except `until-found`, which is kept as that text), `required`, `readonly`, `autofocus`, `multiple`, `selected` and `open` are on whatever the text is (`""` too), and `draggable` is on for `"true"`. `class` is `className` (or `class`, where the element was given that), `for` is `htmlFor`, and any other name is the prop of that name (`aria-*`, `data-*`). On an `<input>` the `checked` attribute is `defaultChecked` (on whatever its text is) and the `value` attribute is `defaultValue`, as in the DOM: the control's `checked` and `value` follow them only while it is clean (no user toggle or edit, no script write of the property), and `getAttribute` gives the attribute back; a checkbox, radio, hidden, submit, button, reset or image `value` attribute is the control's value itself and writes `value`. A `<textarea>` has no `value` attribute, so it is kept as text only. One rule says which prop answers an `<input>`'s `checked` and `value` attributes, for `getAttribute` and for the attribute a stylesheet's `[checked]` and `[value="…"]` match alike: the default prop (`defaultChecked`, `defaultValue`) when the element has one, else the `checked` or `value` prop, as React DOM puts a controlled value in the attribute too (a checkbox's `value` is the attribute itself, so `value` comes first there). So `setAttribute('checked', '')` on an input a framework renders `checked={false}` stays matched after the framework commits `checked` again, and `setAttribute('value', 'y')` on a controlled text input reads back `"y"` while its text stays the controlled value; `removeAttribute` then falls back to the prop. An element keeps the key its framework used for an attribute. The write goes the way a rendered prop's does to the attribute store native's [stylesheet](#stylesheets) selectors read, so `[data-state="open"]`, `[hidden]` and `.foo` match what `setAttribute`, `toggleAttribute` and `dataset` write, and stop matching when it is removed. Like the DOM, a later commit of the same prop by React or Solid overwrites the attribute, a commit that leaves the prop as it was does not, and an attribute the framework never set stays. `setAttribute('style', text)` sets `style.cssText` (below), and `on*` is kept as text for `getAttribute` and does nothing else: see [deviations](./fork/deviations.md#dom-attributes). `toggleAttribute` follows the DOM and returns whether the attribute is there afterwards. A `MutationObserver` with `attributes` gets a record, with `oldValue` where it asked, for each write that changes what `getAttribute` reads. |
 | `style` | The element's inline style as a `CSSStyleDeclaration`; what it reads and writes, and how a framework's `style` merges with code's, is under [Style and id from code](#style-and-id-from-code). `setAttribute('style', text)` is `style.cssText = text`, and `getAttribute('style')` is the `cssText`. |
 
-Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; with several windows they are those of the window that mounted last (the rule `matchMedia` follows). They are never `null`: while no root is mounted (before the first `render()`, after the last `unmount()`) the document answers with its own stand-in `<html>` holding a `<head>` and a `<body>`, the same object on every read until a root mounts and the first root's elements replace it. The stand-in belongs to no window and has no native element: it answers as an element of a gone window does (a zero `getBoundingClientRect()`, `offsetParent` `null`, `focus()` and scrolling that do nothing; `getComputedStyle(el)` throws a `TypeError`, as it does for anything that is not a mounted element), takes attributes, `style` and listeners (an attribute write moves the live lists, so `document.getElementsByClassName("dark")` finds `<html>` right after `classList.add("dark")`, and gives a `MutationObserver` on it a record), and is `isConnected` with `document` as its `parentNode`; inserting a node into it or removing one throws `NoModificationAllowedError`, and `document.createElement` still throws until a root is mounted. When the first root mounts, what was written to the stand-in `<html>`, `<head>` and `<body>` (attributes including `class` and `data-*`, `style` and listeners added with `addEventListener`) is written again to that root's real elements, through the ordinary attribute, style and listener paths, so `document.documentElement.setAttribute("class", "dark")` before `render()` drives an `html.dark body { ... }` rule and a `keydown` listener added to `body` before `render()` fires after it. The stand-ins are then nodes in no document (`isConnected` `false`, `parentNode` `null` for the `<html>`, not contained by `document`), and an element reference taken before the mount is not the mounted element ([deviations](./fork/deviations.md#dom-building-from-code)). After the last `unmount()` the document answers with fresh stand-ins. A library that reads `element.ownerDocument.documentElement` from an element after its root unmounted (floating-ui's `getOffsetParent`) gets the stand-in, as in a browser. `document.compatMode` is `"CSS1Compat"` always, with or without a root. `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin (the [user agent style](#html-tags) of those tags, which a stylesheet rule such as `body { display: flex }` overrides, and neither has a `style` attribute); they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
+Every window root is a real `<html>` with a `<head>` and a `<body>` in it, and the app's top-level nodes are the children of `body`. `document.documentElement` is the `<html>`, `document.head` the `<head>`, `document.body` the `<body>`, and `document.scrollingElement` is `documentElement`; each window's document has its own, and the global `document` is the first window's ([A document per window](#a-document-per-window)). They are never `null`: while no root is mounted (before the first `render()`, after the last `unmount()`) the document answers with its own stand-in `<html>` holding a `<head>` and a `<body>`, the same object on every read until a root mounts and the first root's elements replace it. The stand-in belongs to no window and has no native element: it answers as an element of a gone window does (a zero `getBoundingClientRect()`, `offsetParent` `null`, `focus()` and scrolling that do nothing; `getComputedStyle(el)` throws a `TypeError`, as it does for anything that is not a mounted element), takes attributes, `style` and listeners (an attribute write moves the live lists, so `document.getElementsByClassName("dark")` finds `<html>` right after `classList.add("dark")`, and gives a `MutationObserver` on it a record), and is `isConnected` with `document` as its `parentNode`; inserting a node into it or removing one throws `NoModificationAllowedError`, and `document.createElement` still throws until a root is mounted. When the first root mounts, what was written to the stand-in `<html>`, `<head>` and `<body>` (attributes including `class` and `data-*`, `style` and listeners added with `addEventListener`) is written again to that root's real elements, through the ordinary attribute, style and listener paths, so `document.documentElement.setAttribute("class", "dark")` before `render()` drives an `html.dark body { ... }` rule and a `keydown` listener added to `body` before `render()` fires after it. The stand-ins are then nodes in no document (`isConnected` `false`, `parentNode` `null` for the `<html>`, not contained by `document`), and an element reference taken before the mount is not the mounted element ([deviations](./fork/deviations.md#dom-building-from-code)). After the last `unmount()` the document answers with fresh stand-ins. A library that reads `element.ownerDocument.documentElement` from an element after its root unmounted (floating-ui's `getOffsetParent`) gets the stand-in, as in a browser. `document.compatMode` is `"CSS1Compat"` always, with or without a root. `html.parentNode` is `document`, `head.parentNode` and `body.parentNode` are `html` (`documentElement.children` is `[head, body]`), a top-level element's `parentNode` is `body`, and `isConnected`, `getRootNode()`, `contains` and `compareDocumentPosition` follow. `document.body` is an element like any other: `createPortal(children, document.body)` in React mounts after the app's own nodes, `document.body.setPointerCapture(id)` routes the pointer to it, a click on bare window space has `body` as its `target`, and every event path ends at `html` before it reaches `document` and `window`. Several top-level siblings (a fragment, a Dialog's trigger and its portal layer) all draw, one after the other as block children of `body`. `html` and `body` are `display: block` and as large as the window, with no margin (the [user agent style](#html-tags) of those tags, which a stylesheet rule such as `body { display: flex }` overrides, and neither has a `style` attribute); they add no accessibility node. `head` is `display: none`: it has no box, and an element appended to it is never drawn, laid out or hit, though it is a real element in the tree (a library that prepends a node to `document.head` finds one).
 
-`document.getElementById(id)` finds the first element, in document order across every window, whose `id` is `id` (`null` for none and for `""`). `document.createElement(name)` and the other node makers are in [Building and moving nodes from code](#building-and-moving-nodes-from-code).
+`document.getElementById(id)` finds the first element, in document order in the document's window, whose `id` is `id` (`null` for none and for `""`). `document.createElement(name)` and the other node makers are in [Building and moving nodes from code](#building-and-moving-nodes-from-code).
 
 `el.id` is the `id` prop as a string, `""` without one, as in the DOM, and `el.id = "x"` sets it ([below](#style-and-id-from-code)). The number native knows an element by, which the renderer methods take, is `el.nativeId` (`renderer.scrollToItem(ref.nativeId, i)`).
 
@@ -5347,7 +5411,7 @@ Code that is not the framework (a library such as `@dnd-kit/dom`) changes the tr
 
 | Member | |
 |---|---|
-| `document.createElement(tagName)`, `document.createElementNS(ns, name)`, `document.createTextNode(data)` | New nodes of the window that mounted last, in no tree: a node is drawn once it is inserted under a node that is in the document (`document.body`, `document.head` and `document.documentElement` work). `createElement` lowercases the name; `createElementNS` takes the HTML or the SVG namespace, and the SVG names keep their case (`linearGradient`). Before a root is mounted they throw. A `<style>` element is one of the element types, and a [stylesheet](#stylesheets) once it is in the document. A name that is not one of the element types (`marquee`) throws `NotSupportedError`, where a browser makes an unknown element; a name that is not an XML name throws `InvalidCharacterError`. |
+| `document.createElement(tagName)`, `document.createElementNS(ns, name)`, `document.createTextNode(data)` | New nodes of the document's window, in no tree, whose `ownerDocument` is that document: a node is drawn once it is inserted under a node that is in the document (`document.body`, `document.head` and `document.documentElement` work). `createElement` lowercases the name; `createElementNS` takes the HTML or the SVG namespace, and the SVG names keep their case (`linearGradient`). Before a root is mounted they throw. A `<style>` element is one of the element types, and a [stylesheet](#stylesheets) once it is in the document. A name that is not one of the element types (`marquee`) throws `NotSupportedError`, where a browser makes an unknown element; a name that is not an XML name throws `InvalidCharacterError`. |
 | `appendChild`, `insertBefore`, `removeChild`, `replaceChild` | With the DOM's return values (the node, the node, the child, the replaced child). A node that has a parent is moved: its old parent's `MutationObserver` hears a removal and the new parent's an insertion, and a node in the document moves natively, it is not made again. `HierarchyRequestError` for a node that contains the new parent, for a parent that is `Text` or `document`, and for a node that is neither element nor text; `NotFoundError` for a reference or child that is not a child of the parent; `TypeError` for an argument that is not a `Node`. A throw changes nothing. |
 | `remove()`, `before(...)`, `after(...)`, `replaceWith(...)` | On elements and text. Strings become `Text` nodes. A node among the arguments that is already beside the target moves, as in the DOM. |
 | `append(...)`, `prepend(...)`, `replaceChildren(...)` | On elements. These and `before`, `after` and `replaceWith` with several nodes first take every node out of its parent, as a browser does when it gathers them in a fragment, so a node that cannot go (`HierarchyRequestError`: for `before`, `after` and `replaceWith` it contains the target's parent, for `append`, `prepend` and `replaceChildren` it contains the target itself) leaves the others detached; with one node a throw changes nothing. A node of another window throws before any node is taken out. |
@@ -5355,10 +5419,11 @@ Code that is not the framework (a library such as `@dnd-kit/dom`) changes the tr
 | `textContent`, `nodeValue`, `data` | Setters, as above. A text node's `data` and `nodeValue` change what is drawn. |
 | `substringData(offset, count)`, `appendData(data)`, `insertData(offset, data)`, `deleteData(offset, count)`, `replaceData(offset, count, data)`, `length` | On `Text`, with the standard's "replace data": an `offset` past the end throws `IndexSizeError` and a `count` that runs past it is cut to the end. Every write, `data`, `nodeValue` and `textContent` included, is one `replaceData`, so a `MutationObserver` gets one `characterData` record and the live [`Range`s](#range-and-staticrange) are adjusted. |
 | `splitText(offset)`, `wholeText` | `splitText` keeps the text before `offset`, makes the rest a new `Text` that follows it in the same parent (a `childList` record, then a `characterData` one) and returns it; `IndexSizeError` past the end. A node with no parent gets no sibling: the new node is in no tree. `wholeText` is the data of the text nodes next to this one, joined. |
-| `document.createRange()`, `document.hasFocus()` | `createRange()` is a new `Range` collapsed at `(document, 0)`. `hasFocus()` is `true` while a window is open: see [deviations](./fork/deviations.md#dom-building-from-code). |
+| `document.adoptNode(node)`, `document.importNode(node, deep = false)` | `adoptNode` takes `node` out of the tree it is in and makes the document its owner, with every node under it; it throws `HierarchyRequestError` for a node a window mounted that another window's document would adopt, and `NotSupportedError` for a `document`. `importNode` is a copy (`cloneNode`) that the document owns, in no tree. A node no window mounted that is inserted into another window's tree is adopted by it without either call: see [A document per window](#a-document-per-window). |
+| `document.createRange()`, `document.hasFocus()` | `createRange()` is a new `Range` collapsed at `(document, 0)`. `hasFocus()` is `true` when the platform reports the window as the key window (`isWindowKey`): see [Focus](#windowopen-and-the-window-object) below. |
 | `cloneNode(deep = false)` | On elements and text, and on the comments of a [parsed document](#html-parsing-and-serialization), where a clone is a comment of the same document. A window's tree has no comment nodes (`innerHTML` leaves them out), so a clone of a window's element has none. An element is made again as the same type by the window that owns the original (an SVG element stays an `SVGElement`), with every attribute prop (`id`, `className`, `role`, `tabIndex`, `data-*`, `aria-*`, a `false` one too) and a copy of the live style, code-written properties such as `--x` included; with `deep`, the same for every descendant, in order, and a text node is a copy of its data. A parsed `<template>`'s `content` is copied with `deep` and empty without it. The clone is in no tree (`isConnected` is `false`, `parentNode` is `null`) and has no native element until it is inserted; no framework owns it, so the framework's next update of the original never reaches it. It has **no event handlers**: the `on*` props and listeners from `addEventListener` are not copied, as in the DOM; refs, keys, children props and the `motion` and `layout` props are not copied either ([deviations](fork/deviations.md#dom-building-from-code)). `NotSupportedError` for `document`. |
 
-A node that code takes out of the document is kept: it stays an object with its children, props, text, style and listeners, `isConnected` is `false`, and it can be inserted again. Native drops the element at the next flush if the node is still out of the document by then, and makes it again, with all of it, when it is inserted; a node put back in the same turn is never dropped (it keeps its focus and scroll offset, [deviations](fork/deviations.md#dom-building-from-code)). A node a framework removes by itself (a `<Show>` that hides it, an unmounted React child) is destroyed as before. A node cannot move between windows: inserting a node of one window's tree under another's throws `HierarchyRequestError`. As in React DOM, a node React places a sibling before has to still be a child of the same parent: code that takes it out makes React's next placement before it throw. `document.createDocumentFragment()` makes a `DocumentFragment` of the window that mounted last (it needs a mounted root, like `createElement`): a node that holds children and is never mounted, so native never hears of it. It has `childNodes`, `firstChild`, `children`, `append`, `prepend`, `replaceChildren`, `textContent`, `querySelector(All)` and `cloneNode`, and can be built from created elements and text. Inserting one (`appendChild`, `insertBefore`, `replaceChild`, `append`, `before`, `after`, `replaceWith`, `Range.insertNode`, ...) moves its children into the target in order and leaves it empty, so a fragment can be filled and inserted again; live ranges and `MutationObserver` hear ordinary moves out of the fragment and into the target (one `childList` record per child, [deviations](fork/deviations.md#dom-building-from-code)). `new DocumentFragment()` still throws `TypeError: Illegal constructor`.
+A node that code takes out of the document is kept: it stays an object with its children, props, text, style and listeners, `isConnected` is `false`, and it can be inserted again. Native drops the element at the next flush if the node is still out of the document by then, and makes it again, with all of it, when it is inserted; a node put back in the same turn is never dropped (it keeps its focus and scroll offset, [deviations](fork/deviations.md#dom-building-from-code)). A node a framework removes by itself (a `<Show>` that hides it, an unmounted React child) is destroyed as before. A node a window mounted cannot move to another window: inserting it under another window's tree throws `HierarchyRequestError` (build the node with that window's `document`, or `importNode` a copy); a node no window mounted is adopted by the tree it goes into. As in React DOM, a node React places a sibling before has to still be a child of the same parent: code that takes it out makes React's next placement before it throw. `document.createDocumentFragment()` makes a `DocumentFragment` of the document's window (it needs a mounted root, like `createElement`): a node that holds children and is never mounted, so native never hears of it. It has `childNodes`, `firstChild`, `children`, `append`, `prepend`, `replaceChildren`, `textContent`, `querySelector(All)` and `cloneNode`, and can be built from created elements and text. Inserting one (`appendChild`, `insertBefore`, `replaceChild`, `append`, `before`, `after`, `replaceWith`, `Range.insertNode`, ...) moves its children into the target in order and leaves it empty, so a fragment can be filled and inserted again; live ranges and `MutationObserver` hear ordinary moves out of the fragment and into the target (one `childList` record per child, [deviations](fork/deviations.md#dom-building-from-code)). `new DocumentFragment()` still throws `TypeError: Illegal constructor`.
 
 #### Style and id from code
 
@@ -5427,14 +5492,14 @@ has no document to scroll, as with a page that does not overflow. Libraries that
 check `typeof window` for a browser, such as TanStack Query, see a client.
 `getComputedStyle`, `matchMedia` and `IntersectionObserver` are globals too, and
 so is a handful of members of `window`: `innerWidth` and `innerHeight` (the window's
-content size in CSS pixels, read live from the window that mounted last, and an
-error before any root is mounted, as for `matchMedia`), `visualViewport`,
+content size in CSS pixels, read live from the global window, the first one that mounted, and an
+error before any root is mounted, as for `matchMedia`; another window's size is `windowOf(renderer).innerWidth`), `visualViewport`,
 `frameElement` (`null`) and `parent`, `top` and `self` (the global object, unless the
 runtime defines them). `visualViewport` has `width` and `height` equal to the inner size,
 `offsetLeft`, `offsetTop`, `pageLeft` and `pageTop` of 0 (the document cannot scroll),
 `scale` of 1, and `addEventListener` and `removeEventListener` for `resize` (a listener
 added before any root is mounted is accepted, though `width` and `height` throw until one is). `window` gets
-a `resize` event too: both are sent when the size of the window that mounted last changes
+a `resize` event too: both are sent when the size of their own window changes
 (not for a change of OS preference), `visualViewport` first, from one subscription that
 exists only while either has a listener, and a listener added before any root is mounted
 starts to hear the first one that is. The event's `target` and `currentTarget` are the
@@ -5470,9 +5535,10 @@ Installing twice is harmless. `isWebBuild`, exported by the adapters and
 `@ghia/native/host`, is `true` on the browser build and `false` on the native
 build; use it to tell them apart, not `typeof window`.
 
-`document.getAnimations()` lists the CSS transitions and animations of every
+`document.getAnimations()` lists the CSS transitions and animations of the document's
 window ([Web Animations](#web-animations)). `document.defaultView` is the global
-`window`, and an element's `ownerDocument` is `document`
+`window` for the first window's document, and an element's `ownerDocument` is the
+document of its window
 ([Listeners and DOM members on an element](#listeners-and-dom-members-on-an-element)).
 
 `requestAnimationFrame(callback)` and `cancelAnimationFrame(handle)` are globals too,
@@ -5485,10 +5551,10 @@ the frame that is running included. The steps run once per frame and only for a 
 that answers the display link): a `scrollTo`, a layout read or any other draw between two frames
 runs no callback and no `scroll` event. An error a callback throws goes to the renderer's
 error handler (`onError`), as a handler's does, and the other callbacks still run.
-`requestAnimationFrame` itself never throws; callbacks wait for the first window when none is
+`requestAnimationFrame` itself never throws; callbacks wait for the window when it is not
 open yet, or when a request fails.
-There is one list for the whole app, not one per window
-([deviations](fork/deviations.md#events-and-input)).
+The global one is the first window's: each window has its own list, run by the frame steps of
+that window (`windowOf(renderer).requestAnimationFrame`), and the handles are unique across them.
 
 A `window` or `document` listener hears every event that bubbles to the top of
 the tree (pointer, mouse, click, wheel), whether or not any element on the path
@@ -5502,11 +5568,11 @@ path, so adding the first listener of a type is what turns it on.
 `document.activeElement` is the focused element, the same object a `ref` gives
 (a React instance, a Solid `HostElement`), and `document.body` when nothing is focused,
 as in a browser. It is current inside a `mousedown` handler, where it is still the element the
-press is about to take focus from. With several windows (one root each), it is
-the focused element of the window that heard a focus event last.
+press is about to take focus from. Each window's document answers for its own focus: the
+focused element of its window, whichever window has the focus.
 
 `document.elementFromPoint(x, y)` and `document.elementsFromPoint(x, y)` take client
-coordinates in CSS pixels from the top left of the window that mounted last, and answer
+coordinates in CSS pixels from the top left of the document's window, and answer
 as [`getElementsAt`](#find-what-is-under-a-point) does, with the elements a `ref` gives:
 `elementsFromPoint` lists them topmost first and ends with `body` then `html`, and
 `elementFromPoint` is its first, or `null` for a point outside the window (the list is
@@ -5516,6 +5582,145 @@ laid out first, so an element mounted in the same turn is found, and an element 
 that is not finite throws a `TypeError`, and both throw before a root is mounted.
 
 `document.caretPositionFromPoint(x, y)`, `document.caretRangeFromPoint(x, y)`, `document.getSelection()` and `window.getSelection()`, and the `selectionchange` event they fire are described under [Editable content](#editable-content): [Selection](#selection) and [Range and StaticRange](#range-and-staticrange).
+
+### A document per window
+
+Every window of an app has its own `document` and its own window target (`windowOf(renderer)`, the top of its event path):
+its own `<html>`, `<head>` and `<body>`, `activeElement` and `hasFocus()`, `getSelection()`, `elementFromPoint` and
+`caretPositionFromPoint`, `execCommand`, `adoptedStyleSheets`, node makers, `readyState`, `visibilityState` and `hidden`
+(`"visible"` while its root is mounted and the window open, as native does not report an occluded or minimized window), and
+for its window target `innerWidth`, `innerHeight`, `visualViewport`, `resize`, `matchMedia`, `requestAnimationFrame` and
+`cancelAnimationFrame`, `getComputedStyle` and the no-op `scrollTo`, `scroll` and `scrollBy`. Two windows of one app are two
+renderers, each with its own root (`createRoot(renderer)`), and `documentOf(renderer)` and `windowOf(renderer)` from
+`@ghia/native/host` (and `@ghia/native/testing`, where a `TestRenderer` also has `.document` and `.windowTarget`) are how code
+reaches them. The window target of a second window is its public `Window` object: `documentOf(renderer).defaultView` is it,
+and `window.open()` returns it ([below](#windowopen-and-the-window-object)).
+
+**The global `document` and `window` are the first window's,** for as long as its root is mounted. A second window that mounts
+does not take them over. When the first window closes (the user, `closeWindow()`, the app ending) they stay its own: the global
+`document` is that window's document with a fresh empty `<html>`, `<head>` and `<body>` and `visibilityState` `"hidden"`, and no
+later window takes it over. When its root only unmounts (the window stays open, or a test renderer is disposed) the global ones
+answer as the [stand-in document](#dom-classes-and-the-tree) does, and the next window that mounts takes them: that is how one
+test after another sees its own window as `document`. Before any window has mounted they are the stand-in. A remount of the
+same renderer (`ghia dev` reloading the entry on the same window) keeps its document object.
+
+**An event is heard by the window it happened in.** An event in window B's tree bubbles through B's document and B's window
+target and is never seen by the global `window` or `document` (unless B is the first window); a `dispatchEvent` on an element
+walks the same path. `window` listeners added through the global `window.addEventListener` are the global window's; a second
+window's go on `windowOf(renderer).addEventListener`. `focus`, `blur`, the state pseudo-classes and `hasFocus()` are per
+window.
+
+**`ownerDocument` follows the window.** A node's `ownerDocument` is the document of the window its root belongs to, and before
+it is in one, the document whose `createElement`, `createTextNode` or `createDocumentFragment` made it (a node nothing made
+belongs to the global `document`). A node no window has mounted that is inserted into another window's tree, or into an
+unmounted node of another document, is adopted by that tree, as a browser adopts; `document.adoptNode()` and
+`document.importNode()` do it explicitly. A node a window mounted is that window's for good: inserting it under another
+window's tree throws `HierarchyRequestError`. A React node is bound to its root when it is created: React renders into a
+second window's document with `createRoot(container)` or `createPortal(children, container)`, which create the nodes for the
+container's window (the adapters' `render(code, container)` and `createRoot(container)`, [below](#windowopen-and-the-window-object)).
+
+`MutationObserver` works on any node of any window. The `location`, `history` and storage below, and the shell, are the app's,
+and `popstate` and `hashchange` go to the global window.
+
+### `window.open` and the Window object
+
+`window.open(url = "", target = "_blank", features = "")` opens a window, on the global `window` and on every `Window` object,
+as in a browser. A Ghia app has one document and no page loads, so what a window can open is a blank one that the app then
+renders into:
+
+```tsx
+const win = window.open('', 'inspector', 'width=480,height=320,left=900,top=120')
+render(() => <Inspector />, win.document.body) // Solid: render(code, container), as solid-js/web's
+createRoot(win.document.body).render(<Inspector />) // React: createRoot(container), as react-dom/client's
+```
+
+| Call | Result |
+|---|---|
+| `open()`, `open("")`, `open("about:blank")` with `_blank` | A new native window on the app, with a `document` whose `<html>`, `<head>` and `<body>` are empty, returned as a `Window`. It opens with the opener's title and `fonts`, and focused unless the opener's window was opened with `focus: false`. |
+| the same with a name (`open("", "inspector")`) | The open window of that name (compared ASCII case-insensitively, as a browser matches target names) when there is one: it is focused and returned (`null` with `noopener` or `noreferrer`), the features are ignored. A window whose root is gone (the app unmounted it) gets a fresh root from the opener's factory first, so it can be rendered into again. A closed window, and a test window that was disposed, is not found. Otherwise a new window with that `name`. `_blank` always opens a new one. |
+| `open("https://example.org/")` (`http:`, `https:`, `mailto:`, `tel:`, another origin) | Handed to the system's default handler, as a click on a link is ([the `<a>` tag](#the-a-tag)); returns `null`, and no window opens. |
+| `target` `_self`, `_parent` or `_top` | The window itself: a URL navigates it as `location.assign` does ([`location`, `history` and storage](#location-history-and-storage)), and `""` leaves it as it is. Returns the window. |
+| any other URL (this origin's, `data:`, `file:`...) | Throws a `NotSupportedError`: Ghia has no document loading, so open `""` and render into it. A URL that does not parse throws `SyntaxError`. `javascript:` does nothing and returns `null`. |
+
+**Features** are tokenized as the HTML standard does, comma or space separated and case-insensitive. `width` and `innerWidth`,
+`height` and `innerHeight` set the size of the window's content in CSS px (a value that is not a positive integer is ignored);
+`left` and `screenX`, `top` and `screenY` place its top-left corner in [the global display space](#displays) and are used only
+when both are given. `popup` is accepted and changes nothing. `noopener` and `noreferrer` open the window but return `null`
+and give it no `opener`; on a named window that is found they return `null` and focus it, as a browser does. Names and values are
+case-insensitive (`NOOPENER=YES`). Any other feature is ignored.
+
+**The adapter makes the root.** A new window needs `<html>`, `<head>` and `<body>` and the node makers of the adapter that
+renders into it, and those are the adapter's. `@ghia/solid` and `@ghia/react` register, for every renderer they own a root on
+(`render()` and `createRoot(renderer)`), a factory that mounts an empty root on the renderer `window.open` made: an app calls
+`window.open('')` and renders into `win.document.body`, with nothing registered. The root registers a window disposer of its own (`registerWindowDisposer(renderer, dispose)` from `@ghia/native/host`, which
+the returned function takes back), and the window going away runs it once: the root and what the app rendered into the window
+with it unmount when the window closes, the first window's root too, which is what a window the user closed while a popup stays
+open does (the factory's own returned disposer, below, does the same for a custom host). `window.open` of a window with no factory (a root made by
+other means) throws an `Error` that says so, and a custom host registers one itself:
+
+```ts
+import { registerWindowFactory } from '@ghia/native/host'
+
+const unregister = registerWindowFactory(renderer, (opened) => {
+  const root = mountEmptyRoot(opened) // an element source with html, head and body, and the node factory
+  return () => root.unmount()         // optional: called once when the window closes
+})
+```
+
+`unmountAllRoots()` (`@ghia/native/roots`, which `ghia dev` runs before it runs the entry again) closes the windows `window.open`
+made, with the roots, so a reload does not leave the old popups open beside the new ones.
+
+The adapters keep one slot for each renderer a `render()` mounts on, in `@ghia/native/host` (`renderSlotFor`, `renderSlots`,
+`resetRenderSlots`): a slot is dropped when its window is gone, so a later `render()` makes a window again. `ownRenderer()` is the
+renderer of the window `render()` opened itself (`undefined` before it opens and after it closes), for a test or a script that
+drives the app's window.
+
+A window a factory opened has the same factory, so its own `window.open` works. The test renderer opens test windows: a
+`TestRenderer`'s `window.open` makes another `TestRenderer` (size and title from the features and the opener) and a test
+registers the factory for its root. `dispose()` of a test window closes it as the user's close does: the window hears `pagehide` and `unload`, the roots its adapter
+mounted in it unmount while the window is whole, and `closed` is `true`.
+
+**The Window object** is the `GpuixWindow` of the new window's renderer (`windowOf(renderer)`); the first window's is the
+global object. `window instanceof Window` holds for both. A window has:
+
+- **Identity.** `document`, `window`, `self`, `frames`, `parent` and `top` (itself: there are no frames), `frameElement`
+  (`null`), `length` (0), `opener` (the window that opened it, `null` after `noopener` or `opener = null`; it stays when
+  the opener closes), and `name` (settable; what `open(url, name)` finds it by).
+- **State.** `closed`, `innerWidth`, `innerHeight`, `outerWidth` and `outerHeight` (the same as the inner size: the frame is
+  not measured), `screenX`, `screenY`, `screenLeft` and `screenTop` (the window's place in the global display space; `0` while it
+  has no root), `devicePixelRatio` (the display's scale factor; `1` while the window has no root), `visualViewport`.
+  `matchMedia`, `getComputedStyle`, `getSelection`, `requestAnimationFrame` and `cancelAnimationFrame` are the window's own.
+- **Actions.** `close()` sets `closed` at once and, in a later task as a browser queues it, fires `beforeunload`, `pagehide` and
+  `unload` on the window, unmounts its root and closes it (a `beforeunload` listener that cancels does not keep it open, as a
+  script's close is not stopped in a browser); the document is empty once that task has run, so the handler that called `close()`
+  is not unmounted under itself. `focus()` brings it forward and makes it the key window. `blur()` does nothing: nothing resigns the key
+  window to another window of the app. `resizeTo(width, height)` and `resizeBy` set the size of its content. `moveTo` and
+  `moveBy` do nothing: GPUI places a window when it opens and cannot move it after.
+- **Events.** `addEventListener`, `removeEventListener`, `dispatchEvent` and the handler properties `onresize`, `onfocus`,
+  `onblur`, `onbeforeunload`, `onpagehide`, `onpageshow`, `onunload` and `onmessage`. An event of the window's own tree
+  bubbles to that window and no other. The global object has the same members (`onmessage` where the runtime has none).
+- **`postMessage(message, targetOrigin = "/", transfer)`** (also `postMessage(message, { targetOrigin, transfer })`) clones the
+  message with `structuredClone` (a value that cannot be cloned throws `DataCloneError`) and fires a `MessageEvent` at the
+  window in a later task, with `data`, `origin` the app's origin (`location.origin`) and `source` the sending window. The windows
+  share one JS realm, so nothing else is needed to pass objects between them. A `targetOrigin` other than `"*"`, `"/"` or the
+  app's origin drops the message, and one that is not a URL throws `SyntaxError`. `source` is the window whose event is being
+  handled, and the first window outside a handler.
+- **The realm's members.** What a window does not define it answers with the global object's, because there is one realm:
+  `window.open(...).setTimeout`, `fetch`, `queueMicrotask`, `structuredClone`, `Promise`, `HTMLElement` and the other classes,
+  `localStorage`, `sessionStorage`, `location` and `history` are the same objects. `location`, `history` and storage are the app's,
+  not the window's: a `pushState` in one window moves the URL of all of them ([deviations](./fork/deviations.md#several-windows)).
+
+**Closing.** A window closes when a script calls `close()`, when the user closes it, and when the app ends. The first two fire
+`pagehide` and then `unload` on that window (`close()` fires `beforeunload` first, in a later task: `closed` is `true` at once),
+once, and the root of the window unmounts with them; the app ending fires them on every window that is left. That holds for the
+first window too: when the user closes it while popups stay open, its root unmounts and the global `window` hears `pagehide` and
+`unload`, and the global `window` and `document` stay that closed window's. An opener that closes leaves the windows it opened
+open, as in a browser, and the app ends with its last window.
+
+**Focus.** `document.hasFocus()` is the platform's key window (`isWindowKey`), and a window listening for `focus` or `blur`
+(`addEventListener` or `onfocus`) hears them, with the window as `target`, when it becomes or stops being the key window; a
+window that nobody listens for costs nothing. A window opened with `GPUIX_BACKGROUND=1` ([Let an agent drive the app](#let-an-agent-drive-the-app))
+emulates focus for its elements and is never key, so `hasFocus()` is `false` and no window `focus` or `blur` is sent there.
 
 ### `location`, `history` and storage
 
@@ -6090,8 +6295,10 @@ function Screen() {
 ```
 
 The portal's children are appended after whatever the target already holds, and
-React keeps them in key order among themselves. `target` must belong to the same
-root as the component that calls `createPortal`.
+React keeps them in key order among themselves. `target` may be an element of
+another window: `createPortal(<Palette />, win.document.body)` renders the component's content in the window `window.open('')`
+gave, follows the calling component's state and context, and is removed with it. The nodes are created for the target's window,
+and that window's batch is sent when the commit ends, in a microtask rather than inside the commit.
 
 For floating menus that must paint above a `<virtual-list>`, use
 [`<anchored>`](#overlay-menus) rather than a portal: a portal changes where
@@ -6502,7 +6709,7 @@ An element is **editable** when its own `contenteditable` is `true` (an empty at
 
 ### Selection
 
-`document.getSelection()` and `window.getSelection()` give the one `Selection` of the app (`Selection` is a global, and its constructor throws `Illegal constructor`). Once code selects nodes (`setBaseAndExtent`, `collapse`, `selectAllChildren`, `addRange`, `modify`, or `focus()` on an editing host) or the user clicks into a host, it holds a live `Range` over the DOM and answers everything from it, with no mounted root needed; a React or Solid insertion, removal or text update under it moves its boundary points. Otherwise it is the [text selection](#text-selection) of the window that mounted last: the spans of painted text a drag selects, which are not nodes. The two never exist together: selecting nodes clears the painted text, and a drag that paints text drops the node range.
+`document.getSelection()` and `window.getSelection()` give the `Selection` of the document's window, one for each window (`Selection` is a global, and its constructor throws `Illegal constructor`); a window's selection holds only nodes of that window. Once code selects nodes (`setBaseAndExtent`, `collapse`, `selectAllChildren`, `addRange`, `modify`, or `focus()` on an editing host) or the user clicks into a host, it holds a live `Range` over the DOM and answers everything from it, with no mounted root needed; a React or Solid insertion, removal or text update under it moves its boundary points. Otherwise it is the [text selection](#text-selection) of its window: the spans of painted text a drag selects, which are not nodes. The two never exist together: selecting nodes clears the painted text, and a drag that paints text drops the node range.
 
 | Member | |
 |---|---|
@@ -10490,7 +10697,7 @@ Native parses the sheet, so JS keeps only the text of each rule to answer `cssRu
 
 ### `document.adoptedStyleSheets`
 
-An observable array of `CSSStyleSheet`: assigning the property, assigning an index or `length`, and `push`, `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, `fill` and `copyWithin` all take effect, and a value that is not a `CSSStyleSheet` throws a `TypeError` before anything changes. Only the last index can be deleted, so the array has no holes. A sheet listed twice counts once, at its last place. It is one array for the document, which spans every window: each window gets the same list, and a window opened later gets it too. A sheet that leaves the list is gone from native, and comes back with its current text when it is adopted again.
+An observable array of `CSSStyleSheet`: assigning the property, assigning an index or `length`, and `push`, `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, `fill` and `copyWithin` all take effect, and a value that is not a `CSSStyleSheet` throws a `TypeError` before anything changes. Only the last index can be deleted, so the array has no holes. A sheet listed twice counts once, at its last place. It is one array for each document: a window applies the sheets its own document adopted, and the global `document` is the first window's, so a sheet adopted there does not reach a second window (adopt it in that window's `documentOf(renderer)`). A sheet that leaves the list is gone from native, and comes back with its current text when it is adopted again.
 
 ### `@font-face`
 
@@ -10509,10 +10716,10 @@ The rule stands where `@keyframes` and `@property` do (the top of a sheet, `@lay
 
 `src` is a list tried in order; the first source that loads is the face. A source is:
 
-- `url(...)`, read as an [`<img>` `src`](#img) is (and a `url()` in a `background`): an absolute path, a path relative to the process's working directory (there is no document base URL), a `file://` URL or a `data:` URL. A `format()` hint other than `truetype`, `opentype`, `collection`, `truetype-variations` and `opentype-variations` skips the source without reading it. The file has to be TrueType or OpenType (`.ttf`, `.otf`, `.ttc`), with the family, full and PostScript names GPUI needs, as `registerFont()` asks. **WOFF and WOFF2 are not read** (list a `.ttf` source after them), and `http:` and `https:` addresses are not fetched; both are logged.
+- `url(...)`, read as an [`<img>` `src`](#img) is (and a `url()` in a `background`): an absolute path, a path relative to the process's working directory (there is no document base URL), a `file://` URL or a `data:` URL. A `format()` hint other than `truetype`, `opentype`, `collection`, `woff`, `woff2` and their `-variations` forms (`truetype-variations`, `opentype-variations`, `woff-variations`, `woff2-variations`) skips the source without reading it. The file has to be TrueType, OpenType, WOFF or WOFF2 (`.ttf`, `.otf`, `.ttc`, `.woff`, `.woff2`), with the family, full and PostScript names GPUI needs, as `registerFont()` asks; a broken or nameless file is skipped and logged, and the next source is tried. `http:` and `https:` addresses are not fetched, which is logged too.
 - `local(name)`: the installed font family of that name.
 
-A Vite app gets this from a CSS import: `import css from './app.css?inline'` gives the text of the file with each `url()` rewritten by Vite, and `ghia()` makes every font in one (`.ttf`, `.otf`, `.ttc`) a `data:` URL, in `ghia dev` and in `ghia build`, whatever its size (a build would otherwise emit `/assets/name-hash.ttf`, and the dev server answers `/src/name.ttf`, and the document has no base URL that either resolves against). Put the text in a `<style>` element, or a constructed sheet. A bare `import './app.css'` adds nothing in the UI process. Set `build.assetsInlineLimit` on the `ghia` environment to take over the inlining of the build.
+A Vite app gets this from a CSS import: `import css from './app.css?inline'` gives the text of the file with each `url()` rewritten by Vite, and `ghia()` makes every font in one (`.ttf`, `.otf`, `.ttc`, `.woff`, `.woff2`) a `data:` URL, in `ghia dev` and in `ghia build`, whatever its size (a build would otherwise emit `/assets/name-hash.ttf`, and the dev server answers `/src/name.ttf`, and the document has no base URL that either resolves against). Put the text in a `<style>` element, or a constructed sheet. A bare `import './app.css'` adds nothing in the UI process. Set `build.assetsInlineLimit` on the `ghia` environment to take over the inlining of the build.
 
 Faces are loaded synchronously in the frame that first builds with the rule, and text that names the family is laid out again when the face is there, also when the rule arrives or goes after the text. `font-weight`, `font-style` and `font-stretch` do not select among faces yourself: GPUI matches the weight and style of the files registered under one family name, so give the faces of one family files whose own family names agree. What differs from CSS is in [deviations](./fork/deviations.md#stylesheets).
 
@@ -10840,8 +11047,7 @@ handler it runs can read and write the renderer: `getFocusedElementId()`,
 `matches()`, `getBoundingClientRect()` and `document.activeElement` answer
 current values inside an `onMouseDown`, and a `DismissableLayer` (Dialog,
 Popover) can open from one. Only another `nativeSimulate*` call, `advanceTime` or
-`captureScreenshot` throws there. The test window is one per thread: making a
-`TestRenderer` tears down the previous one. Call `renderer.dispose()` when a test is done with its renderer (`createTestRoot().unmount()` does, after unmounting the root); native calls that need the window throw afterwards, except the ones an element reaches, which answer as for a node that is not in a document (see "An element outlives its window" under the renderer and root notes near the top). A renderer nobody disposes is leaked when the thread exits, which is safe but keeps the window until then.
+`captureScreenshot` throws there. **Several test windows are open at once**: every `TestRenderer` opens its own window on the thread's one test app, and each call acts on its own window. Two renderers have their own element ids (both roots have an element `1`), events, bounds, window size, media features, `openedUrls()` and frames; `flush()`, `drawFrame()` and a simulated input draw only the window they were made on. What is the app's is shared: the clipboard (`writeClipboard`, `readClipboard`: one for the app, as the system's is) and the clock (`clockPause`, `clockAdvance` and the others move the time of every test window), and `appearance` (a window made with none clears the one an earlier window asked for). Call `renderer.dispose()` when a test is done with its renderer (`createTestRoot().unmount()` does, after unmounting the root): it closes that window and no other, and the app goes with the last window. Native calls that need the window throw afterwards, except the ones an element reaches, which answer as for a node that is not in a document (see "An element outlives its window" under the renderer and root notes near the top). A window nobody disposes stays open, and a test that leaves one would keep it for every test after it: a vitest suite adds a setup file (`test.setupFiles`) that calls `bindTestRendererScope({ beforeEach, afterEach })` from `@ghia/native/testing` with its own `vitest`'s hooks, which disposes the renderers a test made when it ends (a renderer made in `beforeAll` or at the top of the file stays), and a script that makes windows in a loop calls `startTestRendererScope()` from `@ghia/native/testing` and the function it returns. What is left when the thread exits is leaked, which is safe.
 
 ### Simulating keys
 
@@ -11290,7 +11496,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Runtime errors keep the macOS window alive and show a stack overlay
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element
-- [ ] Multiple windows
+- [x] Multiple windows (several windows on one app, a document per window, `window.open`, rendering into a window with Solid `render(code, container)` and React `createRoot(container)`)
 - [x] JS remount on a full reload under `ghia dev` (`render()` keeps the native window)
 - [x] Solid component hot updates under `ghia dev` (solid-refresh; local signal state resets)
 - [x] React Fast Refresh under `ghia dev` (`@ghia/react/vite`)

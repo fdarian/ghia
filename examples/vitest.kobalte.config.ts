@@ -8,5 +8,5 @@ import { defineConfig } from 'vitest/config'
 // browser-only dependencies, which the other examples' tests trip on.
 export default defineConfig({
   plugins: [ghia(), solid()],
-  test: { environment: 'node', include: ['kobalte/**/*.test.tsx'] },
+  test: { environment: 'node', setupFiles: ['./vitest.setup.ts'], include: ['kobalte/**/*.test.tsx'] },
 })

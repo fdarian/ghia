@@ -2,13 +2,14 @@
 //! script moves them.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use gpui::prelude::*;
 use web_time::Instant;
 
 use crate::style::StyleDesc;
+use crate::window_map::WindowMap;
 
 /// What one axis of CSS `overflow` does to the element's content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +119,7 @@ pub(crate) fn overscroll_y(style: &StyleDesc) -> gpui::OverscrollBehavior {
 /// exactly as it would without `overflow`.
 pub(crate) fn apply_container<E: gpui::Styled + gpui::StatefulInteractiveElement>(
     mut el: E,
+    window: gpui::WindowId,
     id: u64,
     style: Option<&StyleDesc>,
     colors: &crate::color::ColorContext,
@@ -125,13 +127,13 @@ pub(crate) fn apply_container<E: gpui::Styled + gpui::StatefulInteractiveElement
 ) -> E {
     let Some(style) = style else {
         handles.remove(&id);
-        set_smooth_by_default(id, false);
+        set_smooth_by_default(window, id, false);
         return el;
     };
     let axes = Axes::of(style);
     if !axes.scrolls() {
         handles.remove(&id);
-        set_smooth_by_default(id, false);
+        set_smooth_by_default(window, id, false);
         return el;
     }
     el = match (axes.x.has_offset(), axes.y.has_offset()) {
@@ -148,12 +150,13 @@ pub(crate) fn apply_container<E: gpui::Styled + gpui::StatefulInteractiveElement
         overscroll(style.overscroll_behavior_x.as_deref().or(both)),
         overscroll(style.overscroll_behavior_y.as_deref().or(both)),
     );
-    set_smooth_by_default(id, style.scroll_behavior.as_deref() == Some("smooth"));
+    set_smooth_by_default(window, id, style.scroll_behavior.as_deref() == Some("smooth"));
     let handle = handles.entry(id).or_insert_with(gpui::ScrollHandle::new);
     el = el.track_scroll(handle);
     if axes.x.scrolls_for_user() || axes.y.scrolls_for_user() {
         el = crate::scrollbar::attach(
             el,
+            window,
             id,
             crate::scrollbar::Source::Container {
                 id,
@@ -289,8 +292,8 @@ thread_local! {
     /// `apply_container` says for each scroller it builds whether it is one, and a frame that does
     /// not build a scroller leaves what it said. Thread-local like `SCROLL_HANDLES`, so the
     /// same napi calls can reach it without a window update.
-    static SMOOTH_BY_DEFAULT: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
-    static ANIMATIONS: RefCell<HashMap<u64, Animation>> = RefCell::new(HashMap::new());
+    static SMOOTH_BY_DEFAULT: RefCell<WindowMap<()>> = RefCell::new(WindowMap::default());
+    static ANIMATIONS: RefCell<WindowMap<Animation>> = RefCell::new(WindowMap::default());
     /// What code wrote to the scrollers of each window since its hover last took it, see [`take_writes`].
     static WRITES: RefCell<HashMap<gpui::WindowId, Writes>> = RefCell::new(HashMap::new());
 }
@@ -322,10 +325,17 @@ pub(crate) fn take_writes(window: gpui::WindowId) -> Writes {
     WRITES.with(|writes| writes.borrow_mut().remove(&window)).unwrap_or_default()
 }
 
-/// Call before building a frame, so a scroller that was removed does not keep `scrollBehavior:
-/// "smooth"`.
-pub(crate) fn begin_frame(exists: impl Fn(u64) -> bool) {
-    SMOOTH_BY_DEFAULT.with(|smooth| smooth.borrow_mut().retain(|id| exists(*id)));
+/// Call before building a frame of `window`, so a scroller that was removed does not keep
+/// `scrollBehavior: "smooth"`.
+pub(crate) fn begin_frame(window: gpui::WindowId, exists: impl Fn(u64) -> bool) {
+    SMOOTH_BY_DEFAULT.with(|smooth| smooth.borrow_mut().of_mut(window).retain(|id, _| exists(*id)));
+}
+
+/// Drops the scroll state of a window that closed: its smooth scrolls end with it.
+pub(crate) fn forget_window(window: gpui::WindowId) {
+    SMOOTH_BY_DEFAULT.with(|smooth| smooth.borrow_mut().forget(window));
+    ANIMATIONS.with(|animations| animations.borrow_mut().forget(window));
+    WRITES.with(|writes| writes.borrow_mut().remove(&window));
 }
 
 /// Whether `id` is an element that has a box to scroll in the layout being built. One under
@@ -338,21 +348,21 @@ pub(crate) fn has_scrolling_box(tree: &crate::retained_tree::RetainedTree, id: u
         .is_some_and(|element| !crate::layout::box_generation::is_hidden_in_pass(tree, element))
 }
 
-fn set_smooth_by_default(id: u64, smooth: bool) {
+fn set_smooth_by_default(window: gpui::WindowId, id: u64, smooth: bool) {
     SMOOTH_BY_DEFAULT.with(|set| {
         if smooth {
-            set.borrow_mut().insert(id);
+            set.borrow_mut().insert(window, id, ());
         } else {
-            set.borrow_mut().remove(&id);
+            set.borrow_mut().remove(window, id);
         }
     });
 }
 
-pub(crate) fn is_smooth(id: u64, behavior: Behavior) -> bool {
+pub(crate) fn is_smooth(window: gpui::WindowId, id: u64, behavior: Behavior) -> bool {
     match behavior {
         Behavior::Smooth => true,
         Behavior::Instant => false,
-        Behavior::Auto => SMOOTH_BY_DEFAULT.with(|smooth| smooth.borrow().contains(&id)),
+        Behavior::Auto => SMOOTH_BY_DEFAULT.with(|smooth| smooth.borrow().contains(window, id)),
     }
 }
 
@@ -465,8 +475,8 @@ pub(crate) fn scroll_to(
 }
 
 /// Ends the smooth scroll of `id` in flight, which any other write to it does.
-pub(crate) fn end_smooth_scroll(id: u64) {
-    ANIMATIONS.with(|animations| animations.borrow_mut().remove(&id));
+pub(crate) fn end_smooth_scroll(window: gpui::WindowId, id: u64) {
+    ANIMATIONS.with(|animations| animations.borrow_mut().remove(window, id));
 }
 
 fn move_to(
@@ -476,11 +486,11 @@ fn move_to(
     target: gpui::Point<gpui::Pixels>,
     behavior: Behavior,
 ) -> bool {
-    end_smooth_scroll(id);
+    end_smooth_scroll(window, id);
     if target == handle.offset() {
         return false;
     }
-    let smooth = is_smooth(id, behavior);
+    let smooth = is_smooth(window, id, behavior);
     note_write(window, smooth);
     if !smooth {
         handle.set_offset(target);
@@ -488,9 +498,9 @@ fn move_to(
     }
     ANIMATIONS.with(|animations| {
         animations.borrow_mut().insert(
+            window,
             id,
             Animation {
-                window,
                 handle: handle.clone(),
                 from: handle.offset(),
                 to: target,
@@ -504,8 +514,6 @@ fn move_to(
 }
 
 struct Animation {
-    /// The window of the scroller, whose hover follows when this ends.
-    window: gpui::WindowId,
     handle: gpui::ScrollHandle,
     from: gpui::Point<gpui::Pixels>,
     to: gpui::Point<gpui::Pixels>,
@@ -525,21 +533,23 @@ const SMOOTH_MS_PER_PX: f32 = 0.05;
 const SMOOTH_CURVE: [f64; 4] = [0.4, 0.0, 0.2, 1.0];
 
 /// Whether a smooth scroll has frames to run.
+#[cfg(test)]
 pub(crate) fn animating() -> bool {
     ANIMATIONS.with(|animations| !animations.borrow().is_empty())
 }
 
 /// Whether a smooth scroll of a scroller of `window` has frames to run.
 pub(crate) fn animating_in(window: gpui::WindowId) -> bool {
-    ANIMATIONS.with(|animations| animations.borrow().values().any(|animation| animation.window == window))
+    ANIMATIONS.with(|animations| !animations.borrow().of(window).is_empty())
 }
 
-/// Advances the smooth scrolls to `now`. True while one still has frames to run.
-pub(crate) fn advance_animations(now: Instant) -> bool {
+/// Advances the smooth scrolls of `window` to `now`. True while one still has frames to run.
+pub(crate) fn advance_animations(window: gpui::WindowId, now: Instant) -> bool {
     ANIMATIONS.with(|animations| {
         let mut animations = animations.borrow_mut();
-        animations.retain(|_, animation| advance(animation, now));
-        !animations.is_empty()
+        let held = animations.of_mut(window);
+        held.retain(|_, animation| advance(animation, now));
+        !held.is_empty()
     })
 }
 
@@ -952,7 +962,7 @@ mod tests {
         assert!(move_to(first, 77, &handle, gpui_offset(0.0, 100.0), Behavior::Smooth));
         assert!(animating() && animating_in(first) && !animating_in(second));
         assert_eq!(take_writes(first), Writes { instant: false, smooth: true });
-        end_smooth_scroll(77);
+        end_smooth_scroll(first, 77);
         assert!(!animating_in(first));
     }
 

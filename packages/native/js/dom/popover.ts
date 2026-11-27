@@ -17,7 +17,7 @@
 import { flushPendingMutations } from "../bounds.js"
 import { noteBatchApplied } from "../batch-count.js"
 import { dispatchAtElement, type DomEvent, type DomEventRoot } from "../events/dispatch.js"
-import { document, elementOf } from "../events/window-target.js"
+import { documentOf, elementOf } from "../events/window-target.js"
 import type { DomElementBinding } from "../dom-members.js"
 import type { NativeRenderer } from "../host.js"
 import { namedError } from "../named-error.js"
@@ -74,7 +74,7 @@ function forget(record: Showing, native: boolean): void {
   record.removeLayer?.()
   record.removeLayer = undefined
   if (native) sendOpen(record.renderer, record.id, null)
-  if (!open.some((other) => other.kind === "auto")) stopLightDismiss()
+  if (!open.some((other) => other.kind === "auto" && other.renderer === record.renderer)) stopLightDismiss(record.renderer)
 }
 
 /**
@@ -233,7 +233,7 @@ export function showPopover(element: Element, probe: PopoverProbe): void {
   sendOpen(record.renderer, record.id, ++shownCount)
   if (kind === "auto") {
     record.removeLayer = pushDismissLayer(record.renderer, { onEscapeKeyDown: () => hideShowing(element) })
-    startLightDismiss()
+    startLightDismiss(record.renderer)
   }
   queueToggle(record, element, "closed", "open")
 }
@@ -286,26 +286,29 @@ function popoverHolding(target: unknown): Showing | undefined {
   return undefined
 }
 
-/** A press outside the open `auto` popovers closes them, all of them but the one it is in and those it holds. */
-function lightDismiss(event: DomEvent): void {
+/** A press outside the open `auto` popovers of a window closes them, all of them but the one it is in and those it holds. */
+function lightDismiss(renderer: NativeRenderer, event: DomEvent): void {
   const inside = popoverHolding(event.target)
   for (const record of open.slice().reverse()) {
-    if (record.kind !== "auto") continue
+    if (record.kind !== "auto" || record.renderer !== renderer) continue
     if (inside !== undefined && open.indexOf(record) <= open.indexOf(inside)) break
     if (current(record.element) === record) hide(record, true)
   }
 }
 
-let lightDismissing = false
+/** The `pointerdown` listener on the document of each window that has an `auto` popover showing. */
+const lightDismissers = new Map<NativeRenderer, (event: DomEvent) => void>()
 
-function startLightDismiss(): void {
-  if (lightDismissing) return
-  lightDismissing = true
-  document.addEventListener("pointerdown", lightDismiss, true)
+function startLightDismiss(renderer: NativeRenderer): void {
+  if (lightDismissers.has(renderer)) return
+  const listener = (event: DomEvent) => lightDismiss(renderer, event)
+  lightDismissers.set(renderer, listener)
+  documentOf(renderer).addEventListener("pointerdown", listener, true)
 }
 
-function stopLightDismiss(): void {
-  if (!lightDismissing) return
-  lightDismissing = false
-  document.removeEventListener("pointerdown", lightDismiss, true)
+function stopLightDismiss(renderer: NativeRenderer): void {
+  const listener = lightDismissers.get(renderer)
+  if (listener === undefined) return
+  lightDismissers.delete(renderer)
+  documentOf(renderer).removeEventListener("pointerdown", listener, true)
 }

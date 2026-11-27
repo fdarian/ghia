@@ -1,6 +1,15 @@
 import type { JSX } from "solid-js"
 import { GpuixRenderer, type WindowOptions } from "@ghia/native"
-import { isWebBuild, type NativeRenderer, type RootEventHandlers } from "@ghia/native/host"
+import {
+  bindRenderSlot,
+  Element as RuntimeElement,
+  isWebBuild,
+  renderSlotFor,
+  resetRenderSlots,
+  type NativeRenderer,
+  type RenderSlot as BaseRenderSlot,
+  type RootEventHandlers,
+} from "@ghia/native/host"
 import {
   createNativeRenderer,
   installBrowserAutomation,
@@ -9,13 +18,10 @@ import {
   type FrameLoopOptions,
   type WindowFontsOption,
 } from "@ghia/native/runtime"
-import { createRoot, type Root } from "./root.js"
+import { createRoot, renderIntoElement, type Root } from "./root.js"
 import { reportUncaughtError } from "./uncaught-error.js"
 
-const RENDER_HOST = Symbol.for("@ghia/solid/render-host")
-
-interface RenderSlot {
-  renderer?: NativeRenderer
+interface RenderSlot extends BaseRenderSlot {
   root?: Root
   loop?: FrameLoop
   /** The latest render's handler: the renderer outlives the render that created it. */
@@ -44,13 +50,35 @@ export function createRenderer(
   })
 }
 
-function slot(): RenderSlot {
-  const global = globalThis as typeof globalThis & { [RENDER_HOST]?: RenderSlot }
-  return global[RENDER_HOST] ??= {}
+/**
+ * Mount Solid on a window of its own, as the first call does: later calls under `bun --hot` remount on the same window.
+ *
+ * With an element of a window's document instead of options, `render(code, container)` mounts `code` as children of
+ * that element, as `solid-js/web`'s `render(code, element)` does (typically `window.open('').document.body`), and
+ * returns the function that disposes it.
+ */
+export function render(code: () => JSX.Element, options?: RenderOptions): Root
+export function render(code: () => JSX.Element, container: Element): () => void
+export function render(code: () => JSX.Element, optionsOrContainer: RenderOptions | Element = {}): Root | (() => void) {
+  // Any element goes to `renderIntoElement`, which throws for one that is in no mounted window: the body of a closed window must not mount the app again.
+  if (optionsOrContainer instanceof RuntimeElement) return renderIntoElement(code, optionsOrContainer as Element)
+  return renderWindow(code, optionsOrContainer as RenderOptions)
 }
 
-/** Mount Solid. Later calls under `bun --hot` remount on the same window. */
-export function render(code: () => JSX.Element, options: RenderOptions = {}): Root {
+function createWindowRenderer(host: RenderSlot, windowOptions: WindowOptions & WindowFontsOption): NativeRenderer {
+  const created = createNativeRenderer({
+    onError(error) {
+      reportUncaughtError(host, error)
+    },
+  })
+  bindRenderSlot(host, created)
+  if (created instanceof GpuixRenderer) {
+    created.init(windowOptions)
+  }
+  return created
+}
+
+function renderWindow(code: () => JSX.Element, options: RenderOptions): Root {
   const {
     renderer: injected,
     debugFrameOverlay,
@@ -65,24 +93,15 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     onUncaughtError,
     ...windowOptions
   } = options
-  const host = slot()
+  const host = renderSlotFor<RenderSlot>(injected)
   host.onUncaughtError = onUncaughtError
-  if (!host.renderer) {
-    host.renderer = injected ?? createNativeRenderer({
-      onError(error) {
-        reportUncaughtError(host, error)
-      },
-    })
-    if (!injected && host.renderer instanceof GpuixRenderer) {
-      host.renderer.init(windowOptions)
-    }
-  }
+  const renderer = host.renderer ?? createWindowRenderer(host, windowOptions)
   // After the mount, not before: the loop's first tick draws the window, and
   // started earlier it presents an empty frame (~50 ms) before the content. In a
   // `finally` so a mount that throws still leaves the opened window ticking.
   try {
     host.root?.unmount()
-    host.root = createRoot(host.renderer, {
+    host.root = createRoot(renderer, {
       onEvent,
       onKeyDown,
       onKeyUp,
@@ -94,21 +113,21 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     })
     if (
       isWebBuild &&
-      host.renderer instanceof GpuixRenderer &&
+      renderer instanceof GpuixRenderer &&
       !Reflect.has(globalThis, "gpuix")
     ) {
-      installBrowserAutomation(host.renderer).then(
+      installBrowserAutomation(renderer).then(
         (automation) => {
           if (!Reflect.has(globalThis, "gpuix")) Reflect.set(globalThis, "gpuix", automation)
         },
         (error) => console.error("[gpuix-solid] automation failed", error)
       )
     }
-    if (debugFrameOverlay) host.renderer.setDebugFrameOverlay?.(debugFrameOverlay)
+    if (debugFrameOverlay) renderer.setDebugFrameOverlay?.(debugFrameOverlay)
     host.root.render(code)
   } finally {
-    if (!injected && host.renderer instanceof GpuixRenderer && !host.loop) {
-      host.loop = startFrameLoop(host.renderer, {
+    if (!injected && renderer instanceof GpuixRenderer && !host.loop) {
+      host.loop = startFrameLoop(renderer, {
         ...frameLoop,
         onTerminated: () => {
           if (typeof process !== "undefined") process.exit(0)
@@ -121,9 +140,5 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
 }
 
 export function resetRender(): void {
-  const global = globalThis as typeof globalThis & { [RENDER_HOST]?: RenderSlot }
-  const host = global[RENDER_HOST]
-  host?.loop?.stop()
-  host?.root?.unmount()
-  delete global[RENDER_HOST]
+  resetRenderSlots()
 }

@@ -9,7 +9,7 @@ import { reportUncaught } from "./events/dispatch.js"
 import { createRendererState } from "./renderer-state.js"
 import { readLayoutSize } from "./bounds.js"
 import type { NativeRenderer } from "./host.js"
-import { assertDispatchable, dispatchEventAlongPath, document, type GpuixDocument } from "./events/window-target.js"
+import { assertDispatchable, dispatchEventAlongPath, type GpuixDocument } from "./events/window-target.js"
 import {
   attributeLookupName,
   attributeNameOf,
@@ -23,7 +23,7 @@ import {
 } from "./dom/attribute-names.js"
 import { hasMutationObservers, queueAttributeMutation } from "./dom/mutation-observer.js"
 import { styleAttributeText, writeStyleText } from "./dom/css-style-declaration.js"
-import { DOM_BINDING, Element, SVGElement, type Node } from "./dom/nodes.js"
+import { DOM_BINDING, Element, ownerDocumentOf, SVGElement, type Node } from "./dom/nodes.js"
 import { popoverProperty } from "./dom/popover-attribute.js"
 import { hidePopover, showPopover, togglePopover, writePopoverAttribute } from "./dom/popover.js"
 import type { StyleDesc } from "./host.js"
@@ -33,7 +33,7 @@ import type { DOMRectList } from "./dom/dom-rect.js"
 
 /** The DOM members every host element has beside the scroll ones. */
 export interface DomElement {
-  /** The `document` of the app. `document.defaultView` is the global `window`. */
+  /** The `document` of the window the element is in. For the first window's, `document.defaultView` is the global `window`. */
   readonly ownerDocument: GpuixDocument
   /** Whether the element is in the tree of a mounted root. */
   readonly isConnected: boolean
@@ -212,7 +212,12 @@ export function defineDomMembers<This extends object>(
   defineInputMembers(target, bind)
   defineBoxMembers(target, bind as unknown as (self: Element) => DomElementBinding)
   Object.defineProperties(target, {
-    ownerDocument: { configurable: true, get: () => document },
+    ownerDocument: {
+      configurable: true,
+      get(this: This) {
+        return ownerDocumentOf(this as unknown as Node)
+      },
+    },
     isConnected: {
       configurable: true,
       get(this: This) {
@@ -313,7 +318,7 @@ export function defineDomMembers<This extends object>(
         const report = bound.layout ? createRendererState(bound.layout.renderer).reportError : reportUncaught
         // A click toggles a checkbox or radio before its listeners run, and puts it back when one cancels it.
         preActivateClick(bound.layout, event)
-        dispatchEventAlongPath(event, path, (index) => listenersOf(path[index]), bound.connected, report)
+        dispatchEventAlongPath(event, path, (index) => listenersOf(path[index]), bound.connected, report, (ownerDocumentOf(this as unknown as Node) as unknown as GpuixDocument).window)
         activateAfterClick(bound.layout, event)
         followLinkAfterClick(path, event)
         return !event.defaultPrevented

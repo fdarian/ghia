@@ -13,13 +13,12 @@ import { dataTransferControl, DataTransfer } from "../dom/data-transfer.js"
 import { serializeChildren } from "../dom/html/parse.js"
 import { rangeInnerText } from "../dom/inner-text.js"
 import { Node, type Element } from "../dom/nodes.js"
-import { getSelection, holdsNodeSelection } from "../dom/selection.js"
+import { holdsNodeSelection } from "../dom/selection.js"
 import { ClipboardEvent } from "../events/classes.js"
-import { document } from "../events/window-target.js"
+import { documentOf, type GpuixDocument } from "../events/window-target.js"
 import type { ClipboardData } from "../../index.js"
 import { flushPendingMutations } from "../bounds.js"
 import type { NativeRenderer } from "../host.js"
-import { mountedRenderer } from "../mounted-renderer.js"
 import { setDocumentCommands } from "./document-commands.js"
 import { editingHostOf } from "./host.js"
 import { editingSelectionKind, focusedNode, isTextControl, pastedText, runEditingInput } from "./input.js"
@@ -55,16 +54,16 @@ export function isClipboardCommand(name: string | undefined): name is ClipboardC
  * selection's start whether or not it is editable, so a selection that code put on a hidden element
  * (Lexical's node selection) is what the event is aimed at while an editing host has focus.
  */
-function eventTarget(): Element {
-  if (holdsNodeSelection()) {
-    const selection = getSelection()
+function eventTarget(document: GpuixDocument): Element {
+  const selection = document.getSelection()
+  if (holdsNodeSelection(selection)) {
     if (selection.rangeCount > 0) {
       const start = selection.getRangeAt(0).startContainer
       const element = start.nodeType === ELEMENT_NODE ? (start as Element) : start.parentElement
       if (element !== null) return element
     }
   }
-  return focusedNode() as Element
+  return focusedNode(document) as Element
 }
 
 /** Dispatches the event and says whether a handler canceled it. */
@@ -111,9 +110,9 @@ function writeCanceled(data: DataTransfer, clipboard: ClipboardAccess): void {
  * (`rangeInnerText`; `Selection.toString` has none), and its markup under a `<meta charset>`. False
  * when there is none.
  */
-function copyNodeSelection(clipboard: ClipboardAccess): boolean {
-  if (!holdsNodeSelection()) return false
-  const selection = getSelection()
+function copyNodeSelection(document: GpuixDocument, clipboard: ClipboardAccess): boolean {
+  const selection = document.getSelection()
+  if (!holdsNodeSelection(selection)) return false
   if (selection.isCollapsed) return false
   const markup = serializeChildren(selection.getRangeAt(0).cloneContents())
   clipboard.writeClipboard([
@@ -124,10 +123,10 @@ function copyNodeSelection(clipboard: ClipboardAccess): boolean {
 }
 
 /** `copy` and `cut` hand the handler a store it may write, and the clipboard gets what it wrote when it cancels. */
-function fireWritable(type: "copy" | "cut", clipboard: ClipboardAccess): boolean {
+function fireWritable(document: GpuixDocument, type: "copy" | "cut", clipboard: ClipboardAccess): boolean {
   const data = new DataTransfer()
   const control = dataTransferControl(data)
-  const canceled = fire(type, eventTarget(), data)
+  const canceled = fire(type, eventTarget(document), data)
   try {
     if (canceled) writeCanceled(data, clipboard)
   } finally {
@@ -136,9 +135,9 @@ function fireWritable(type: "copy" | "cut", clipboard: ClipboardAccess): boolean
   return canceled
 }
 
-function runCopy(clipboard: ClipboardAccess): boolean {
-  if (fireWritable("copy", clipboard)) return true
-  return copyNodeSelection(clipboard)
+function runCopy(document: GpuixDocument, clipboard: ClipboardAccess): boolean {
+  if (fireWritable(document, "copy", clipboard)) return true
+  return copyNodeSelection(document, clipboard)
 }
 
 /**
@@ -147,11 +146,11 @@ function runCopy(clipboard: ClipboardAccess): boolean {
  * with a caret, Chrome does nothing, so this is handled and has no painted-text fallback. A cut that
  * `execCommand` asked for fires no `beforeinput` (Input Events: it is not a user's edit), only `input`.
  */
-function runCut(clipboard: ClipboardAccess, source: ClipboardCommandSource): boolean {
-  if (fireWritable("cut", clipboard)) return true
-  if (editingSelectionKind() !== "range") return true
-  copyNodeSelection(clipboard)
-  runEditingInput("deleteByCut", null, { beforeInput: source === "user" })
+function runCut(document: GpuixDocument, clipboard: ClipboardAccess, source: ClipboardCommandSource): boolean {
+  if (fireWritable(document, "cut", clipboard)) return true
+  if (editingSelectionKind(document) !== "range") return true
+  copyNodeSelection(document, clipboard)
+  runEditingInput(document, "deleteByCut", null, { beforeInput: source === "user" })
   return true
 }
 
@@ -168,28 +167,28 @@ function clipboardData(clipboard: ClipboardAccess, mode: "readonly" | "protected
  * Chrome's default paste: the text of the clipboard goes into an editing host at the selection, and
  * anywhere else nothing does. A clipboard with no text changes nothing, and fires no `beforeinput`.
  */
-function runPaste(clipboard: ClipboardAccess): boolean {
+function runPaste(document: GpuixDocument, clipboard: ClipboardAccess): boolean {
   const data = clipboardData(clipboard, "readonly")
   let canceled: boolean
   try {
-    canceled = fire("paste", eventTarget(), data)
+    canceled = fire("paste", eventTarget(document), data)
   } finally {
     dataTransferControl(data).mode = "protected"
   }
   if (canceled) return true
-  if (editingSelectionKind() === "none") return true
+  if (editingSelectionKind(document) === "none") return true
   const items = clipboardData(clipboard, "readonly")
   if (pastedText(items) === null) return true
-  runEditingInput("insertFromPaste", null, { dataTransfer: items })
+  runEditingInput(document, "insertFromPaste", null, { dataTransfer: items })
   return true
 }
 
 /** Cmd+A: the focused editing host's contents, or the page's when none has focus. */
-function runSelectAll(): boolean {
-  const host = editingHostOf(focusedNode())
+function runSelectAll(document: GpuixDocument): boolean {
+  const host = editingHostOf(focusedNode(document))
   const body: unknown = document.body
   if (!(body instanceof Node)) throw new Error("document.body is not a DOM node")
-  getSelection().selectAllChildren(host ?? body)
+  document.getSelection().selectAllChildren(host ?? body)
   return true
 }
 
@@ -199,21 +198,22 @@ function runSelectAll(): boolean {
  * clipboard event (docs/fork/deviations.md).
  */
 export function runClipboardCommand(command: ClipboardCommand, renderer: NativeRenderer, source: ClipboardCommandSource = "user"): boolean {
-  if (isTextControl(focusedNode())) return false
+  const document = documentOf(renderer)
+  if (isTextControl(focusedNode(document))) return false
   const clipboard = clipboardOf(renderer)
   let handled: boolean
   switch (command) {
     case "copy":
-      handled = runCopy(clipboard)
+      handled = runCopy(document, clipboard)
       break
     case "cut":
-      handled = runCut(clipboard, source)
+      handled = runCut(document, clipboard, source)
       break
     case "paste":
-      handled = runPaste(clipboard)
+      handled = runPaste(document, clipboard)
       break
     case "selectAll":
-      handled = runSelectAll()
+      handled = runSelectAll(document)
       break
   }
   flushPendingMutations(renderer)
@@ -236,22 +236,20 @@ function documentCommandOf(name: string): ClipboardCommand | undefined {
  * tracked. `"paste"` does nothing, as in Chrome without the clipboard-read permission.
  */
 setDocumentCommands({
-  exec(name) {
+  exec(document, name) {
     const command = documentCommandOf(name)
     if (command === undefined) return false
-    const renderer = mountedRenderer()
-    if (renderer === undefined) throw new Error(`document.execCommand("${name}") needs a mounted GPUIX root. Call it after render().`)
-    return runClipboardCommand(command, renderer, "exec")
+    return runClipboardCommand(command, document.window.requireRenderer(`document.execCommand("${name}")`), "exec")
   },
   supported(name) {
     return documentCommandOf(name) !== undefined || name.toLowerCase() === "paste"
   },
-  enabled(name) {
+  enabled(document, name) {
     switch (name.toLowerCase()) {
       case "copy":
-        return holdsNodeSelection() && !getSelection().isCollapsed
+        return holdsNodeSelection(document.getSelection()) && !document.getSelection().isCollapsed
       case "cut":
-        return editingSelectionKind() === "range"
+        return editingSelectionKind(document) === "range"
       case "selectall":
         return true
       default:

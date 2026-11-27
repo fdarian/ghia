@@ -1,4 +1,3 @@
-import { cancelAnimationFrame, requestAnimationFrame } from "./animation-frame.js"
 import { getComputedStyle } from "./computed-style.js"
 import { CSSRule, CSSRuleList, CSSStyleRule, CSSStyleSheet } from "./css/index.js"
 import { matchMedia } from "./match-media.js"
@@ -34,7 +33,8 @@ import { Selection } from "./dom/selection.js"
 import { EVENT_CLASSES } from "./events/classes.js"
 import { replaceStandInDocumentElements, standInDocumentElements } from "./dom/stand-in-document.js"
 import { CaretPosition } from "./editing/caret-position.js"
-import { document, installStandInDocument, window } from "./events/window-target.js"
+import { document, globalWindow, installStandInDocument, window } from "./events/window-target.js"
+import { Window } from "./events/window-targets.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
 import { Animation, CSSAnimation, CSSTransition, DocumentTimeline, KeyframeEffect } from "./web-animations.js"
@@ -66,6 +66,7 @@ const DOM_CLASSES = {
   Document,
   DocumentFragment,
   ShadowRoot,
+  Window,
   ValidityState,
   DOMTokenList,
   HTMLCollection,
@@ -101,11 +102,14 @@ const DOM_CLASSES = {
 }
 
 installStandInDocument({
-  elements: () => standInDocumentElements(document),
-  replace: replaceStandInDocumentElements,
+  elements: (owner) => standInDocumentElements(owner as unknown as Node),
+  replace: (owner, mounted) => replaceStandInDocumentElements(owner as unknown as Node, mounted),
 })
 
-const getSelection = () => document.getSelection()
+/** What the global `window` does: the first window's. */
+const getSelection = () => globalWindow().document.getSelection()
+const requestAnimationFrame = (callback: (time: number) => void) => globalWindow().requestAnimationFrame(callback)
+const cancelAnimationFrame = (handle: number) => globalWindow().cancelAnimationFrame(handle)
 
 const DOM_FUNCTIONS = { ResizeObserver, IntersectionObserver, getComputedStyle, matchMedia, getSelection }
 

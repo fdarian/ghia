@@ -5,6 +5,7 @@ import { dlopen, FFIType } from "bun:ffi"
 import React from "react"
 import { render } from "@ghia/react"
 import type { GpuixRenderer } from "@ghia/native"
+import { ownRenderer } from "@ghia/native/host"
 import { CASES, HELPER_PATH, IDLE_MS, READY_FILE, REQUEST_FILE, TERMINATED_FILE, type CaseName } from "./paths"
 
 const folder = process.env.QUIT_E2E_DIR
@@ -52,11 +53,10 @@ await sleep(IDLE_MS)
 leave(READY_FILE, { pid: process.pid, windows: helper.symbols.qe_visible_windows() })
 
 if (name === "quit-action") {
-  // The adapter keeps the live renderer in this slot, which is where a test can reach it from.
-  const slot = Reflect.get(globalThis, "__gpuixRenderHost") as { renderer?: GpuixRenderer } | undefined
-  if (!slot?.renderer) throw new Error("the adapter's render slot holds no renderer")
+  const renderer = ownRenderer() as GpuixRenderer | undefined
+  if (!renderer) throw new Error("render() has opened no window of its own")
   leave(REQUEST_FILE, {})
-  slot.renderer.simulateKeystrokes("Meta+q")
+  renderer.simulateKeystrokes("Meta+q")
 } else if (name === "last-window-close") {
   leave(REQUEST_FILE, {})
   if (helper.symbols.qe_close_window_later() !== 1) throw new Error("the app has no visible window to close")

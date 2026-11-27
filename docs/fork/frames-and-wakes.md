@@ -258,6 +258,34 @@ Each wakes the host through the watch above (a main-queue block, or the Apple Ev
 terminated platform, and the process ends in 20 to 50 ms. Before this, AppKit ended the process from inside the pump
 without running `onTerminated`, or the quit waited for an unrelated wake. The e2e is in [testing.md](testing.md#the-quit-e2e).
 
+### Several windows: one loop
+
+The windows of an App share one platform, so `tick()` of any of their renderers pumps all of them, and the run-loop wake
+hook is the platform's, one per process. Both are shared:
+
+- **One loop.** `startFrameLoop(renderer)` registers the renderer with the App's loop (`SharedFrameLoop`,
+  `packages/native/js/runtime.ts`) and starts it when it is the first. An iteration flushes the writes every renderer has
+  queued (`flushPendingMutations`), then ticks the platform once, through the first renderer that is still in the loop, so a
+  second window never doubles the pump. The input frame and `keyEventPending` belong to the platform too, and are asked of that
+  renderer. The loop's first iteration and the one a joining renderer gets are each a task of their own
+  ([Startup order](#startup-order)), behind the same `scheduledFrame` guard as a wake, so a window that joins while another
+  one's iteration is already queued shares it instead of ticking twice, and one that joins an idle loop is ticked although
+  nothing wakes an idle platform for it; `frameMs` is the first renderer's, and the loop is the wake loop or the timer loop for all.
+- **One wake.** `setFrameWakeCallback` is installed on one renderer at a time, and the loop moves it to the next renderer when
+  that one leaves, so an idle app still gets no timer and no wakes. In Rust the hook is the entry list of `shared_wake.rs`:
+  `FrameWake::install` adds the renderer's callback and never replaces another's, `clear` removes its own, the watch stops with
+  the last entry, and `pending` is one flag, ended by any renderer's `tick()`. (`GpuixRenderer`'s drop used to clear the hook for
+  the whole process.)
+- **A window leaves.** After a tick with more than one renderer in the loop, those whose `isWindowClosed()` is true leave: the
+  sync handler is released, the renderer's teardown runs (`detachRenderer` and the rest of what `tick()` returning false ran) and
+  its `onWindowClosed` is called, while the loop goes on for the others. With one renderer the loop asks nothing: the last window
+  closing is the quit, and the last member never leaves this way even when its window is closed, which a `pagehide` handler of
+  a window that leaves can do to the rest: the quit is queued, only the next `tick()` sees it, and an emptied loop would never run
+  `onTerminated` (or flush storage, or let a Worker go).
+- **The end.** `tick()` returns false once the platform quit, and the loop then releases every renderer, flushes storage and runs
+  the `onTerminated` of each renderer that was in the loop once (the same function given for several renderers runs once), then
+  stops. A renderer that starts a loop after the end starts a new one.
+
 ### One wake per event: the commit of `sendEvent:`
 
 **Problem.** A stream of input woke JS about twice per event: once for the event, and once 1 to 8 ms later for a tick
@@ -707,7 +735,7 @@ drew.
 
 `render()` (`@ghia/solid`, `@ghia/react`) mounts the tree and then starts the frame loop, so the first presented frame has content. The loop's first `tick()` draws the window; started before the mount it presented an empty window and the content a frame later (about 50 ms on the scratch app, measured with the window-visible marks of `ghia-startup-2026-11-27`). The mount does not need the loop: it is synchronous. The loop is started in a `finally` around the mount, so a mount that throws still leaves the opened window ticking.
 
-`startFrameLoop` does not tick inline: its first tick is its own task (a `setImmediate` behind the `scheduledFrame` guard, the one a wake uses). It runs after the mount, after the code that follows `render()`, and after the microtasks the mount queued (an async `onMount`, a promise-based floating-ui position, Lexical's microtask commit), so all of them, and a mutation made right after `render()` returns, land in the first presented frame. A browser paints after the task that built the page and its microtask checkpoint; `scheduleInputFrame` follows the same rule.
+`startFrameLoop` does not tick inline: the first tick of the shared loop is its own task (a `setImmediate` behind the `scheduledFrame` guard, the one a wake uses), and so is the first tick of a window that joins a loop already running. It runs after the mount, after the code that follows `render()`, and after the microtasks the mount queued (an async `onMount`, a promise-based floating-ui position, Lexical's microtask commit), so all of them, and a mutation made right after `render()` returns, land in the first presented frame. A browser paints after the task that built the page and its microtask checkpoint; `scheduleInputFrame` follows the same rule.
 
 Nothing slow goes before the window on the main thread. The `<img>` HTTP client (`custom_elements::img::init`) is a `LazyHttpClient` that builds its `ReqwestClient` inside the first http(s) fetch, on GPUI's background executor: `reqwest` loads the macOS trust store when it builds a client (about 150 `SecTrustSettings` calls, ~76 ms), which used to run in the did-finish-launching callback before the window existed. An app with no http(s) image never builds it. Its user agent (`gpuix`) and proxy handling are those of `ReqwestClient::user_agent`.
 
@@ -729,6 +757,13 @@ Nothing slow goes before the window on the main thread. The `<img>` HTTP client 
   a vsync.
 - `packages/native/examples/quit-e2e` ([testing.md](testing.md#the-quit-e2e)) asks a real idle app to quit four ways and checks
   that `onTerminated` ran and the process ended; the zed side is `gpui_macos` `tests/main_run_loop_wakeups.rs`.
+- `frame-loop.test.ts` "several windows on one App" (7) runs the shared loop against fake renderers: one pump per iteration,
+  the first renderer keeps the wake, a joining renderer is ticked, a closed window leaves and the wake moves, the end runs
+  `onTerminated` once, a window whose `onWindowClosed` closes the last other one leaves that one in the loop so the queued quit
+  ends the app, and stopping one handle leaves the loop to the others. The `shared_wake` unit test checks that a second
+  entry does not replace the first. The multi-window e2e ([testing.md](testing.md#the-multi-window-e2e)) runs two real windows
+  through close, close of the wake's owner, the close button, the last close, a `pagehide` handler that closes the other window
+  (`unload-closes-last`) and a quit.
 - react `events.test.tsx` "wakes JS once per mouse move, not again when the frame boundary comes" opens a visible window
   with `focus: false`, posts 240 mouse moves from NSEventThread at random points of 120 Hz periods and allows 1.15 wakes
   per move. Without the flush after `sendEvent:` it saw 352 and 339 wakes for 240 moves (1.47 and 1.41).

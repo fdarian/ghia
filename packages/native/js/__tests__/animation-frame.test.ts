@@ -1,12 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
-import {
-  addFrameSource,
-  cancelAnimationFrame,
-  requestAnimationFrame,
-  resumeFrameRequests,
-  runAnimationFrame,
-  type FrameSource,
-} from "../animation-frame.js"
+import { describe, expect, it } from "vitest"
+import { FrameList, type FrameSource } from "../animation-frame.js"
 
 /** A window that records how often it was asked, and takes the request when it is open. */
 const report = (error: unknown) => {
@@ -24,140 +17,149 @@ function windowSource(open = true) {
   return { state, source }
 }
 
-describe("requestAnimationFrame", () => {
-  const stops: Array<() => void> = []
-  const add = (source: FrameSource) => {
-    const stop = addFrameSource(source)
-    stops.push(stop)
-    return stop
-  }
-
-  afterEach(() => {
-    for (const stop of stops.splice(0)) stop()
-    // Leaves nothing queued for the next test.
-    runAnimationFrame({}, 0, () => {})
+describe("a window's frame list", () => {
+  it("asks its window once until its frame runs", () => {
+    const window = windowSource()
+    const frames = new FrameList()
+    frames.attach(window.source)
+    frames.request(() => {})
+    frames.request(() => {})
+    expect(window.state.asks).toBe(1)
+    frames.run(0, report)
+    frames.request(() => {})
+    expect(window.state.asks).toBe(2)
   })
 
-  it("asks each window once until its frame runs", () => {
+  it("keeps the callbacks of each window apart: one window's frame runs its own and no other's", () => {
     const first = windowSource()
     const second = windowSource()
-    add(first.source)
-    add(second.source)
-    requestAnimationFrame(() => {})
-    requestAnimationFrame(() => {})
-    expect([first.state.asks, second.state.asks]).toEqual([1, 1])
-    runAnimationFrame(first.source, 0, report)
-    requestAnimationFrame(() => {})
-    expect([first.state.asks, second.state.asks]).toEqual([2, 1])
-  })
-
-  it("runs the callbacks in order with one time, and a second window finds nothing left", () => {
-    const first = windowSource()
-    const second = windowSource()
-    add(first.source)
-    add(second.source)
+    const firstFrames = new FrameList()
+    const secondFrames = new FrameList()
+    firstFrames.attach(first.source)
+    secondFrames.attach(second.source)
     const seen: Array<[string, number]> = []
-    requestAnimationFrame((time) => seen.push(["a", time]))
-    requestAnimationFrame((time) => seen.push(["b", time]))
-    runAnimationFrame(first.source, 1234.5, report)
-    runAnimationFrame(second.source, 9999, report)
+    firstFrames.request((time) => seen.push(["first", time]))
+    secondFrames.request((time) => seen.push(["second", time]))
+    expect([first.state.asks, second.state.asks]).toEqual([1, 1])
+    secondFrames.run(7, report)
+    expect(seen).toEqual([["second", 7]])
+    firstFrames.run(9, report)
+    expect(seen).toEqual([["second", 7], ["first", 9]])
+  })
+
+  it("runs the callbacks in order with one time", () => {
+    const frames = new FrameList()
+    frames.attach(windowSource().source)
+    const seen: Array<[string, number]> = []
+    frames.request((time) => seen.push(["a", time]))
+    frames.request((time) => seen.push(["b", time]))
+    frames.run(1234.5, report)
+    frames.run(9999, report)
     expect(seen).toEqual([["a", 1234.5], ["b", 1234.5]])
   })
 
+  it("hands out handles that name one callback of the app, whichever list it is in", () => {
+    const first = new FrameList()
+    const second = new FrameList()
+    const handles = [first.request(() => {}), second.request(() => {}), first.request(() => {})]
+    expect(new Set(handles).size).toBe(3)
+  })
+
   it("keeps what a callback requests for the next frame", () => {
-    add(windowSource().source)
-    const source = windowSource().source
-    add(source)
+    const frames = new FrameList()
+    frames.attach(windowSource().source)
     const order: string[] = []
-    requestAnimationFrame(() => {
+    frames.request(() => {
       order.push("first")
-      requestAnimationFrame(() => order.push("nested"))
+      frames.request(() => order.push("nested"))
     })
-    runAnimationFrame(source, 0, report)
+    frames.run(0, report)
     expect(order).toEqual(["first"])
-    runAnimationFrame(source, 0, report)
+    frames.run(0, report)
     expect(order).toEqual(["first", "nested"])
   })
 
   it("does not run a cancelled callback, one of the running frame included", () => {
-    const source = windowSource().source
-    add(source)
+    const frames = new FrameList()
+    frames.attach(windowSource().source)
     const order: string[] = []
-    const cancelled = requestAnimationFrame(() => order.push("cancelled"))
+    const cancelled = frames.request(() => order.push("cancelled"))
     let later = 0
-    requestAnimationFrame(() => {
+    frames.request(() => {
       order.push("first")
-      cancelAnimationFrame(later)
+      frames.cancel(later)
     })
-    later = requestAnimationFrame(() => order.push("later"))
-    cancelAnimationFrame(cancelled)
-    runAnimationFrame(source, 0, report)
+    later = frames.request(() => order.push("later"))
+    frames.cancel(cancelled)
+    frames.run(0, report)
     expect(order).toEqual(["first"])
   })
 
   it("reports a callback that throws to the reporter and runs the rest", () => {
-    const source = windowSource().source
-    add(source)
+    const frames = new FrameList()
+    frames.attach(windowSource().source)
     const reported: unknown[] = []
     const order: string[] = []
     const boom = new Error("boom")
-    requestAnimationFrame(() => {
+    frames.request(() => {
       throw boom
     })
-    requestAnimationFrame(() => order.push("after"))
-    runAnimationFrame(source, 0, (error) => reported.push(error))
+    frames.request(() => order.push("after"))
+    frames.run(0, (error) => reported.push(error))
     expect(order).toEqual(["after"])
     expect(reported).toEqual([boom])
   })
 
   it("does not throw when the window refuses the request, and runs the callback in a later frame", () => {
-    const source: FrameSource = {
+    const frames = new FrameList()
+    frames.attach({
       requestAnimationFrame() {
         throw new Error("no window")
       },
-    }
-    add(source)
+    })
     const order: string[] = []
-    expect(() => requestAnimationFrame(() => order.push("ran"))).not.toThrow()
+    expect(() => frames.request(() => order.push("ran"))).not.toThrow()
     expect(order).toEqual([])
-    runAnimationFrame(source, 0, report)
+    frames.run(0, report)
     expect(order).toEqual(["ran"])
   })
 
   it("asks a window that attaches after a refused request", () => {
-    const refusing: FrameSource = {
+    const frames = new FrameList()
+    frames.attach({
       requestAnimationFrame() {
         throw new Error("no window")
       },
-    }
-    add(refusing)
+    })
     const order: string[] = []
-    requestAnimationFrame(() => order.push("ran"))
+    frames.request(() => order.push("ran"))
     const later = windowSource()
-    add(later.source)
+    frames.attach(later.source)
     expect(later.state.asks).toBe(1)
-    runAnimationFrame(later.source, 0, report)
+    frames.run(0, report)
     expect(order).toEqual(["ran"])
   })
 
-  it("waits for the first window, and asks again once a window that was not open takes requests", () => {
+  it("waits for a window, and asks again once a window that was not open takes requests", () => {
+    const frames = new FrameList()
     const order: string[] = []
-    requestAnimationFrame(() => order.push("waited"))
+    frames.request(() => order.push("waited"))
     const closed = windowSource(false)
-    add(closed.source)
+    frames.attach(closed.source)
     expect(closed.state.asks).toBe(1)
     closed.state.open = true
-    resumeFrameRequests(closed.source)
+    frames.resume()
     expect(closed.state.asks).toBe(2)
-    runAnimationFrame(closed.source, 0, report)
+    frames.run(0, report)
     expect(order).toEqual(["waited"])
   })
 
   it("stops asking a window that was taken out", () => {
     const gone = windowSource()
-    const stop = add(gone.source)
-    stop()
-    requestAnimationFrame(() => {})
+    const frames = new FrameList()
+    const detach = frames.attach(gone.source)
+    detach()
+    frames.request(() => {})
     expect(gone.state.asks).toBe(0)
   })
 })

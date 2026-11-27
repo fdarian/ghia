@@ -1,13 +1,15 @@
 /**
  * Where `document.execCommand` and the `queryCommand*` methods go. They are installed by
- * `clipboard-commands.ts`, which needs `document` and so cannot be imported by the module that
- * defines it.
+ * `clipboard-commands.ts`, which needs the document class and so cannot be imported by the module that
+ * defines it. Each takes the document the call was made on, whose window the command runs in.
  */
 
+import type { GpuixDocument } from "../events/window-target.js"
+
 export interface DocumentCommands {
-  exec(name: string): boolean
+  exec(document: GpuixDocument, name: string): boolean
   supported(name: string): boolean
-  enabled(name: string): boolean
+  enabled(document: GpuixDocument, name: string): boolean
 }
 
 let installed: DocumentCommands | undefined

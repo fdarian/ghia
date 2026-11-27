@@ -9,9 +9,11 @@
 //! reference ids and the elements by DOM id), so it reads those and what they relate, never the
 //! rest of the tree, and keeps the answer until something it reads changes.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+
+use rustc_hash::FxHashMap;
 
 use crate::retained_tree::{RetainedElement, RetainedTree};
 
@@ -97,28 +99,42 @@ struct CacheKey {
 }
 
 thread_local! {
-    static CACHE: RefCell<Option<(CacheKey, Rc<A11yLinks>)>> = const { RefCell::new(None) };
-    /// The elements whose key differs from the one they had before the links were computed again,
-    /// until `take_changed`.
-    static CHANGED: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+    /// The links of each tree, by `RetainedTree::id`: the windows of an App each have a tree, and
+    /// one that alternates with another would otherwise compute its links again at every frame and
+    /// find every element changed.
+    static CACHE: RefCell<FxHashMap<u64, (CacheKey, Rc<A11yLinks>)>> = RefCell::new(FxHashMap::default());
+    /// The tree whose links `current` answers: the one `sync` ran for last, which is the one the
+    /// frame being built reads.
+    static CURRENT: Cell<u64> = const { Cell::new(0) };
+    /// The elements of each tree whose key differs from the one they had before the links were
+    /// computed again, until `take_changed`.
+    static CHANGED: RefCell<FxHashMap<u64, Vec<u64>>> = RefCell::new(FxHashMap::default());
 }
 
-/// The elements whose links changed since this was last called.
-pub(crate) fn take_changed() -> Vec<u64> {
-    CHANGED.with(|changed| std::mem::take(&mut *changed.borrow_mut()))
+/// The elements of `tree` whose links changed since this was last called.
+pub(crate) fn take_changed(tree: u64) -> Vec<u64> {
+    CHANGED.with(|changed| changed.borrow_mut().remove(&tree).unwrap_or_default())
 }
 
 /// [`take_changed`], leaving them for the frame that takes them.
-pub(crate) fn peek_changed() -> Vec<u64> {
-    CHANGED.with(|changed| changed.borrow().clone())
+pub(crate) fn peek_changed(tree: u64) -> Vec<u64> {
+    CHANGED.with(|changed| changed.borrow().get(&tree).cloned().unwrap_or_default())
+}
+
+/// Drops what is kept for a tree whose window is gone.
+pub(crate) fn forget_tree(tree: u64) {
+    // `try_with`: a view can be dropped while the thread's locals are being torn down.
+    let _ = CACHE.try_with(|cache| cache.borrow_mut().remove(&tree));
+    let _ = CHANGED.try_with(|changed| changed.borrow_mut().remove(&tree));
 }
 
 /// Recompute the links when the tree changed since the last call. Call before
 /// building a frame, and again before any later build of part of the same
 /// tree (virtual list rows), which may see a newer tree.
 pub(crate) fn sync(tree: &RetainedTree) {
+    CURRENT.set(tree.id());
     let Some(root) = tree.root_id.and_then(|id| tree.elements.get(&id)) else {
-        CACHE.with(|cache| *cache.borrow_mut() = None);
+        CACHE.with(|cache| cache.borrow_mut().remove(&tree.id()));
         return;
     };
     let key = CacheKey {
@@ -128,18 +144,19 @@ pub(crate) fn sync(tree: &RetainedTree) {
     };
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if cache.as_ref().is_some_and(|(cached, _)| *cached == key) {
+        if cache.get(&key.tree).is_some_and(|(cached, _)| *cached == key) {
             return;
         }
         let links = compute(tree);
-        let before = cache.as_ref().map(|(_, links)| links.keys()).unwrap_or_default();
+        let before = cache.get(&key.tree).map(|(_, links)| links.keys()).unwrap_or_default();
         let now = links.keys();
         CHANGED.with(|changed| {
             let mut changed = changed.borrow_mut();
+            let changed = changed.entry(key.tree).or_default();
             changed.extend(now.iter().filter(|(id, key)| before.get(id) != Some(key)).map(|(id, _)| *id));
             changed.extend(before.keys().filter(|id| !now.contains_key(id)));
         });
-        *cache = Some((key, Rc::new(links)));
+        cache.insert(key.tree, (key, Rc::new(links)));
     });
 }
 
@@ -147,7 +164,7 @@ pub(crate) fn current() -> Rc<A11yLinks> {
     CACHE.with(|cache| {
         cache
             .borrow()
-            .as_ref()
+            .get(&CURRENT.get())
             .map(|(_, links)| links.clone())
             .unwrap_or_default()
     })

@@ -199,6 +199,8 @@ export interface DomEventRoot {
    * the error is reported to the global handler, as the DOM does.
    */
   reportError?: (error: unknown) => void
+  /** The window object the events of this root have as `view`, when it is not the global `window` (the first window's). */
+  view?: object
 }
 
 /** What `stopPropagation()` and `stopImmediatePropagation()` have done so far. */
@@ -302,6 +304,7 @@ export function createDomEvent(
     if (!isElementField(key)) event[key] = fields[key]
   }
   event.target = path[0] ?? pathlessTarget
+  if (root.view !== undefined && "view" in event) event.view = root.view
   event.relatedTarget = optionalElement(root, payload.relatedTarget)
   if (payload.formEntries) Object.assign(event, formSubmission(root, payload.formEntries, payload.submitterId))
   // An edit has no data unless it inserted text, and the DOM says so with null.
@@ -343,6 +346,25 @@ export type HandlersAt = (index: number) => HandlerLookup | undefined
 /** What a dispatch asks of an element's handlers: the handler under a key. A `Map` is one, and so is `ElementListeners`. */
 export interface HandlerLookup {
   get(key: string): HostEventHandler | undefined
+}
+
+/**
+ * Delivers an event aimed at a window itself, which has no path: the window's own listeners hear it
+ * in its capture phase and then its bubble phase, both at the target. Leaves `currentTarget` null and
+ * `eventPhase` 0.
+ */
+export function walkWindowTarget(
+  target: { run(event: DomEvent, state: DomEventState, capture: boolean, phase: number, fail: (error: unknown) => void): void },
+  event: DomEvent,
+  state: DomEventState & DispatchState,
+  fail: (error: unknown) => void
+): void {
+  state.dispatching = true
+  target.run(event, state, true, EVENT_PHASE_AT_TARGET, fail)
+  if (!state.propagationStopped) target.run(event, state, false, EVENT_PHASE_AT_TARGET, fail)
+  event.currentTarget = null
+  event.eventPhase = EVENT_PHASE_NONE
+  state.dispatching = false
 }
 
 /**

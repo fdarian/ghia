@@ -144,6 +144,7 @@ pub(crate) type FocusExit = Rc<dyn Fn(bool)>;
 /// The engine for a webview whose surface has the content view `content_view`
 /// (`NativeSurface::platform_handle`).
 pub(crate) fn create_backend(
+    window_id: gpui::WindowId,
     id: u64,
     content_view: usize,
     emitter: Rc<EventEmitter>,
@@ -153,6 +154,7 @@ pub(crate) fn create_backend(
     if cx.has_global::<super::test_backend::TestWebviews>() {
         let _ = content_view;
         return Ok(Box::new(super::test_backend::TestBackend::new(
+            window_id,
             id,
             cx.global::<super::test_backend::TestWebviews>(),
             emitter,
@@ -161,12 +163,12 @@ pub(crate) fn create_backend(
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = id;
+        let _ = (window_id, id);
         return Ok(Box::new(crate::platform::webview_macos::WkBackend::new(content_view, emitter, focus_exit)?));
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (id, content_view, emitter, focus_exit);
+        let _ = (window_id, id, content_view, emitter, focus_exit);
         Err("webview is not supported on this platform".to_string())
     }
 }

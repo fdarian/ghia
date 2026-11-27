@@ -9,6 +9,11 @@ import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 const SQUARE_URL = new URL("../../../react/src/__tests__/fixtures/gpuix-test-square.ttf", import.meta.url)
 const SQUARE_PATH = fileURLToPath(SQUARE_URL)
 const SQUARE_DATA_URL = `data:font/ttf;base64,${fs.readFileSync(SQUARE_PATH).toString("base64")}`
+const FIXTURES = new URL("../../../react/src/__tests__/fixtures/", import.meta.url)
+const fixture = (name: string) => fs.readFileSync(fileURLToPath(new URL(name, FIXTURES)))
+const SQUARE_WOFF_DATA_URL = `data:font/woff;base64,${fixture("gpuix-test-square.woff").toString("base64")}`
+const SQUARE_WOFF2_DATA_URL = `data:font/woff2;base64,${fixture("gpuix-test-square.woff2").toString("base64")}`
+const NAMELESS_WOFF2_DATA_URL = `data:font/woff2;base64,${fixture("gpuix-test-nameless.woff2").toString("base64")}`
 const NAMELESS_DATA_URL = `data:font/ttf;base64,${fs
   .readFileSync(fileURLToPath(new URL("../../../react/src/__tests__/fixtures/gpuix-test-nameless.ttf", import.meta.url)))
   .toString("base64")}`
@@ -61,6 +66,48 @@ describe.skipIf(!hasNativeTestRenderer)("@font-face in a sheet", () => {
       </div>
     ))
     expect([width("inline"), width("path"), width("later")]).toEqual([40, 40, 40])
+  })
+
+  it("loads a WOFF and a WOFF2 file, from a data URL and from a path, under the family the rule gives it", () => {
+    app.render(() => (
+      <div>
+        <style>{`
+          @font-face { font-family: Woff; src: url(${SQUARE_WOFF_DATA_URL}) format("woff") }
+          @font-face { font-family: Woff2; src: url(${SQUARE_WOFF2_DATA_URL}) format("woff2") }
+          @font-face { font-family: Woff2Path; src: url("${new URL("gpuix-test-square.woff2", FIXTURES).href}") format("woff2"), url(${SQUARE_DATA_URL}) }
+        `}</style>
+        {probe("woff", "Woff")}
+        {probe("woff2", "Woff2")}
+        {probe("path", "Woff2Path")}
+        {probe("plain", "No Such Brand")}
+      </div>
+    ))
+    expect([width("woff"), width("woff2"), width("path")]).toEqual([40, 40, 40])
+    expect(width("plain")).not.toBe(40)
+  })
+
+  it("skips a broken or nameless WOFF2 for the next source, and a rule with only those leaves the family alone", () => {
+    app.render(() => (
+      <div>
+        <style>{`
+          @font-face { font-family: Next; src: url(data:font/woff2;base64,d09GMgAAAAA=) format("woff2"), url(${NAMELESS_WOFF2_DATA_URL}) format("woff2"), url(${SQUARE_WOFF_DATA_URL}) format("woff") }
+          @font-face { font-family: Only; src: url(data:font/woff2;base64,d09GMgAAAAA=) format("woff2"), url(${NAMELESS_WOFF2_DATA_URL}) format("woff2") }
+        `}</style>
+        {probe("next", "Next")}
+        {probe("only", "Only")}
+        {probe("fallback", "Another Missing Family")}
+      </div>
+    ))
+    expect(width("next")).toBe(40)
+    expect(width("only")).toBe(width("fallback"))
+  })
+
+  it("registers a WOFF2 file with registerFont, as the window's fonts option does", () => {
+    app.renderer.registerFont(fixture("gpuix-test-square.woff2"))
+    app.render(() => probe("registered", "GpuixTestSquare"))
+    expect(width("registered")).toBe(40)
+    expect(() => app.renderer.registerFont(fixture("gpuix-test-nameless.woff2"))).toThrow(/name/)
+    expect(() => app.renderer.registerFont(fixture("gpuix-test-square.woff2").subarray(0, 60))).toThrow(/WOFF/)
   })
 
   it("lays out text again when the face arrives after the text", () => {

@@ -639,6 +639,12 @@ pub(crate) fn forget_window(window: WindowId) {
     BOUNDS.with(|cell| cell.borrow_mut().entry(window).or_default().reset());
 }
 
+/// Drops what is kept for a window that closed.
+pub(crate) fn drop_window(window: WindowId) {
+    BOUNDS.with(|cell| cell.borrow_mut().remove(&window));
+    HOST_NODES.with(|nodes| nodes.borrow_mut().remove(&window));
+}
+
 /// Record this element's own painted box, with no extra element in the tree.
 ///
 /// A leaf such as `gpui::img` cannot have a canvas child to measure it.

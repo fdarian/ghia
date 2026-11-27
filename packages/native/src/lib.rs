@@ -53,6 +53,8 @@ mod screen;
 mod scroll;
 mod scroll_write;
 mod scrollbar;
+#[cfg(target_os = "macos")]
+mod shared_wake;
 mod shrink;
 mod slot;
 mod tape;
@@ -66,7 +68,11 @@ mod theme;
 mod style_memo;
 mod universal_style;
 mod visible_range;
+mod window_activity;
 mod window_kind;
+mod window_map;
+#[cfg(target_os = "macos")]
+mod window_set;
 mod window_title;
 #[cfg(target_os = "macos")]
 mod window_key;

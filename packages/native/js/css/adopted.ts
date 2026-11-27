@@ -1,5 +1,4 @@
 import { observableArray, type ObservableArray } from "./observable-array.js"
-import { setAdoptedSheets } from "./sheet-sync.js"
 import { CSSStyleSheet } from "./style-sheet.js"
 
 function convert(value: unknown): CSSStyleSheet {
@@ -7,18 +6,10 @@ function convert(value: unknown): CSSStyleSheet {
   throw new TypeError("Failed to set an item of 'adoptedStyleSheets' on 'Document': The value provided is not a CSSStyleSheet.")
 }
 
-let adopted: ObservableArray<CSSStyleSheet> | undefined
-
-function current(): ObservableArray<CSSStyleSheet> {
-  adopted ??= observableArray(convert, () => setAdoptedSheets(adopted!.array))
+/** One document's `adoptedStyleSheets`: `onChange` hears every change that left it different. */
+export function createAdoptedStyleSheets(onChange: (sheets: readonly CSSStyleSheet[]) => void): ObservableArray<CSSStyleSheet> {
+  const adopted: ObservableArray<CSSStyleSheet> = observableArray(convert, () => onChange(adopted.array))
   return adopted
 }
 
-/** `document.adoptedStyleSheets`: one array for the document, however many windows it spans. */
-export function getAdoptedStyleSheets(): CSSStyleSheet[] {
-  return current().array
-}
-
-export function replaceAdoptedStyleSheets(sheets: Iterable<unknown>): void {
-  current().replace(sheets)
-}
+export type { CSSStyleSheet }

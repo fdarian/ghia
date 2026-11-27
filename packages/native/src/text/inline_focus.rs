@@ -37,6 +37,21 @@ pub(crate) fn take_press_focus(window: WindowId) -> Option<FocusHandle> {
     PRESS_FOCUS.with(|slots| slots.borrow_mut().remove(&window))
 }
 
+/// The window closed: a press that was never taken goes with it.
+pub(crate) fn forget_window(window: WindowId) {
+    PRESS_FOCUS.with(|slots| slots.borrow_mut().remove(&window));
+}
+
+#[cfg(test)]
+pub(crate) fn hold_press_focus_for_test(window: WindowId, handle: FocusHandle) {
+    PRESS_FOCUS.with(|slots| slots.borrow_mut().insert(window, handle));
+}
+
+#[cfg(test)]
+pub(crate) fn holds_press_focus(window: WindowId) -> bool {
+    PRESS_FOCUS.with(|slots| slots.borrow().contains_key(&window))
+}
+
 /// A focusable inline box of a paragraph.
 pub struct FocusableBox {
     pub id: u64,

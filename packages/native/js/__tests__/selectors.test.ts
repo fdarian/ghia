@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import { DOM_BINDING, DocumentFragment, HTMLElement, SVGElement, Text, type Element, type ElementBinding, type Node, type TextBinding } from "../dom/nodes.js"
 import { document, installElementSource } from "../events/window-target.js"
 import { NodeList } from "../dom/html-collection.js"
-import { mountedRenderers } from "../mounted-renderer.js"
 import type { NativeRenderer } from "../host.js"
 import { defineDomMembers } from "../dom-members.js"
 import "../dom-globals.js"
@@ -495,12 +494,10 @@ describe("document and fragment queries", () => {
     html.parent = document
     adopt(html, [head, body])
     const remove = installElementSource(native, () => undefined, () => ({ html, head, body }))
-    mountedRenderers().push(native)
     return {
       html,
       body,
       unmount() {
-        mountedRenderers().splice(mountedRenderers().indexOf(native), 1)
         remove()
       },
     }

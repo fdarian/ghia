@@ -2,6 +2,7 @@
 /// globals twice, and a global `addEventListener` then reaches both copies of the window.
 import { afterEach, describe, expect, it } from "vitest"
 import "../dom-globals.js"
+import { windowOf } from "../events/window-target.js"
 import { createRendererState } from "../renderer-state.js"
 import type { NativeRenderer } from "../host.js"
 
@@ -87,7 +88,7 @@ describe("the resize event", () => {
     expect(fake.mediaChangeCalls).toEqual([true, false])
   })
 
-  it("starts watching a window that mounts after the listener was added, and follows the last one", () => {
+  it("starts watching a window that mounts after the listener was added, and stays with the first window", () => {
     const seen: number[] = []
     const listener = () => seen.push(window.innerWidth)
     window.addEventListener("resize", listener)
@@ -96,20 +97,41 @@ describe("the resize event", () => {
       expect(first.mediaChangeCalls).toEqual([true])
       first.width = 700
       first.emitMediaChange()
+      // A second window has its own `resize` listeners: the global window's are not its.
       const second = mountWindow()
-      expect(first.mediaChangeCalls).toEqual([true, false])
-      expect(second.mediaChangeCalls).toEqual([true])
+      expect(first.mediaChangeCalls).toEqual([true])
+      expect(second.mediaChangeCalls).toEqual([])
       first.width = 710
       first.emitMediaChange()
       second.width = 900
       second.emitMediaChange()
       mounted.pop()!.detach()
-      expect(second.mediaChangeCalls).toEqual([true, false])
-      expect(first.mediaChangeCalls).toEqual([true, false, true])
-      expect(seen).toEqual([700, 900])
+      expect(first.mediaChangeCalls).toEqual([true])
+      expect(seen).toEqual([700, 710])
     } finally {
       window.removeEventListener("resize", listener)
     }
+  })
+
+  it("sends resize to the window that was resized: a second window's listener hears its own size only", () => {
+    const first = mountWindow()
+    const second = mountWindow()
+    const secondWindow = windowOf(second as unknown as NativeRenderer)
+    const seen: Array<[string, number]> = []
+    const onGlobal = () => seen.push(["global", window.innerWidth])
+    window.addEventListener("resize", onGlobal)
+    secondWindow.addEventListener("resize", () => seen.push(["second", secondWindow.innerWidth]))
+    secondWindow.visualViewport.addEventListener("resize", () => seen.push(["second viewport", secondWindow.visualViewport.width]))
+    expect(first.mediaChangeCalls).toEqual([true])
+    expect(second.mediaChangeCalls).toEqual([true])
+    second.width = 321
+    second.emitMediaChange()
+    expect(seen).toEqual([["second viewport", 321], ["second", 321]])
+    first.width = 123
+    first.emitMediaChange()
+    expect(seen.at(-1)).toEqual(["global", 123])
+    expect(seen).toHaveLength(3)
+    window.removeEventListener("resize", onGlobal)
   })
 
   it("lets visualViewport take a resize listener before a root mounts, and starts at the first mount", () => {

@@ -44,8 +44,12 @@ import type {
 } from "./host.js"
 import { bindClipboard } from "./clipboard.js"
 import { bindLinkOpener } from "./shell/open-link.js"
+import { bindWindowOpener } from "./window-open.js"
+import { windowGone } from "./window-lifecycle.js"
 import { runEditingComposition, runEditingInput, type EditingCompositionStep } from "./editing/input.js"
-import { forgetElementSource, forgetWindowSource } from "./events/window-target.js"
+import { documentOf, forgetElementSource, windowOf } from "./events/window-target.js"
+import type { GpuixDocument } from "./events/window-target.js"
+import type { GpuixWindow } from "./events/window-targets.js"
 import { detachRenderer } from "./detached-renderer.js"
 import type { HostDropEffect } from "./events/types.js"
 import { matchableText } from "./text-match.js"
@@ -67,6 +71,8 @@ export {
   MAC_CPU_THROTTLES,
   readMacCpuThrottle,
 } from "./cpu-throttle.js"
+
+export { documentOf, windowOf }
 export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 export { getComputedStyle, type ComputedStyle } from "./computed-style.js"
@@ -287,6 +293,9 @@ interface NativeTestRendererApi
   focusPrevious(): void
   getFocusedElementId(): number | null
   setWindowActive(active: boolean): void
+  isWindowKey(): boolean
+  isWindowClosed(): boolean
+  getScaleFactor(): number
   focusNextWithin(elementId: number): void
   focusPreviousWithin(elementId: number): void
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
@@ -700,8 +709,47 @@ export interface A11yTreeDump {
 
 // ── TestRenderer ─────────────────────────────────────────────────────
 
-/** The test window is one per thread: making a renderer tears down the one before it. */
-let latestRenderer: TestRenderer | undefined
+/** The renderers whose windows are open, in the order they were made. Any number of test windows
+ *  are open at once, on one native app; `dispose()` closes one and `startTestRendererScope()`
+ *  closes the ones a test left behind. */
+const liveRenderers = new Set<TestRenderer>()
+
+/**
+ * Starts a scope that closes the windows made after it: the returned function disposes every
+ * renderer made since that is still open, without the retention report `dispose()` makes. A
+ * test's renderer is often not disposed (the root of a test that did not unmount, a suite that
+ * makes one window per test), and with several windows open at once nothing else closes it.
+ * `bindTestRendererScope` makes a scope of each vitest test; a script that makes many windows in a
+ * loop calls it itself. Windows made before the scope (a `beforeAll` one) are not touched.
+ */
+export function startTestRendererScope(): () => void {
+  const before = new Set(liveRenderers)
+  return () => TestRenderer.releaseAll([...liveRenderers].filter((renderer) => !before.has(renderer)))
+}
+
+/**
+ * Makes a scope of each test of a vitest suite, from its setup file (`setupFiles`): pass
+ * `beforeEach` and `afterEach` of the `vitest` the suite runs on, which this module cannot import
+ * itself (a package that is not the suite's own has its own copy of vitest, and a hook of that one
+ * finds no runner).
+ *
+ *     import { bindTestRendererScope } from "@ghia/native/testing"
+ *     import { afterEach, beforeEach } from "vitest"
+ *     bindTestRendererScope({ beforeEach, afterEach })
+ */
+export function bindTestRendererScope(hooks: {
+  beforeEach: (hook: () => void) => void
+  afterEach: (hook: () => void) => void
+}): void {
+  let end: (() => void) | undefined
+  hooks.beforeEach(() => {
+    end = startTestRendererScope()
+  })
+  hooks.afterEach(() => {
+    end?.()
+    end = undefined
+  })
+}
 
 /** Throws if a replayed frame of this window differed from a build of it, or if gpuix's own
  *  check found an element judged unchanged that built differently, and prints the counters when
@@ -762,16 +810,7 @@ export class TestRenderer implements NativeRenderer {
     }
     const fonts = readFontFiles(options.fonts)
     this.native = new NativeTestRenderer(options, options.scaleFactor)
-    if (latestRenderer) {
-      // The native side keeps one window per thread and this constructor replaced it, so the
-      // earlier renderer is as dead as a disposed one: it would reach the new window's state, and
-      // throw once that is disposed.
-      forgetWindowSource(latestRenderer)
-      detachRenderer(latestRenderer)
-      unregisterKeyframesHost(latestRenderer.native)
-      closeWebAnimations(latestRenderer)
-    }
-    latestRenderer = this
+    liveRenderers.add(this)
     for (const font of fonts) this.native.registerFont(font)
     registerKeyframesHost(this.native)
     this.applyBatch = this.native.applyBatch.bind(this.native)
@@ -806,6 +845,51 @@ export class TestRenderer implements NativeRenderer {
     this.native.setSyncEventHandler((event) => this.dispatchSyncEvent(event))
     bindClipboard(this)
     bindLinkOpener(this)
+    this.windowTitle = options.title
+    // `window.open` of a test window opens another test window, which a test sees as one more renderer.
+    bindWindowOpener(this, {
+      title: () => this.windowTitle,
+      create: (opened) => {
+        const sibling = new TestRenderer({ onError: options.onError, scaleFactor: options.scaleFactor, fonts: options.fonts, ...opened })
+        // A window opens key, as the live one does with `focus: true`.
+        sibling.activateWindow()
+        return sibling
+      },
+    })
+  }
+
+  private windowTitle: string | undefined
+  private windowClosed = false
+
+  /**
+   * Whether the window is closed: `closeWindow()` ran (what a script's `window.close()` does to a test window; the
+   * native window stays until `dispose()`), or native no longer has it.
+   */
+  isWindowClosed(): boolean {
+    return this.windowClosed || this.native.isWindowClosed()
+  }
+
+  /** What `window.close()` asks of the platform: a test window only notes it, and `dispose()` still releases it. */
+  closeWindow(): void {
+    this.windowClosed = true
+  }
+
+  /** Whether the offscreen window is the active one, which `setWindowActive` and `activateWindow` change. */
+  isWindowKey(): boolean {
+    return this.native.isWindowKey()
+  }
+
+  /** Makes this window the key one and every other test window not, as the platform has one key window. */
+  activateWindow(): void {
+    for (const other of liveRenderers) {
+      if (other !== this && other.isWindowKey()) other.setWindowActive(false)
+    }
+    this.setWindowActive(true)
+  }
+
+  /** Device pixels per CSS px of the window: the `scaleFactor` it opened with, or `setWindowScaleFactor`'s. */
+  getScaleFactor(): number {
+    return this.native.getScaleFactor()
   }
 
   /** Asks the window for its next frame's steps, which run the `requestAnimationFrame` callbacks. */
@@ -822,7 +906,28 @@ export class TestRenderer implements NativeRenderer {
   dispose(): void {
     // A run under GPUIX_RETAIN_VERIFY fails at the window that showed a replayed frame that a
     // build would have shown differently, and says which test's window it was.
-    if (process.env.GPUIX_RETAIN_VERIFY !== undefined) reportRetentionMismatches(this.native)
+    if (process.env.GPUIX_RETAIN_VERIFY !== undefined && liveRenderers.has(this)) {
+      reportRetentionMismatches(this.native)
+    }
+    this.#release()
+  }
+
+  /** @internal The `document` of this window: its own `<html>`, `<body>`, selection, focus and `elementFromPoint`. */
+  get document(): GpuixDocument {
+    return documentOf(this)
+  }
+
+  /** @internal The window target of this window, at the top of its event path: its `innerWidth`, `matchMedia` and `requestAnimationFrame`. */
+  get windowTarget(): GpuixWindow {
+    return windowOf(this)
+  }
+
+  /** Everything `dispose()` does but the retention report: what is left of a window nobody
+   *  disposed does not fail the test that made it. */
+  #release(): void {
+    if (!liveRenderers.delete(this)) return
+    // The window closes as a user's does: it hears `pagehide` and `unload`, and the adapter's root is let go while the window is whole.
+    windowGone(this)
     forgetElementSource(this)
     unregisterKeyframesHost(this.native)
     closeWebAnimations(this)
@@ -832,6 +937,11 @@ export class TestRenderer implements NativeRenderer {
     } finally {
       detachRenderer(this)
     }
+  }
+
+  /** @internal `startTestRendererScope` closes the windows a test left open. */
+  static releaseAll(renderers: readonly TestRenderer[]): void {
+    for (const renderer of renderers) renderer.#release()
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────
@@ -988,7 +1098,7 @@ export class TestRenderer implements NativeRenderer {
   simulateEditingInput(inputType: string, data?: string): void {
     this.native.flushIfDirty()
     this.dispatchNativeEvents()
-    if (!runEditingInput(inputType, data ?? null).handled) throw noEditingHost("simulateEditingInput")
+    if (!runEditingInput(documentOf(this), inputType, data ?? null).handled) throw noEditingHost("simulateEditingInput")
     this.dispatchNativeEvents()
     this.native.flushIfDirty()
   }
@@ -1005,7 +1115,7 @@ export class TestRenderer implements NativeRenderer {
     this.native.flushIfDirty()
     this.dispatchNativeEvents()
     for (const step of steps) {
-      if (!runEditingComposition(step)) throw noEditingHost("simulateEditingComposition")
+      if (!runEditingComposition(documentOf(this), step)) throw noEditingHost("simulateEditingComposition")
       this.dispatchNativeEvents()
     }
     this.native.flushIfDirty()

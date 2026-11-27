@@ -259,6 +259,8 @@ describe("a file-backed Storage in a process that ends", () => {
 
   const storageModule = fileURLToPath(new URL("../shell/storage.ts", import.meta.url))
 
+  const CHILD_DEADLINE_MS = 10_000
+
   interface Ended {
     code: number | null
     signal: NodeJS.Signals | null
@@ -279,6 +281,8 @@ ${body}
     const path = join(directory, "data", "localStorage.json")
     return new Promise((resolve, reject) => {
       const child = spawn("bun", [script, path], { stdio: ["ignore", "pipe", "pipe"] })
+      // A re-raise that does not happen would leave the child running and the test waiting.
+      const deadline = setTimeout(() => child.kill("SIGKILL"), CHILD_DEADLINE_MS)
       let output = ""
       let sent = false
       child.stdout.on("data", (chunk: Buffer) => {
@@ -290,7 +294,10 @@ ${body}
       })
       child.stderr.on("data", (chunk: Buffer) => void (output += chunk.toString()))
       child.on("error", reject)
-      child.on("close", (code, ended) => resolve({ code, signal: ended, output }))
+      child.on("close", (code, ended) => {
+        clearTimeout(deadline)
+        resolve({ code, signal: ended, output })
+      })
     })
   }
 
@@ -346,11 +353,56 @@ ready()`,
     expect(written()).toEqual({ queued: "1" })
   })
 
-  it("installs no signal handler where a listener already is", async () => {
-    const ended = await runChild(`process.on("SIGTERM", () => {})
-createFileStorage(path)
-console.log(process.listenerCount("SIGTERM"), process.listenerCount("SIGINT"))`)
+  it("keeps its handler beside a listener that is already there: it flushes and does not raise the signal again", async () => {
+    const ended = await runChild(
+      `${NO_TASK}
+process.on("SIGINT", () => {
+  console.log("handled")
+  process.exit(3)
+})
+createFileStorage(path).setItem("queued", "1")
+console.log(process.listenerCount("SIGINT"))
+ready()`,
+      "SIGINT",
+    )
+    expect(ended.signal, ended.output).toBeNull()
+    expect(ended.code, ended.output).toBe(3)
+    expect(ended.output).toContain("handled")
+    expect(ended.output).toContain("2")
+    expect(written()).toEqual({ queued: "1" })
+  })
+
+  it("leaves a signal to a once listener added after the storage, which is removed before it runs", async () => {
+    const ended = await runChild(
+      `${NO_TASK}
+createFileStorage(path).setItem("queued", "1")
+process.once("SIGTERM", () => {
+  console.log("handled")
+  clearInterval(keepAlive)
+})
+ready()`,
+      "SIGTERM",
+    )
+    expect(ended.signal, ended.output).toBeNull()
     expect(ended.code, ended.output).toBe(0)
-    expect(ended.output.trim()).toBe("1 1")
+    expect(ended.output).toContain("handled")
+    expect(written()).toEqual({ queued: "1" })
+  })
+
+  it("leaves a signal to a once listener that was there before the storage", async () => {
+    const ended = await runChild(
+      `${NO_TASK}
+process.once("SIGINT", () => {
+  console.log("handled")
+  clearInterval(keepAlive)
+})
+createFileStorage(path).setItem("queued", "1")
+ready()`,
+      "SIGINT",
+    )
+    expect(ended.signal, ended.output).toBeNull()
+    expect(ended.code, ended.output).toBe(0)
+    expect(ended.output).toContain("handled")
+    expect(written()).toEqual({ queued: "1" })
   })
 })
