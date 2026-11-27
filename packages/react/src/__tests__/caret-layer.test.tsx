@@ -2,10 +2,13 @@
 /// transparent by the window itself, so the page paints no frame, runs no patch and wakes nothing for a blink. A caret the window
 /// cannot blink (here: inside an effect group) is the page's again, and ticks. The patch frames of that fallback are pinned by
 /// `animation-frame-work` and `editing-caret`, which turn the caret into one the window cannot blink (`setPaintedCarets`).
+import fs from "fs"
+import path from "path"
 import React from "react"
 import { afterEach, describe, expect, it } from "vitest"
 import { document } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
+import { SHOTS_DIR } from "./test-utils"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -16,6 +19,7 @@ const counted = it.skipIf(
 
 const BLINK = 500
 const PHASES = 4
+const FADE = "opacity 300ms linear"
 const TEXT = { fontSize: 16, lineHeight: "20px", fontFamily: "Menlo" } as const
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
@@ -34,6 +38,15 @@ function show(renderer: Renderer) {
   renderer.flush()
   renderer.drawFrame()
   renderer.presentFrame()
+}
+
+/** The fade of an ancestor runs to its end, a patched frame at a time. */
+function finishFade(renderer: Renderer) {
+  for (let step = 0; step < 8; step++) {
+    renderer.advanceTime(50)
+    renderer.drawFrame()
+    renderer.presentFrame()
+  }
 }
 
 /** What the page drew while the clock moved by one change of phase: whole frames and patched ones. */
@@ -61,10 +74,15 @@ describeNative("the caret of a window that blinks it", () => {
     cleanups.push(() => root.unmount())
     const renderer = root.renderer
     renderer.clockPause()
-    const render = (covered: boolean) =>
+    // The input is in the same place of the tree whether or not its parent fades, so it keeps its focus. The fade is a transition,
+    // which is drawn as patches that put the input's recording, replayed, under a new effect group: nothing builds the input again.
+    const render = (covered: boolean, faded = false, native = false) =>
       root.render(
         <div style={{ position: "relative", width: 400, height: 200 }}>
-          {wrap(<input testId="probe" defaultValue="some text" style={{ width: 200, height: 24 }} />)}
+          <div style={{ opacity: faded ? 0.5 : 1, transition: FADE }}>
+            {wrap(<input testId="probe" defaultValue="some text" style={{ width: 200, height: 24 }} />)}
+          </div>
+          {native && <nativeview style={{ position: "absolute", left: 250, top: 100, width: 100, height: 50 }} />}
           {covered && <div testId="cover" style={{ position: "absolute", left: 0, top: 0, width: 300, height: 60, background: "#c0c0c0" }} />}
         </div>
       )
@@ -83,14 +101,18 @@ describeNative("the caret of a window that blinks it", () => {
     cleanups.push(() => root.unmount())
     const renderer = root.renderer
     renderer.clockPause()
-    root.render(
-      <div style={{ padding: 20, position: "relative", ...TEXT }}>
-        <div contentEditable style={{ width: 400, height: 300 }}>
-          <div>first line</div>
+    const render = (faded: boolean) =>
+      root.render(
+        <div style={{ padding: 20, position: "relative", ...TEXT }}>
+          <div style={{ opacity: faded ? 0.5 : 1, transition: FADE }}>
+            <div contentEditable style={{ width: 400, height: 300 }}>
+              <div>first line</div>
+            </div>
+          </div>
+          {cover && <div style={{ position: "absolute", left: 0, top: 0, width: 300, height: 100, background: "#c0c0c0" }} />}
         </div>
-        {cover && <div style={{ position: "absolute", left: 0, top: 0, width: 300, height: 100, background: "#c0c0c0" }} />}
-      </div>
-    )
+      )
+    render(false)
     await settle(renderer)
     renderer.setInlineDraws(false)
     renderer.setA11yActive(false)
@@ -101,7 +123,7 @@ describeNative("the caret of a window that blinks it", () => {
     await sleep(0)
     show(renderer)
     show(renderer)
-    return { renderer }
+    return { renderer, render }
   }
 
   it("shows a focused input's caret on the layer and asks for no frame over several phases", async () => {
@@ -166,5 +188,75 @@ describeNative("the caret of a window that blinks it", () => {
     expect(framesInPhase(renderer), "the first change of phase is a frame built whole").toBeGreaterThan(0)
     const seen = phases(renderer)
     expect(seen).toEqual([1, 1, 1, 1])
+  })
+
+  // The window blinked this caret on its layer and stops: the input's painter is replayed, not run, so only the hand-over the
+  // window asks for (one tick) lets the page arm the blink again.
+  counted("blinks the page's way a caret that an ancestor's opacity took off the layer, a patched frame for each phase", async () => {
+    const { renderer, render } = await mountInput()
+    expect(renderer.getCaretOnLayer()).toBe(true)
+    expect(phases(renderer)).toEqual([0, 0, 0, 0])
+    render(false, true)
+    await settle(renderer, 3)
+    show(renderer)
+    finishFade(renderer)
+    expect(renderer.getCaretOnLayer()).toBe(false)
+    expect(renderer.getCaretNeedsTicks(), "the page has to tick").toBe(true)
+    expect(framesInPhase(renderer), "the first change of phase").toBeGreaterThan(0)
+    expect(phases(renderer)).toEqual([1, 1, 1, 1])
+  })
+
+  // A <nativeview> mounting composes the window, which takes its layer away from the input and draws its caret as it is: the
+  // page blinks it from then on. (Here the frame that composes the window also paints the input, so its painter is told; the
+  // case of a painter that is replayed is pinned in gpui, `caret_tests`, and the hand-over for it is `caret::hand_over`.)
+  counted("blinks the page's way a caret of a window that became composed, a patched frame for each phase", async () => {
+    const { renderer, render } = await mountInput()
+    expect(renderer.getCaretOnLayer()).toBe(true)
+    show(renderer)
+    render(false, false, true)
+    show(renderer)
+    expect(renderer.getCaretOnLayer()).toBe(false)
+    expect(renderer.getCaretNeedsTicks(), "the page has to tick").toBe(true)
+    expect(framesInPhase(renderer), "the first change of phase").toBeGreaterThan(0)
+    expect(phases(renderer)).toEqual([1, 1, 1, 1])
+  })
+
+  counted("blinks the page's way a contenteditable caret that an ancestor's opacity took off the layer, lit and dark in turn", async () => {
+    const { renderer, render } = await mountHost()
+    expect(renderer.getCaretOnLayer()).toBe(true)
+    render(true)
+    await settle(renderer, 3)
+    show(renderer)
+    finishFade(renderer)
+    expect(renderer.getCaretOnLayer()).toBe(false)
+    expect(renderer.getCaretNeedsTicks()).toBe(true)
+    framesInPhase(renderer)
+    const lit = () => renderer.getPaintedNodeSelection().caret!.lit
+    const seen: boolean[] = []
+    const frames: number[] = []
+    for (let phase = 0; phase < PHASES; phase++) {
+      frames.push(framesInPhase(renderer))
+      seen.push(lit())
+    }
+    expect(frames).toEqual([1, 1, 1, 1])
+    expect(seen).toEqual([seen[0], !seen[0], seen[0], !seen[0]])
+  })
+
+  // What is drawn: the caret of an input in an effect group is a quad of the page, lit or transparent as its painter made it.
+  counted("draws the caret of an input inside an opacity group lit and dark in turn over four phases", async () => {
+    const { renderer } = await mountInput((input) => <div style={{ opacity: 0.5 }}>{input}</div>)
+    show(renderer)
+    const shoot = (phase: number) => {
+      renderer.advanceTime(BLINK)
+      renderer.drawFrame()
+      renderer.presentFrame()
+      const file = path.join(SHOTS_DIR, `caret-layer-group-${phase}.png`)
+      renderer.captureShownFrame(file)
+      return fs.readFileSync(file)
+    }
+    const shots = Array.from({ length: PHASES }, (_, phase) => shoot(phase))
+    expect(shots[0].equals(shots[1]), "a phase differs from the next").toBe(false)
+    expect(shots[0].equals(shots[2])).toBe(true)
+    expect(shots[1].equals(shots[3])).toBe(true)
   })
 })

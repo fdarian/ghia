@@ -4465,14 +4465,22 @@ and on Enter in an `<input>` (see [The input and change events](#the-input-and-c
 does not reject an edit like a browser-controlled input.
 
 The focused caret stays solid during edits and then blinks every 500ms while
-idle. The window blinks it, with no frame of the page: on macOS, in a window with
-no native view (`<webview>`, `<nativeview>`) and with nothing drawn over the caret,
-it is a layer that the system's compositor animates, so a blink costs no GPU work and
-no JS wake; otherwise gpui draws it lit or dark with a present of its own that
-draws nothing else. Only a caret in an effect group, a text clip or a window with a
-native view is repainted by the page at each phase (a tick that repaints only the
-input, and only when the caret changes phase, so a tick of an animation elsewhere
-leaves the caret as it was painted, as Chrome does). A blur, an inactive window and a
+idle. The window blinks it, with no frame of the page. On macOS the caret is a layer
+that the system's compositor animates (a blink costs no GPU work and no JS wake)
+unless the window has a native view (`<webview>`, `<nativeview>`), the caret is in an
+effect group, a text clip or under a transform or an opacity below 1, a rounded
+corner of its clip cuts it, or something drawn after it overlaps it. Whatever is
+drawn after it counts by its reach: a box, a native view, and an effect group (an
+`opacity` below 1 or a `filter` that makes one) by its clip grown by what its
+filters spread, so an unrelated group elsewhere on the page keeps it on the layer and
+one whose blur reaches it does not. Off the layer, the window draws a caret under a
+transform, an opacity or something that overlaps it lit or dark with a present of its
+own that draws nothing else. Only a caret in an effect group, a text clip or a window
+with a native view is repainted by the page at each phase (a tick that repaints only
+the input, and only when the caret changes phase, so a tick of an animation
+elsewhere leaves the caret as it was painted, as Chrome does). A caret the window
+blinked and then stopped blinking (a native view mounts, or an ancestor gains an
+opacity) is handed to the page with one frame, after which it blinks that way. A blur, an inactive window and a
 caret that cannot be seen (scrolled out of its scroller, or outside the window or a clip)
 show no caret and ask for no frame; the field still takes text there. Override its colour through the
 shared native theme:

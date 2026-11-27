@@ -50,9 +50,12 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: the caret of a window that blink
     const renderer = root.renderer
     renderer.clockPause()
     const [covered, setCovered] = createSignal(false)
+    const [faded, setFaded] = createSignal(false)
     root.render(() => (
       <div style={{ position: "relative", width: 400, height: 200 }}>
-        <input testId="probe" defaultValue="some text" style={{ width: 200, height: 24 }} />
+        <div style={{ opacity: faded() ? 0.5 : 1, transition: "opacity 300ms linear" }}>
+          <input testId="probe" defaultValue="some text" style={{ width: 200, height: 24 }} />
+        </div>
         {covered() && <div style={{ position: "absolute", left: 0, top: 0, width: 300, height: 60, background: "#c0c0c0" }} />}
       </div>
     ))
@@ -62,7 +65,16 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: the caret of a window that blink
     renderer.dispatchNativeEvents()
     show(renderer)
     show(renderer)
-    return { renderer, cover: async (on: boolean) => {
+    return { renderer, fade: async () => {
+      setFaded(true)
+      await settle(renderer, 3)
+      show(renderer)
+      for (let step = 0; step < 8; step++) {
+        renderer.advanceTime(50)
+        renderer.drawFrame()
+        renderer.presentFrame()
+      }
+    }, cover: async (on: boolean) => {
       setCovered(on)
       await settle(renderer, 3)
       show(renderer)
@@ -80,6 +92,16 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: the caret of a window that blink
     expect(Array.from({ length: PHASES }, () => framesInPhase(renderer))).toEqual([0, 0, 0, 0])
     await cover(false)
     expect(renderer.getCaretOnLayer(), "uncovered").toBe(true)
+  })
+
+  it("blinks a caret the page's way, a patched frame for each phase, once an ancestor's opacity took it off the layer", async () => {
+    const { renderer, fade } = await mountInput()
+    expect(renderer.getCaretOnLayer()).toBe(true)
+    await fade()
+    expect(renderer.getCaretOnLayer()).toBe(false)
+    expect(renderer.getCaretNeedsTicks(), "the page has to tick").toBe(true)
+    expect(framesInPhase(renderer), "the first change of phase").toBeGreaterThan(0)
+    expect(Array.from({ length: PHASES }, () => framesInPhase(renderer))).toEqual([1, 1, 1, 1])
   })
 
   it("shows a contenteditable caret on the layer, asks for no frame, and its lit readback still alternates", async () => {

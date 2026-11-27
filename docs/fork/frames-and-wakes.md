@@ -179,9 +179,9 @@ AppKit events are only drained inside `tick()`, and a 100 ms fallback timer tick
 | Idle: `tick()` ms per second | 6.9 | 0 |
 | Idle: CPU | 1.45% | 0.29% |
 | A DOM write after idle | | first draw 20 to 25 ms after the write, 3 wakes |
-| Focused input, caret blinking | | 2 draws/s, 8 wakes/s (the caret as a quad ticked by the page: a composed window, an effect group or text clip around the caret, a platform that cannot leave a quad out of a frame) |
-| Focused input, caret on the layer (macOS, no native surface, nothing drawn over it) | | 0 draws/s, 0 wakes/s: Core Animation blinks it, and the GPU is not submitted to |
-| Focused input, caret a quad that gpui blinks (something drawn over it) | | 2 present-only frames/s of the caret's area, 0 wakes/s of JS |
+| Focused input, caret blinking | | 2 draws/s, 8 wakes/s (the caret as a quad ticked by the page: a composed window, an effect group or text clip around the caret, a platform that cannot leave a quad out of a frame). A caret the window blinked and stops blinking (a native view mounts; a recording of it is replayed under a new group) costs one frame that is a tick, then the page ticks it (`caret::hand_over`) |
+| Focused input, caret on the layer (macOS, no native surface, not in an effect group, a text clip, a transform or an opacity below 1, nothing drawn after it reaches it) | | 0 draws/s, 0 wakes/s: Core Animation blinks it, and the GPU is not submitted to |
+| Focused input, caret a quad that gpui blinks (something drawn after it overlaps it, including the reach of an effect group: its clip grown by its filters; or a transform or an opacity below 1 around it) | | 2 present-only frames/s of the caret's area, 0 wakes/s of JS |
 | Colour animation, draws and presents | 75/s | 75/s |
 
 For comparison, Chrome with an idle one-text window has the renderer and the GPU process at 0% (its browser process was

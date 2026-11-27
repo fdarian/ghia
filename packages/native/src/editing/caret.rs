@@ -327,3 +327,19 @@ impl CaretPaint {
         note_anchor(id, Some(self.state.anchor()));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_repainted_caret_makes_the_container_that_painted_it_due() {
+        let caret = EditingCaret::new(gpui::black());
+        caret.holder.set(Some(7));
+        caret.painted_shown.set(true);
+        assert!(!caret.due(7, true));
+        caret.repaint();
+        assert!(caret.due(7, true));
+        assert!(!caret.due(8, true), "only the container that holds the caret");
+    }
+}
