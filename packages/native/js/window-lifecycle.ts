@@ -62,6 +62,9 @@ function incumbentWindow(): GpuixWindow {
 /** The renderers whose window already heard `pagehide` and `unload`: the global window object outlives its renderer, so it cannot be the key. */
 const unloaded = new WeakSet<object>()
 
+/** The renderers whose window `windowGone` already handled. */
+const gone = new WeakSet<object>()
+
 /** The windows a script opened by name, for a later `window.open(url, name)` to find. */
 const opened = new Set<GpuixWindow>()
 
@@ -124,7 +127,11 @@ function sendUnload(window: GpuixWindow, renderer: NativeRenderer, scripted: boo
  * @internal Called by the frame loop when a window leaves it, by a disposed test window, and by `close()`.
  */
 export function windowGone(renderer: NativeRenderer): void {
-  const window = knownWindowOf(renderer)
+  // Once: a second report (a `close()` task that ran after a disposed test window, or after the frame loop released it) must not mark the
+  // global window closed again once a later window has taken it over.
+  const firstTime = !gone.has(renderer)
+  gone.add(renderer)
+  const window = firstTime ? knownWindowOf(renderer) : undefined
   if (window !== undefined) {
     sendUnload(window, renderer, false)
     opened.delete(window)
@@ -163,6 +170,8 @@ export function closeWindowObject(window: GpuixWindow): void {
 }
 
 function finishClose(window: GpuixWindow, renderer: NativeRenderer): void {
+  // The window went before this task ran (the user, the frame loop or a test's `dispose()` released it): nothing is left to close or report.
+  if (gone.has(renderer)) return
   try {
     sendUnload(window, renderer, true)
     // The root goes while the window is still there to take what unmounting it sends.

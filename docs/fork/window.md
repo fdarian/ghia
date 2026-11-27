@@ -330,7 +330,8 @@ read of another window), and fails with a clear error when a native call holds n
 **Closing and the key window.** A window ends when `close()`, the user or the app's end closes it. The frame loop reports a
 window that left it (`releaseClosedWindows`, or `terminate` for all) to `windowGone(renderer)`, which fires `pagehide` and
 `unload` once (a script's `close()` already sent them with `beforeunload`), marks the window closed (`forgetWindowSource`)
-and calls the disposer the adapter's factory returned. `close()` calls the disposer before `closeWindow()`, while the native
+and calls the disposer the adapter's factory returned. `windowGone` acts once for a renderer: a `close()` task that outlives the window's release (a test's `dispose()`, the frame
+loop) finds it done and returns, so it cannot mark the global window closed again after a later window took it over. `close()` calls the disposer before `closeWindow()`, while the native
 window is still there; for a window the user closed the disposer runs after, which is when a window is gone to native (below).
 The first window is no exception: its root unmounts when it closes, as a later window's does, and a popup that stays open keeps
 the app and the global `window` (`pagehide` and `unload` fire on it). Window disposers (`registerWindowDisposer`, from

@@ -291,6 +291,19 @@ describe.skipIf(!hasNativeTestRenderer)("closing a window", () => {
     expect(log).toHaveLength(2)
   })
 
+  it("does not close the global window again when a close() task outlives the disposal of its renderer", async () => {
+    const first = openFirst()
+    expect(documentOf(first)).toBe(globalDocument)
+    window.close()
+    // The task of `close()` has not run: the window goes first, as a test's `dispose()` or the frame loop makes it.
+    first.dispose()
+    await tick()
+    const next = openFirst()
+    expect(documentOf(next)).toBe(globalDocument)
+    expect(globalWindow().closed).toBe(false)
+    expect(globalDocument.visibilityState).not.toBe("hidden")
+  })
+
   it("lets the cancelable beforeunload of a script close go", async () => {
     openFirst()
     const child = opened(window.open())
