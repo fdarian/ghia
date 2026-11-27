@@ -158,6 +158,21 @@ export declare class GpuixRenderer {
    */
   isWindowKey(): boolean
   /**
+   * The window's device pixels per CSS px: `devicePixelRatio`. It follows the display the
+   * window is on, so read it again after a `mediaChange`.
+   */
+  getScaleFactor(): number
+  /**
+   * Where the window's top-left corner is, in CSS px in the global space `getAllDisplays()`
+   * reports (`screenX` and `screenY`). macOS only.
+   */
+  getWindowPosition(): WindowPosition
+  /**
+   * Sets the size of the window's content in CSS px, as the user dragging an edge would
+   * (`window.resizeTo`). The window is not clamped to the display. macOS only.
+   */
+  setWindowSize(width: number, height: number): void
+  /**
    * Bring the window forward and give it focus. This is how a window opened
    * with `show: false` or `focus: false` is revealed later.
    */
@@ -1161,6 +1176,13 @@ export declare class TestGpuixRenderer {
   writeClipboard(items: Array<ClipboardData>): void
   readClipboard(): Array<ClipboardData>
   getFocusedElementId(): number | null
+  /**
+   * Whether the offscreen window is the active one: the test stand-in of `isWindowKey`, which
+   * `setWindowActive` changes.
+   */
+  isWindowKey(): boolean
+  /** The window's device pixels per CSS px, as the live renderer's `getScaleFactor`. */
+  getScaleFactor(): number
   /** Makes the offscreen window key or not, as when the user switches apps. */
   setWindowActive(active: boolean): void
   focusNextWithin(elementId: number): void
@@ -3277,6 +3299,12 @@ export interface WindowOptions {
    * frontmost. macOS only; elsewhere it is a normal window. Anything else throws.
    */
   kind?: 'normal' | 'panel'
+}
+
+/** A window's top-left corner in CSS px, in the global space of `getAllDisplays()`. */
+export interface WindowPosition {
+  x: number
+  y: number
 }
 
 export interface WindowSize {

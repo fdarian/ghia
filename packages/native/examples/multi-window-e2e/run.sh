@@ -6,7 +6,8 @@
 # session): it prints "not checkable: <the condition>". Needs a release addon with test-support (`bun run
 # build` in packages/native) and the React package built (`bun run build` in packages/react).
 #
-# `E2E_ONLY=close-second,close-first` runs only those cases: close-second, close-first, close-button, close-all, quit.
+# `E2E_ONLY=close-second,close-first` runs only those cases: close-second, close-first, close-button, close-all, quit,
+# window-open (the first window opens a third with window.open, checks it and closes it).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 sh "$here/../quit-e2e/build-helper.sh"

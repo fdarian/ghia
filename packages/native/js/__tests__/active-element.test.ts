@@ -7,12 +7,11 @@ import {
   forgetElementSource,
   forgetWindowSource,
   installElementSource,
-  noteFocusEvent,
 } from "../events/window-target.js"
 
 function root(elements: Record<number, object>) {
-  const state = { focused: null as number | null }
-  const renderer = { getFocusedElementId: () => state.focused }
+  const state = { focused: null as number | null, key: false }
+  const renderer = { getFocusedElementId: () => state.focused, isWindowKey: () => state.key }
   const remove = installElementSource(renderer, (id) => elements[id])
   return { renderer, state, remove }
 }
@@ -54,21 +53,28 @@ describe("document.activeElement across roots", () => {
     second.remove()
   })
 
-  it("has the focus in the window that heard a focus event last, among open windows", () => {
+  it("has the focus in the window the platform says is the key window", () => {
     const first = root({ 1: {} })
     const second = root({ 1: {} })
     const firstDocument = documentOf(first.renderer as never)
     const secondDocument = documentOf(second.renderer as never)
+    first.state.key = true
     expect([firstDocument.hasFocus(), secondDocument.hasFocus()]).toEqual([true, false])
-    noteFocusEvent(second.renderer)
+    first.state.key = false
+    second.state.key = true
     expect([firstDocument.hasFocus(), secondDocument.hasFocus()]).toEqual([false, true])
-    noteFocusEvent(first.renderer)
-    expect([firstDocument.hasFocus(), secondDocument.hasFocus()]).toEqual([true, false])
-    forgetWindowSource(first.renderer)
-    expect([firstDocument.hasFocus(), secondDocument.hasFocus()]).toEqual([false, true])
+    // A closed window has no focus, whatever the platform last said.
+    forgetWindowSource(second.renderer)
+    expect([firstDocument.hasFocus(), secondDocument.hasFocus()]).toEqual([false, false])
     first.remove()
     second.remove()
     forgetElementSource(first.renderer)
+  })
+
+  it("throws when the renderer cannot report the key window", () => {
+    const remove = installElementSource({ getFocusedElementId: () => null }, () => ({}))
+    expect(() => document.hasFocus()).toThrow("key window")
+    remove()
   })
 
   it("throws when the root has no element for the focused id", () => {

@@ -922,6 +922,7 @@ impl TestGpuixRenderer {
                             // The OS's preferences are the machine's; the test window starts with none.
                             view.set_media_features(crate::media::MediaFeatures::default());
                             view.observe_appearance(window, cx);
+                            view.observe_window_activity(window, cx);
                             view.observe_viewport(window, cx);
                             view.force_scroller_style(crate::scrollbar::ScrollerStyle::Overlay);
                             view.simulate_platform_pointer_lock(simulated_platform_clone);
@@ -1962,6 +1963,19 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_focused_element_id(&self) -> Result<Option<f64>> {
         self.update_view(|view, window, _cx| view.focused_element_id(window).map(|id| id as f64))
+    }
+
+    /// Whether the offscreen window is the active one: the test stand-in of `isWindowKey`, which
+    /// `setWindowActive` changes.
+    #[napi]
+    pub fn is_window_key(&self) -> Result<bool> {
+        self.window_call(|window, _cx| window.is_window_active())
+    }
+
+    /// The window's device pixels per CSS px, as the live renderer's `getScaleFactor`.
+    #[napi]
+    pub fn get_scale_factor(&self) -> Result<f64> {
+        self.window_call(|window, _cx| f64::from(window.scale_factor()))
     }
 
     /// Makes the offscreen window key or not, as when the user switches apps.

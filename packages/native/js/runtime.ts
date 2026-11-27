@@ -7,7 +7,9 @@ import { bindClipboard } from "./clipboard.js"
 import { bindEyeDropper } from "./eyedropper.js"
 import { bindLinkOpener } from "./shell/open-link.js"
 import { flushStorage } from "./shell/storage.js"
-import { forgetWindowSource, windowOf } from "./events/window-target.js"
+import { windowOf } from "./events/window-target.js"
+import { windowGone } from "./window-lifecycle.js"
+import { bindWindowOpener } from "./window-open.js"
 import { detachRenderer } from "./detached-renderer.js"
 import { closeWebAnimations } from "./web-animations.js"
 import { flushPendingMutations } from "./bounds.js"
@@ -86,11 +88,35 @@ export function createNativeRenderer(
     typeof process !== "undefined" && automationRequested(process.env)
   const init = renderer.init.bind(renderer)
   const tick = renderer.tick.bind(renderer)
+  let title = undefined as string | undefined
+  let fontOption = undefined as WindowFontsOption["fonts"]
+  let focusOption = undefined as boolean | undefined
+  const setWindowTitle = renderer.setWindowTitle.bind(renderer)
+  renderer.setWindowTitle = (next) => {
+    title = next
+    setWindowTitle(next)
+  }
+  // `window.open` makes another window like this one's on the same app and frame loop.
+  bindWindowOpener(renderer, {
+    title: () => title,
+    create(opened) {
+      const sibling = createNativeRenderer(options)
+      // The window opens focused unless its opener asked not to take the keyboard (an app driven in the background).
+      sibling.init({ ...opened, fonts: fontOption, focus: focusOption } as WindowOptions & WindowFontsOption)
+      const loop = frameLoopOptions.get(renderer)
+      // Without a loop of the opener's own the app ticks itself, and a second pump would race it.
+      if (loop !== undefined) startFrameLoop(sibling, { frameMs: loop.frameMs, onTerminated: loop.onTerminated, onError: loop.onError })
+      return sibling
+    },
+  })
   renderer.init = (windowOptions?: WindowOptions & WindowFontsOption | null) => {
     const fonts = readFontFiles(windowOptions?.fonts)
+    title = windowOptions?.title
+    fontOption = windowOptions?.fonts
+    focusOption = windowOptions?.focus
     init(windowOptions)
     // Callbacks requested before the window existed had no window to ask.
-    windowOf(renderer).frames.resume()
+    windowOf(renderer).animationFrames.resume()
     for (const font of fonts) renderer.registerFont(font)
     // The web renderer has no motion engine, so nothing to define keyframes on.
     if (typeof renderer.defineKeyframes === "function") registerKeyframesHost(renderer)
@@ -103,7 +129,7 @@ export function createNativeRenderer(
   rendererReleasers.set(renderer, () => {
     unregisterKeyframesHost(renderer)
     closeWebAnimations(renderer)
-    forgetWindowSource(renderer)
+    windowGone(renderer)
     detachRenderer(renderer)
   })
   tickPreparers.set(renderer, () => flushPendingMutations(renderer))
@@ -118,6 +144,8 @@ export function createNativeRenderer(
 }
 
 const rendererReleasers = new WeakMap<object, () => void>()
+/** The options a renderer joined the frame loop with, which a window it opens joins with too. */
+const frameLoopOptions = new WeakMap<object, FrameLoopOptions>()
 const tickPreparers = new WeakMap<object, () => void>()
 
 function releaseRenderer(renderer: object): void {
@@ -352,6 +380,7 @@ export function startFrameLoop(
   options: FrameLoopOptions = {}
 ): FrameLoop {
   if (!renderer.requiresTick()) return { stop() {} }
+  frameLoopOptions.set(renderer, options)
   const member: FrameLoopMember = { renderer, options }
   let loop = sharedLoop
   if (!loop || loop.isStopped) {

@@ -68,6 +68,7 @@ mod theme;
 mod style_memo;
 mod universal_style;
 mod visible_range;
+mod window_activity;
 mod window_kind;
 mod window_map;
 #[cfg(target_os = "macos")]

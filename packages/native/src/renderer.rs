@@ -473,6 +473,7 @@ fn open_gpuix_window(
                     request.pointer_requests.clone(),
                 );
                 view.observe_appearance(window, cx);
+                view.observe_window_activity(window, cx);
                 view.observe_viewport(window, cx);
                 view.observe_scroller_style(cx);
                 view.observe_media_features(window, cx);
@@ -2347,24 +2348,35 @@ impl GpuixRenderer {
         };
 
         if has_app {
-            let window_handle = GPUI_APP.with(|app| {
-                let app = app.borrow();
-                let app = app.as_ref().expect("has_app checked it");
-                app.update(|cx| {
-                    // The appearance override is the App's, not a window's: a window that names
-                    // none leaves the one the first window set.
-                    if appearance.is_some() {
-                        cx.set_window_appearance(appearance);
-                    }
-                    let window_handle = open_gpuix_window(cx, &request).map_err(|error| {
-                        Error::from_reason(format!("Failed to open the GPUI window: {error}"))
-                    })?;
-                    if activate {
-                        cx.activate(true);
-                    }
-                    Ok::<_, Error>(window_handle)
-                })
-            })?;
+            let open = |cx: &mut gpui::App| {
+                // The appearance override is the App's, not a window's: a window that names
+                // none leaves the one the first window set.
+                if appearance.is_some() {
+                    cx.set_window_appearance(appearance);
+                }
+                let window_handle = open_gpuix_window(cx, &request).map_err(|error| {
+                    Error::from_reason(format!("Failed to open the GPUI window: {error}"))
+                })?;
+                if activate {
+                    cx.activate(true);
+                }
+                Ok::<_, Error>(window_handle)
+            };
+            let window_handle = if crate::events::sync_dispatch::in_sync_call() {
+                // `window.open` from an event handler: GPUI has the App borrowed for the input,
+                // so the window opens on the one the dispatch holds, as a handler of Zed's does.
+                crate::events::sync_dispatch::with_active_window(|_window, cx| open(cx)).ok_or_else(|| {
+                    Error::from_reason(
+                        "A window cannot be opened from inside a native call that holds no window: open it from an event handler or outside the frame",
+                    )
+                })??
+            } else {
+                GPUI_APP.with(|app| {
+                    let app = app.borrow();
+                    let app = app.as_ref().expect("has_app checked it");
+                    app.update(open)
+                })?
+            };
             return self.finish_init(window_handle);
         }
 
@@ -2545,6 +2557,7 @@ impl GpuixRenderer {
                                             pointer_requests,
                                         );
                                         view.observe_appearance(window, cx);
+                                        view.observe_window_activity(window, cx);
                                         view.observe_viewport(window, cx);
                                         view.observe_scroller_style(cx);
                                         view.observe_media_features(window, cx);
@@ -2626,6 +2639,11 @@ impl GpuixRenderer {
         let tree_id = tree.id();
         drop(tree);
         crate::custom_elements::nativeview::teardown::tell_destroyed(tree_id, &destroyed)?;
+        // A closed window still takes the batch, which is what unmounting the root of a window the
+        // user closed sends: the tree is the renderer's, and there is no window left to draw or focus.
+        if self.is_window_closed() {
+            return Ok(destroyed);
+        }
         // A re-render that changed nothing sends a batch of identical resends.
         // Waking the window for it makes it rebuild and diff the whole element
         // tree to draw the frame it already has.
@@ -3118,6 +3136,57 @@ impl GpuixRenderer {
 
         #[cfg(not(target_os = "macos"))]
         Err(Error::from_reason("isWindowKey needs macOS"))
+    }
+
+    /// The window's device pixels per CSS px: `devicePixelRatio`. It follows the display the
+    /// window is on, so read it again after a `mediaChange`.
+    #[napi]
+    pub fn get_scale_factor(&self) -> Result<f64> {
+        self.update_window_without_view(|window, _cx| f64::from(window.scale_factor()))
+    }
+
+    /// Where the window's top-left corner is, in CSS px in the global space `getAllDisplays()`
+    /// reports (`screenX` and `screenY`). macOS only.
+    #[napi]
+    pub fn get_window_position(&self) -> Result<WindowPosition> {
+        #[cfg(target_os = "macos")]
+        {
+            let (local, display) = self.update_window_without_view(|window, cx| {
+                let bounds = window.bounds();
+                let display = window.display(cx).map(|display| u64::from(display.id()));
+                (bounds.origin, display)
+            })?;
+            let displays = crate::screen::all_displays()?;
+            // A window on no display (still opening) is placed against the primary one, whose origin is the global one.
+            let origin = display
+                .and_then(|id| displays.iter().find(|candidate| u64::from(candidate.id) == id))
+                .map_or((0.0, 0.0), |display| (display.bounds.x, display.bounds.y));
+            return Ok(WindowPosition {
+                x: origin.0 + f64::from(f32::from(local.x)),
+                y: origin.1 + f64::from(f32::from(local.y)),
+            });
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("getWindowPosition needs macOS"))
+    }
+
+    /// Sets the size of the window's content in CSS px, as the user dragging an edge would
+    /// (`window.resizeTo`). The window is not clamped to the display. macOS only.
+    #[napi]
+    pub fn set_window_size(&self, width: f64, height: f64) -> Result<()> {
+        if !(width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0) {
+            return Err(Error::from_reason(format!(
+                "The window size has to be positive, got {width} x {height}"
+            )));
+        }
+        #[cfg(target_os = "macos")]
+        return self.update_window_without_view(|window, _cx| {
+            window.resize(gpui::size(gpui::px(width as f32), gpui::px(height as f32)));
+        });
+
+        #[cfg(not(target_os = "macos"))]
+        Err(Error::from_reason("setWindowSize needs macOS"))
     }
 
     /// Bring the window forward and give it focus. This is how a window opened
@@ -6639,6 +6708,8 @@ pub(crate) struct GpuixView {
     window_appearance_change: bool,
     window_appearance_event_id: u64,
     appearance_subscription: Option<gpui::Subscription>,
+    /// Tells JS when the window becomes or stops being the active one: see `window_activity`.
+    pub(crate) activity_subscription: Option<gpui::Subscription>,
     bounds_subscription: Option<gpui::Subscription>,
     media_viewport: gpui::Size<gpui::Pixels>,
     /// The OS preferences the stylesheets' media queries read. The test renderer sets its own.
@@ -7753,6 +7824,7 @@ impl GpuixView {
             window_appearance_change: false,
             window_appearance_event_id: 0,
             appearance_subscription: None,
+            activity_subscription: None,
             bounds_subscription: None,
             media_viewport: gpui::Size::default(),
             media_features: crate::media::read_system_features(),
@@ -15158,6 +15230,14 @@ impl Task for PromptForPathsTask {
 pub struct WindowSize {
     pub width: f64,
     pub height: f64,
+}
+
+/// A window's top-left corner in CSS px, in the global space of `getAllDisplays()`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct WindowPosition {
+    pub x: f64,
+    pub y: f64,
 }
 
 #[derive(Debug, Clone, Default)]

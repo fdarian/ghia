@@ -8,7 +8,8 @@ import React from "react"
 import { createRoot } from "@ghia/react"
 import { createNativeRenderer, startFrameLoop } from "@ghia/native/runtime"
 import type { EventPayload, GpuixRenderer } from "@ghia/native"
-import { CASES, HELPER_PATH, READY_FILE, REPORT_FILE, TERMINATED_FILE, type CaseName, type Report } from "./paths"
+import { registerWindowFactory } from "@ghia/native/host"
+import { CASES, HELPER_PATH, READY_FILE, REPORT_FILE, TERMINATED_FILE, type CaseName, type Report, type WindowOpenReport } from "./paths"
 
 const folder = process.env.MULTI_WINDOW_E2E_DIR
 const name = process.env.MULTI_WINDOW_E2E_CASE as CaseName | undefined
@@ -83,6 +84,13 @@ function Page({ id, width, height }: { id: string; width: number; height: number
 }
 createRoot(alpha).render(<Page id="alpha" width={250} height={120} />)
 createRoot(beta).render(<Page id="beta" width={350} height={180} />)
+// The factory the React adapter has not registered yet (it is the next slice): what window.open asks of
+// the opener's adapter, a root for the new window's empty document, made with the adapter's createRoot.
+registerWindowFactory(alpha, (opened) => {
+  const root = createRoot(opened)
+  root.render(<Page id="gamma" width={300} height={100} />)
+  return () => root.unmount()
+})
 
 // A machine that gives the app no windows (screen locked or asleep) reports it and waits to be killed.
 if (!(await until(() => visibleWindows() >= 2, 10000))) {
@@ -124,13 +132,63 @@ const closedId: "alpha" | "beta" = name === "close-first" || (name === "close-bu
 const closing = closedId === "alpha" ? alpha : beta
 const survivor = closedId === "alpha" ? beta : alpha
 const survivorId = closedId === "alpha" ? "beta" : "alpha"
+// "window-open": the first window opens a third with window.open and the app looks at it and closes it.
+async function exerciseWindowOpen(): Promise<WindowOpenReport> {
+  const opened = window.open("", "gamma", "width=360,height=240,left=620,top=140") as (Window & typeof globalThis) | null
+  if (opened === null) throw new Error("window.open returned null")
+  const openedRenderer = (opened as unknown as { renderer: GpuixRenderer }).renderer
+  await until(() => visibleWindows() >= 3, 5000)
+  const windowsWhileOpen = visibleWindows()
+  await sleep(300)
+  const gamma = find(treeOf(openedRenderer), "gamma")
+  const hasOwnTree = gamma?.bounds?.width === 300 && find(treeOf(openedRenderer), "alpha") === undefined && find(treeOf(alpha), "gamma") === undefined
+  const closeEvents: string[] = []
+  for (const type of ["beforeunload", "pagehide", "unload"]) opened.addEventListener(type, () => closeEvents.push(type))
+  const result = {
+    windowsWhileOpen,
+    size: [opened.innerWidth, opened.innerHeight] as [number, number],
+    position: [opened.screenX, opened.screenY] as [number, number],
+    devicePixelRatioMatchesNative: opened.devicePixelRatio === openedRenderer.getScaleFactor() && opened.devicePixelRatio >= 1,
+    openerIsTheFirstWindow: opened.opener === window,
+    hasOwnTree,
+    ownBodyHasContent: opened.document.body.childNodes.length > 0 && opened.document.body !== document.body,
+    reusedByName: window.open("", "gamma") === opened,
+  }
+  opened.close()
+  await until(() => visibleWindows() <= 2, 5000)
+  const windowsAfterClose = visibleWindows()
+  // window.open from inside a key handler: native runs it inside the dispatch of beta's window, with the App borrowed.
+  let fromHandler = "the handler did not run"
+  let fromHandlerWindow: (Window & typeof globalThis) | null = null
+  beta.setSyncEventHandler((event: EventPayload) => {
+    if (event.eventType !== "keydown") return { defaultPrevented: false, propagationStopped: false }
+    try {
+      fromHandlerWindow = window.open("", "delta", "width=280,height=200") as (Window & typeof globalThis) | null
+      fromHandler = fromHandlerWindow === null ? "returned null" : "ok"
+    } catch (error) {
+      fromHandler = String(error)
+    }
+    return { defaultPrevented: false, propagationStopped: false }
+  })
+  beta.simulateKeystrokes("a")
+  beta.setSyncEventHandler(() => ({ defaultPrevented: false, propagationStopped: false }))
+  const handlerWindowShown = fromHandler === "ok" && (await until(() => visibleWindows() >= 3, 5000))
+  if (fromHandlerWindow !== null) (fromHandlerWindow as Window).close()
+  await until(() => visibleWindows() <= 2, 5000)
+  const openedFromHandler = fromHandler === "ok" ? (handlerWindowShown ? "ok" : "the window was not shown") : fromHandler
+  setters.alpha?.("alpha window updated")
+  const openerStillShowsUpdate = await until(() => JSON.stringify(alpha.getPaintedText()).includes("updated"), 3000)
+  return { ...result, openedFromHandler, closeEvents, closedAfterClose: opened.closed && openedRenderer.isWindowClosed(), windowsAfterClose, openerStillShowsUpdate }
+}
+const windowOpen = name === "window-open" ? await exerciseWindowOpen() : null
+
 const report: Report = {
   windowsAtStart,
   crossWindowCall,
   alphaHasOwnTree,
   betaHasOwnTree,
   boundsDiffer,
-  closed: name === "quit" ? null : closedId,
+  closed: name === "quit" || name === "window-open" ? null : closedId,
   windowsAfterClose: -1,
   closedRendererSawIt: false,
   survivorStillOpen: false,
@@ -138,9 +196,10 @@ const report: Report = {
   survivorWasShown: false,
   survivorShowsUpdate: false,
   windowClosedCalls,
+  windowOpen,
 }
 
-if (name !== "quit") {
+if (name !== "quit" && name !== "window-open") {
   if (name !== "close-button") closing.closeWindow()
   report.closedRendererSawIt = await until(() => closing.isWindowClosed() && windowClosedCalls[closedId] === 1, 3000)
   report.windowsAfterClose = visibleWindows()

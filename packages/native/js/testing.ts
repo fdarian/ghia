@@ -44,6 +44,7 @@ import type {
 } from "./host.js"
 import { bindClipboard } from "./clipboard.js"
 import { bindLinkOpener } from "./shell/open-link.js"
+import { bindWindowOpener } from "./window-open.js"
 import { runEditingComposition, runEditingInput, type EditingCompositionStep } from "./editing/input.js"
 import { documentOf, forgetElementSource, windowOf } from "./events/window-target.js"
 import type { GpuixDocument } from "./events/window-target.js"
@@ -291,6 +292,8 @@ interface NativeTestRendererApi
   focusPrevious(): void
   getFocusedElementId(): number | null
   setWindowActive(active: boolean): void
+  isWindowKey(): boolean
+  getScaleFactor(): number
   focusNextWithin(elementId: number): void
   focusPreviousWithin(elementId: number): void
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
@@ -837,6 +840,48 @@ export class TestRenderer implements NativeRenderer {
     this.native.setSyncEventHandler((event) => this.dispatchSyncEvent(event))
     bindClipboard(this)
     bindLinkOpener(this)
+    this.windowTitle = options.title
+    // `window.open` of a test window opens another test window, which a test sees as one more renderer.
+    bindWindowOpener(this, {
+      title: () => this.windowTitle,
+      create: (opened) => {
+        const sibling = new TestRenderer({ onError: options.onError, scaleFactor: options.scaleFactor, fonts: options.fonts, ...opened })
+        // A window opens key, as the live one does with `focus: true`.
+        sibling.activateWindow()
+        return sibling
+      },
+    })
+  }
+
+  private windowTitle: string | undefined
+  private windowClosed = false
+
+  /** Whether `closeWindow()` ran: what a script's `window.close()` does to a test window. The native window stays until `dispose()`. */
+  isWindowClosed(): boolean {
+    return this.windowClosed
+  }
+
+  /** What `window.close()` asks of the platform: a test window only notes it, and `dispose()` still releases it. */
+  closeWindow(): void {
+    this.windowClosed = true
+  }
+
+  /** Whether the offscreen window is the active one, which `setWindowActive` and `activateWindow` change. */
+  isWindowKey(): boolean {
+    return this.native.isWindowKey()
+  }
+
+  /** Makes this window the key one and every other test window not, as the platform has one key window. */
+  activateWindow(): void {
+    for (const other of liveRenderers) {
+      if (other !== this && other.isWindowKey()) other.setWindowActive(false)
+    }
+    this.setWindowActive(true)
+  }
+
+  /** Device pixels per CSS px of the window: the `scaleFactor` it opened with, or `setWindowScaleFactor`'s. */
+  getScaleFactor(): number {
+    return this.native.getScaleFactor()
   }
 
   /** Asks the window for its next frame's steps, which run the `requestAnimationFrame` callbacks. */

@@ -34,6 +34,7 @@ import { EVENT_CLASSES } from "./events/classes.js"
 import { replaceStandInDocumentElements, standInDocumentElements } from "./dom/stand-in-document.js"
 import { CaretPosition } from "./editing/caret-position.js"
 import { document, globalWindow, installStandInDocument, window } from "./events/window-target.js"
+import { Window } from "./events/window-targets.js"
 import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
 import { isWebBuild } from "./web-build.js"
 import { Animation, CSSAnimation, CSSTransition, DocumentTimeline, KeyframeEffect } from "./web-animations.js"
@@ -65,6 +66,7 @@ const DOM_CLASSES = {
   Document,
   DocumentFragment,
   ShadowRoot,
+  Window,
   ValidityState,
   DOMTokenList,
   HTMLCollection,

@@ -28,6 +28,9 @@
       ],
       "@ghia/native/runtime": [
         "../../dist/runtime.js"
+      ],
+      "@ghia/native/host": [
+        "../../dist/host.js"
       ]
     }
   },

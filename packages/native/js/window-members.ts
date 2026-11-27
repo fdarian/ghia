@@ -2,10 +2,20 @@ import { getComputedStyle } from "./computed-style.js"
 import { createDomEvent, EVENT_PHASE_AT_TARGET, EVENT_PHASE_NONE, reportHandlerErrors } from "./events/dispatch.js"
 import type { GpuixEventTarget } from "./events/event-target.js"
 import { globalWindow } from "./events/window-target.js"
-import { installWindowHooks, type GpuixWindow } from "./events/window-targets.js"
+import { installWindowHooks, WINDOW_HANDLER_TYPES, type GpuixWindow } from "./events/window-targets.js"
 import type { NativeRenderer } from "./host.js"
 import { matchMediaFor } from "./match-media.js"
 import { createRendererState } from "./renderer-state.js"
+import {
+  closeWindowObject,
+  dispatchOnWindow,
+  focusWindowObject,
+  positionOf,
+  postMessageToWindow,
+  resizeWindowObject,
+  scaleFactorOf,
+} from "./window-lifecycle.js"
+import { openWindow } from "./window-open.js"
 
 const NO_ROOT = { eventHandlers: new Map(), elementById: () => undefined }
 
@@ -68,6 +78,16 @@ export function installWindowMembers(): void {
     syncResize,
     matchMedia: (renderer, query) => matchMediaFor(renderer)(query),
     getComputedStyle,
+    lifecycle: {
+      open: openWindow,
+      close: closeWindowObject,
+      focus: focusWindowObject,
+      postMessage: postMessageToWindow,
+      dispatchEvent: dispatchOnWindow,
+      resizeTo: resizeWindowObject,
+      scaleFactor: scaleFactorOf,
+      position: positionOf,
+    },
   })
   Object.defineProperties(globalThis, {
     innerWidth: {
@@ -84,9 +104,55 @@ export function installWindowMembers(): void {
     visualViewport: { configurable: true, get: () => globalWindow().visualViewport },
     frameElement: { value: null, configurable: true, writable: true },
   })
+  installGlobalWindowMembers()
   // A runtime that has its own keeps it: `self` is the global object already in Bun.
   for (const name of ["parent", "top", "self"]) {
     if (Reflect.get(globalThis, name) !== undefined) continue
     Object.defineProperty(globalThis, name, { value: globalThis, configurable: true, writable: true })
+  }
+}
+
+/** The members of a window that the global object carries for the first window: each forwards to `globalWindow()`. */
+function installGlobalWindowMembers(): void {
+  const first = (): GpuixWindow => globalWindow()
+  const readable = ["closed", "devicePixelRatio", "outerWidth", "outerHeight", "screenX", "screenY", "screenLeft", "screenTop", "length"] as const
+  for (const name of readable) {
+    Object.defineProperty(globalThis, name, { configurable: true, get: () => first()[name] })
+  }
+  // `opener` and `name` are settable, as in a browser: a script drops the opener with `opener = null`.
+  Object.defineProperty(globalThis, "opener", {
+    configurable: true,
+    get: () => first().opener,
+    set: (value: null) => {
+      first().opener = value
+    },
+  })
+  Object.defineProperty(globalThis, "name", {
+    configurable: true,
+    get: () => first().name,
+    set: (value: unknown) => {
+      first().name = String(value)
+    },
+  })
+  const methods = ["open", "close", "focus", "blur", "postMessage", "resizeTo", "resizeBy", "moveTo", "moveBy"] as const
+  for (const name of methods) {
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]) => Reflect.apply(Reflect.get(first(), name), first(), args),
+    })
+  }
+  Object.defineProperty(globalThis, "frames", { value: globalThis, configurable: true, writable: true })
+  // The handlers of the events a window sends itself; `onmessage` stays the runtime's where it has one.
+  for (const type of WINDOW_HANDLER_TYPES) {
+    const property = `on${type}`
+    if (type === "message" && Reflect.get(globalThis, property) !== undefined) continue
+    Object.defineProperty(globalThis, property, {
+      configurable: true,
+      get: () => Reflect.get(first(), property),
+      set: (value: unknown) => {
+        Reflect.set(first(), property, value)
+      },
+    })
   }
 }

@@ -8,7 +8,7 @@ import { EDIT_INPUT_EVENT, endCompositionOnBlur, runNativeEditInput } from "./ed
 import { EDIT_POINTER_EVENT, runEditingPointer } from "./editing/pointer-selection.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { popoversOfRendererGone } from "./dom/popover.js"
-import { elementOf, GpuixEventTarget, noteFocusEvent, trackFocusedElement, windowOf } from "./events/window-target.js"
+import { elementOf, GpuixEventTarget, trackFocusedElement, windowOf } from "./events/window-target.js"
 import type { GpuixWindow } from "./events/window-targets.js"
 import { deliverObservation } from "./observers.js"
 import type {
@@ -21,6 +21,7 @@ import type {
   WindowKeyEventHandler,
 } from "./host.js"
 import { shapeScrollEvent } from "./scroll.js"
+import { deliverWindowActivity, runAsIncumbent } from "./window-lifecycle.js"
 import { deliverWebAnimationEvent, isWebAnimationEvent } from "./web-animations.js"
 
 export interface RendererRootHandlers {
@@ -188,6 +189,9 @@ export type ActiveRoot = RendererRootBinding & {
 /** What native sends in the frame steps of a window that was asked for `requestAnimationFrame`. */
 const ANIMATION_FRAME_EVENT = "animationframe"
 
+/** What native sends when the window becomes or stops being the key one, while `window` listens for `focus` or `blur`: `value` is `"true"` or `"false"`. */
+const WINDOW_ACTIVE_EVENT = "windowActive"
+
 const STATE_KEY = Symbol.for("@ghia/native/renderer-states")
 
 /** Register an open overlay on this renderer's layer stack. */
@@ -306,7 +310,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       throw new Error("An animationframe event arrived without its timelineTime")
     }
     const time = event.timelineTime
-    const run = () => windowOf(renderer).frames.run(time, (error) => state.reportError(error))
+    const run = () => windowOf(renderer).animationFrames.run(time, (error) => state.reportError(error))
     if (active?.handlers.schedule) active.handlers.schedule(run)
     else run()
   }
@@ -359,7 +363,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       active = binding
       binding.window.attached = true
       binding.window.syncResize()
-      removeFrameSource = binding.window.frames.attach(renderer)
+      removeFrameSource = binding.window.animationFrames.attach(renderer)
       return binding
     },
     dispatch(received) {
@@ -371,6 +375,12 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       if (received.eventType === "mediaChange") {
         for (const listener of [...mediaListeners]) listener()
         return mediaListeners.size > 0
+      }
+      if (received.eventType === WINDOW_ACTIVE_EVENT) {
+        const run = () => deliverWindowActivity(windowOf(renderer), received.value === "true")
+        if (active?.handlers.schedule) active.handlers.schedule(run)
+        else run()
+        return false
       }
       if (received.eventType.startsWith("motionValue")) {
         const sink = motionValueSinks.get(received.elementId)
@@ -410,7 +420,6 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         return true
       }
       if (received.eventType === "focusin") {
-        noteFocusEvent(renderer)
         const focused = elementOf(renderer, received.elementId)
         trackFocusedElement(renderer, "focusin", focused)
         placeCaretOnFocusIn(focused)
@@ -453,7 +462,6 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         return { defaultPrevented: false, propagationStopped: false, handled }
       }
       if (received.eventType === "focusin") {
-        noteFocusEvent(renderer)
         const focused = elementOf(renderer, received.elementId)
         trackFocusedElement(renderer, "focusin", focused)
         placeCaretOnFocusIn(focused)
@@ -550,6 +558,11 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       }
     },
   }
+  // The handlers of an event run as the window it happened in: `postMessage` names it as the sender.
+  const dispatchEvent = state.dispatch
+  const dispatchSyncEvent = state.dispatchSync
+  state.dispatch = (received) => runAsIncumbent(windowOf(renderer), () => dispatchEvent(received))
+  state.dispatchSync = (received) => runAsIncumbent(windowOf(renderer), () => dispatchSyncEvent(received))
   allStates().set(renderer, state)
   return state
 }

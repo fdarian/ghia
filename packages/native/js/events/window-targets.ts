@@ -14,7 +14,22 @@ type WindowHooks = {
   syncResize(window: GpuixWindow): void
   matchMedia(renderer: NativeRenderer, query: string): MediaQueryList
   getComputedStyle: typeof getComputedStyle
+  lifecycle: WindowLifecycle
 }
+
+/** What a window does that reaches outside it (opens, closes, asks the platform): `window-lifecycle.ts` and `window-open.ts`. */
+export type WindowLifecycle = {
+  open(opener: GpuixWindow, url: string | URL, target: string, features: string): object | null
+  close(window: GpuixWindow): void
+  focus(window: GpuixWindow): void
+  postMessage(window: GpuixWindow, message: unknown, targetOrigin: string | WindowPostMessageOptions | undefined, transfer: Transferable[] | undefined): void
+  dispatchEvent(window: GpuixWindow, event: Event): boolean
+  resizeTo(window: GpuixWindow, width: number, height: number): void
+  scaleFactor(window: GpuixWindow): number
+  position(window: GpuixWindow): { x: number; y: number }
+}
+
+export type WindowPostMessageOptions = { targetOrigin?: string; transfer?: Transferable[] }
 
 let installedHooks: WindowHooks | undefined
 
@@ -31,6 +46,31 @@ function hooks(): WindowHooks {
 }
 
 type WindowSize = { width: number; height: number }
+
+const WINDOW_TOKEN = Symbol("Window")
+
+/**
+ * The `Window` interface: `window instanceof Window` holds for the global object, which is the first
+ * window, and for every window Ghia opens (`GpuixWindow`). A window object answers what it does not
+ * define itself (`Promise`, `HTMLElement`, `setTimeout`, `fetch`, `location`, `localStorage`) with
+ * the global object's: there is one JS realm, so they are the same objects.
+ */
+export class Window {
+  constructor(token?: symbol) {
+    if (token !== WINDOW_TOKEN) throw new TypeError("Illegal constructor")
+  }
+
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return value === globalThis || Function.prototype[Symbol.hasInstance].call(this, value)
+  }
+}
+
+Object.setPrototypeOf(Window.prototype, Object.create(globalThis))
+
+/** The event handler properties of a window object: `onresize` and the rest. */
+const HANDLER_TYPES = ["resize", "focus", "blur", "beforeunload", "pagehide", "pageshow", "unload", "message"] as const
+type HandlerType = (typeof HANDLER_TYPES)[number]
+export type WindowEventHandler = ((this: object, event: Event) => unknown) | null
 
 /**
  * The window's visual viewport. Ghia has no pinch zoom or on-screen keyboard that moves it, so
@@ -90,16 +130,21 @@ export type WindowLinks = {
  * `getComputedStyle`. It is internal: `windowOf(renderer)` finds it, and its `document` is the
  * window's own. The first window's is the global `window` (`globalThis`) and `document`.
  */
-export class GpuixWindow {
+export class GpuixWindow extends Window {
   readonly events: GpuixEventTarget
   readonly visualViewport = new VisualViewport(this)
-  readonly frames = new FrameList()
+  /** The `requestAnimationFrame` callbacks of the window. */
+  readonly animationFrames = new FrameList()
   /** The renderer of the window, `undefined` while the global window has none yet. Set by the registry only. */
   renderer: NativeRenderer | undefined
   /** The window closed: its document is empty from then on, and the global one stays the closed window's. */
   closed = false
   /** A root is attached to the renderer (`attach` of its renderer state): set by the renderer state only. */
   attached = false
+  /** `window.name`: what a later `window.open(url, name)` finds the window by. */
+  name = ""
+  /** @internal The window that opened this one with `window.open`, until `noopener` or `opener = null`. */
+  openerLink: GpuixWindow | null = null
 
   /** What the window is to code: the global object for the first window, the window target itself for another. The `currentTarget` of its own listeners, the `target` of `resize` and the `view` of its events. */
   readonly view: object
@@ -107,6 +152,7 @@ export class GpuixWindow {
   #document: GpuixDocument | undefined
 
   constructor(links: WindowLinks) {
+    super(WINDOW_TOKEN)
     this.view = links.owner ?? this
     this.mounted = links.mounted
     this.events = new GpuixEventTarget(() => {
@@ -157,6 +203,141 @@ export class GpuixWindow {
     return this.size("innerHeight").height
   }
 
+  /** The window itself: the global object for the first window. */
+  get window(): object {
+    return this.view
+  }
+
+  get self(): object {
+    return this.view
+  }
+
+  get frames(): object {
+    return this.view
+  }
+
+  /** Ghia has no frames, so a window is its own `parent` and `top`. */
+  get parent(): object {
+    return this.view
+  }
+
+  get top(): object {
+    return this.view
+  }
+
+  readonly frameElement = null
+  readonly length = 0
+
+  /** The window that opened this one with `window.open`, or `null`. It stays after that window closes. */
+  get opener(): object | null {
+    return this.openerLink?.view ?? null
+  }
+
+  set opener(value: null) {
+    if (value !== null) throw new TypeError("opener can only be set to null")
+    this.openerLink = null
+  }
+
+  open(url: string | URL = "", target = "_blank", features = ""): object | null {
+    return hooks().lifecycle.open(this, url, String(target), String(features))
+  }
+
+  /** Fires `beforeunload`, `pagehide` and `unload` on this window and closes it. */
+  close(): void {
+    hooks().lifecycle.close(this)
+  }
+
+  /** Brings the window forward and makes it the key window. */
+  focus(): void {
+    hooks().lifecycle.focus(this)
+  }
+
+  /** Does nothing: nothing in the platform resigns the key window to another of the app's windows. */
+  blur(): void {}
+
+  postMessage(message: unknown, targetOrigin?: string | WindowPostMessageOptions, transfer?: Transferable[]): void {
+    hooks().lifecycle.postMessage(this, message, targetOrigin, transfer)
+  }
+
+  dispatchEvent(event: Event): boolean {
+    return hooks().lifecycle.dispatchEvent(this, event)
+  }
+
+  /** Sets the size of the window's content, as `resizeTo` does. */
+  resizeTo(width: number, height: number): void {
+    hooks().lifecycle.resizeTo(this, Number(width), Number(height))
+  }
+
+  resizeBy(width: number, height: number): void {
+    const size = this.size("resizeBy")
+    hooks().lifecycle.resizeTo(this, size.width + Number(width), size.height + Number(height))
+  }
+
+  /** Does nothing: GPUI places a window when it opens and cannot move it after. */
+  moveTo(): void {}
+  moveBy(): void {}
+
+  /** The window's frame is not measured apart from its content, so it is `innerWidth`. */
+  get outerWidth(): number {
+    return this.innerWidth
+  }
+
+  get outerHeight(): number {
+    return this.innerHeight
+  }
+
+  get devicePixelRatio(): number {
+    return hooks().lifecycle.scaleFactor(this)
+  }
+
+  get screenX(): number {
+    return hooks().lifecycle.position(this).x
+  }
+
+  get screenY(): number {
+    return hooks().lifecycle.position(this).y
+  }
+
+  get screenLeft(): number {
+    return this.screenX
+  }
+
+  get screenTop(): number {
+    return this.screenY
+  }
+
+  getSelection(): ReturnType<GpuixDocument["getSelection"]> {
+    return this.document.getSelection()
+  }
+
+  /** `location` is the app's one: setting it navigates it. */
+  get location(): Location {
+    return Reflect.get(globalThis, "location")
+  }
+
+  set location(value: string | URL) {
+    Reflect.set(globalThis, "location", String(value))
+  }
+
+  readonly #handlers = new Map<HandlerType, { handler: WindowEventHandler; listening: boolean }>()
+
+  /** @internal The `on<type>` property of a window: one listener, added when a handler is first set, calls the current one. */
+  handlerOf(type: HandlerType): WindowEventHandler {
+    return this.#handlers.get(type)?.handler ?? null
+  }
+
+  /** @internal */
+  setHandler(type: HandlerType, value: unknown): void {
+    const slot = this.#handlers.get(type) ?? { handler: null, listening: false }
+    this.#handlers.set(type, slot)
+    slot.handler = typeof value === "function" ? (value as WindowEventHandler) : null
+    if (slot.handler === null || slot.listening) return
+    slot.listening = true
+    this.events.addEventListener(type, (event) => {
+      slot.handler?.call(this.view, event as unknown as Event)
+    })
+  }
+
   readonly scrollX = 0
   readonly scrollY = 0
 
@@ -170,11 +351,11 @@ export class GpuixWindow {
   }
 
   requestAnimationFrame(callback: (time: number) => void): number {
-    return this.frames.request(callback)
+    return this.animationFrames.request(callback)
   }
 
   cancelAnimationFrame(handle: number): void {
-    this.frames.cancel(handle)
+    this.animationFrames.cancel(handle)
   }
 
   getComputedStyle(...args: Parameters<typeof getComputedStyle>): ReturnType<typeof getComputedStyle> {
@@ -218,3 +399,21 @@ export class GpuixWindow {
     return this.mounted()
   }
 }
+
+export interface GpuixWindow extends Record<`on${HandlerType}`, WindowEventHandler> {}
+
+for (const type of HANDLER_TYPES) {
+  Object.defineProperty(GpuixWindow.prototype, `on${type}`, {
+    configurable: true,
+    enumerable: true,
+    get(this: GpuixWindow) {
+      return this.handlerOf(type)
+    },
+    set(this: GpuixWindow, value: unknown) {
+      this.setHandler(type, value)
+    },
+  })
+}
+
+/** The `on<type>` handler properties, for the global object to carry as the first window's. */
+export const WINDOW_HANDLER_TYPES: readonly string[] = HANDLER_TYPES

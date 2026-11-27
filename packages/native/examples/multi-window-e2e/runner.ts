@@ -72,7 +72,26 @@ async function runCase(name: CaseName): Promise<Result> {
     if (!report.alphaHasOwnTree) problems.push("the first window does not hold its own tree")
     if (!report.betaHasOwnTree) problems.push("the second window does not hold its own tree")
     if (!report.boundsDiffer) problems.push("the two windows report the same bounds")
-    if (name !== "quit") {
+    if (name === "window-open") {
+      const opened = report.windowOpen
+      if (opened === null) problems.push("the app did not report what window.open did")
+      else {
+        if (opened.windowsWhileOpen !== 3) problems.push(`${opened.windowsWhileOpen} windows while the opened one was up, not 3`)
+        if (opened.size[0] !== 360 || opened.size[1] !== 240) problems.push(`the opened window is ${opened.size.join(" x ")}, not 360 x 240`)
+        if (opened.position[0] !== 620 || opened.position[1] !== 140) problems.push(`the opened window is at ${opened.position.join(", ")}, not 620, 140`)
+        if (!opened.devicePixelRatioMatchesNative) problems.push("devicePixelRatio is not the renderer's scale factor")
+        if (!opened.openerIsTheFirstWindow) problems.push("the opened window's opener is not the first window")
+        if (!opened.hasOwnTree) problems.push("the opened window does not hold its own tree")
+        if (!opened.ownBodyHasContent) problems.push("the opened window's document.body is empty or the first window's")
+        if (!opened.reusedByName) problems.push("window.open with the same name did not return the open window")
+        if (opened.closeEvents.join(",") !== "beforeunload,pagehide,unload") problems.push(`close() fired ${opened.closeEvents.join(", ") || "nothing"}, not beforeunload, pagehide, unload`)
+        if (opened.openedFromHandler !== "ok") problems.push(`window.open from a key handler: ${opened.openedFromHandler}`)
+        if (!opened.closedAfterClose) problems.push("the window is not closed after close()")
+        if (opened.windowsAfterClose !== 2) problems.push(`${opened.windowsAfterClose} windows after close(), not 2`)
+        if (!opened.openerStillShowsUpdate) problems.push("the first window does not show a change made after the opened window closed")
+      }
+    }
+    if (name !== "quit" && name !== "window-open") {
       if (report.windowsAfterClose !== 1) problems.push(`${report.windowsAfterClose} windows after one was closed, not 1`)
       if (!report.closedRendererSawIt) problems.push("the renderer of the closed window did not hear of it (isWindowClosed, onWindowClosed once)")
       if (!report.survivorStillOpen) problems.push("closing one window closed the other")

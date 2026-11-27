@@ -349,6 +349,25 @@ export interface HandlerLookup {
 }
 
 /**
+ * Delivers an event aimed at a window itself, which has no path: the window's own listeners hear it
+ * in its capture phase and then its bubble phase, both at the target. Leaves `currentTarget` null and
+ * `eventPhase` 0.
+ */
+export function walkWindowTarget(
+  target: { run(event: DomEvent, state: DomEventState, capture: boolean, phase: number, fail: (error: unknown) => void): void },
+  event: DomEvent,
+  state: DomEventState & DispatchState,
+  fail: (error: unknown) => void
+): void {
+  state.dispatching = true
+  target.run(event, state, true, EVENT_PHASE_AT_TARGET, fail)
+  if (!state.propagationStopped) target.run(event, state, false, EVENT_PHASE_AT_TARGET, fail)
+  event.currentTarget = null
+  event.eventPhase = EVENT_PHASE_NONE
+  state.dispatching = false
+}
+
+/**
  * Walks `event` along `elements` (target first): the hooks' capture phase, capture handlers from
  * the root down to the target, then the target's, then the bubble handlers back up, then the
  * hooks' bubble phase. Handlers run synchronously, and one that throws goes to `fail` while the

@@ -101,8 +101,6 @@ type ElementSourceEntry = {
   source: ElementSource
   /** The renderer's window was replaced or closed: it can still name elements but reports no focus and lists no animations. */
   windowGone: boolean
-  /** Order in which the roots last heard a focus event; higher is more recent. */
-  focusedAt: number
   /** The element the last `focusin` named, until its `focusout`: what `document.activeElement` answers without asking native. */
   focused: object | null
 }
@@ -120,7 +118,6 @@ const elementSources: Map<object, ElementSourceEntry> = (() => {
   Reflect.set(globalThis, ELEMENT_SOURCES_KEY, created)
   return created
 })()
-let focusClock = 0
 
 type StandInDocument = {
   /** The `<html>`, `<head>` and `<body>` a document answers with while no root of its window is mounted. */
@@ -430,18 +427,16 @@ export class GpuixDocument<Element = unknown> extends Document {
   }
 
   /**
-   * Whether this document's window has focus. Native does not tell JS which window is the key one,
-   * so it is the open window that heard a focus event last, and the first one open while none has.
+   * Whether this document's window is the key window, as the platform says (`isWindowKey`): the
+   * window the user's keyboard is in. False once the window is closed.
    */
   hasFocus(): boolean {
-    const own = this.liveEntry()
-    if (own === undefined) return false
-    let key: ElementSourceEntry | undefined
-    for (const entry of elementSources.values()) {
-      if (entry.windowGone) continue
-      if (key === undefined || entry.focusedAt > key.focusedAt) key = entry
+    if (this.liveEntry() === undefined) return false
+    const renderer = this.window.requireRenderer("document.hasFocus")
+    if (renderer.isWindowKey === undefined) {
+      throw new Error("This renderer does not report the key window, so document.hasFocus is unavailable")
     }
-    return key === own
+    return renderer.isWindowKey()
   }
 
   /** A `TreeWalker` over `root`, standing on `root`, as `document.createTreeWalker` does: `whatToShow` is every node by default. */
@@ -688,6 +683,11 @@ export function windowOf(renderer: NativeRenderer): GpuixWindow {
   return made
 }
 
+/** @internal The window of `renderer` if it has one yet, without making one. */
+export function knownWindowOf(renderer: NativeRenderer): GpuixWindow | undefined {
+  return records.get(renderer)
+}
+
 /** @internal The document of `renderer`'s window. */
 export function documentOf(renderer: NativeRenderer): GpuixDocument {
   return windowOf(renderer).document
@@ -737,7 +737,6 @@ export function installElementSource(
       nodeFactory: nodeFactory ?? null,
     },
     windowGone: false,
-    focusedAt: 0,
     focused: null,
   }
   const owner = windowOf(renderer as NativeRenderer)
@@ -801,12 +800,6 @@ export function elementOf(renderer: object, id: number): object | undefined {
 }
 
 setElementLookup(elementOf)
-
-/** @internal Records that `owner`'s window just moved focus, for the tie-break of `activeElement`. */
-export function noteFocusEvent(owner: object): void {
-  const entry = elementSources.get(owner)
-  if (entry) entry.focusedAt = ++focusClock
-}
 
 /**
  * @internal Follows the focus events native reports, so a question of "is focus inside this element" (the selection
@@ -1008,8 +1001,8 @@ export function dispatchEventAlongPath(
   errors.forEach(report)
 }
 
-/** What the DOM clears when a dispatch ends: the stop flags and the path. The event keeps its target and its canceled flag. */
-function endDispatch(state: DispatchState): void {
+/** @internal What the DOM clears when a dispatch ends: the stop flags and the path. The event keeps its target and its canceled flag. */
+export function endDispatch(state: DispatchState): void {
   state.propagationStopped = false
   state.immediatePropagationStopped = false
   state.path = []
@@ -1034,8 +1027,8 @@ export function assertDispatchable(event: Event): DispatchState {
   return state
 }
 
-/** The state of a dispatch of an app's `event` at `target`, which it must not already be in. */
-function beginDispatch(event: Event, target: object): DispatchState {
+/** @internal The state of a dispatch of an app's `event` at `target`, which it must not already be in. */
+export function beginDispatch(event: Event, target: object): DispatchState {
   const state = assertDispatchable(event)
   ;(event as unknown as DomEvent & { target: object }).target = target
   return state
