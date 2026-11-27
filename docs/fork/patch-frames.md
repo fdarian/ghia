@@ -1098,8 +1098,9 @@ the patcher turns it on with `Window::set_contained_patches`.
   splices the ranges of the anchor into the frame (`PatchDecline::Splice` when it cannot) instead of declining `Operations`,
   `Hitboxes` and `Registrations`. An anchor that holds roots (text, boxes with children) and a keyed swap of the content with
   another number of elements are patched. A bar of a `div` scroller in the anchor (its thumb is noted for the scroll patch) goes with the splice: the
-  thumbs the patch's own paint noted take the place of the ones the part held, and the splice declines (`PatchDecline::Splice`) only for a bar the patch did
-  not paint, or a list's. gpui then rewrites the recording of the anchor from the patch
+  thumbs the patch's own paint noted take the place of every thumb the frame kept for that scroller (whatever it painted, so a bar that was off leaves
+  nothing behind), where the first of them was, and the splice declines (`PatchDecline::Splice`) only for a bar the patch did not paint, or a list's (in the
+  part or in the scratch frame). gpui then rewrites the recording of the anchor from the patch
   (`rewrittenRecordings`), which is what lets the next commit patch it again. A root that published (every host element of Ghia
   reports its box through a layout probe) keeps its rewritten recording when it has an `on_replay` hook, as a frame built
   whole accepts for the recording (zed `c4590da472`), so consecutive commits in an anchor are all patches. Ghia reads the outcome after
@@ -1736,7 +1737,8 @@ thumb changes in a step, so a step is not built.
   changed (the thumb would move, grow, appear or lie on another track; the pointer thickens the bar, which paints a track under the thumb; the offset moved,
   which is a scroll's frame). `paint_scroll_thumb` returns whether the frame notes the bar, and a window that does not (scroll patch off) keeps asking for built frames.
 - **`Window::plan_scroll_thumb_repaints`, then `Window::repaint_scroll_thumbs`.** The first asks every bar of the frame shown and writes nothing; the second
-  writes the color over the operation of each thumb that differs (the quad's background under the element opacity it was painted with, nothing else of it),
+  writes the color over the operation of each thumb that differs, found by the scroller and axis of its bar when it writes and not by where the frame kept it at the plan
+  (a splice between the two moves the thumbs) (the quad's background under the element opacity it was painted with, nothing else of it),
   in place in the scene when the operation fits (`Scene::patch_in_place`) and by making the scene again otherwise, sets that the frame is presented, counts
   `PatchCounters::thumb_repaints` (`getPatchCounters().thumbRepaints`) and runs the owner's `done`: the bar's alpha and `painted` state, the next tick while it fades, the
   timer for a hold that began again. A miss is a tick the patcher declines (`unpatchable["Thumb:Alpha"]` and the like), drawn whole in the same draw.
