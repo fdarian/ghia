@@ -46,9 +46,9 @@ pub(super) struct ParsedRule {
     /// In the order of the cascade, and without the rules no selector can match.
     rules: Vec<LocalRule>,
     /// Their layers are ids of `layers`, as the rules' are.
-    keyframes: Vec<Defined<KeyframesRule>>,
-    properties: Vec<Defined<Registration>>,
-    font_faces: Vec<Defined<FontFaceRule>>,
+    keyframes: Vec<Defined<KeyframesRule, LocalLayer>>,
+    properties: Vec<Defined<Registration, LocalLayer>>,
+    font_faces: Vec<Defined<FontFaceRule, LocalLayer>>,
     unsupported: Vec<String>,
     /// The layers the rule declares, which `rules` are in.
     layers: Layers,
@@ -164,23 +164,9 @@ impl ParseCache {
                     layer: rule.layer.map(|layer| mapped[layer.0.index()]),
                     conditions: rule.conditions.clone(),
                 }));
-                // A definition's layer is the document's like a rule's, so it is mapped the same way.
-                let mapped_layer = |layer: Option<LayerId>| layer.map(|layer| mapped[layer.index()]);
-                assembled.keyframes.extend(parsed.keyframes.iter().map(|rule| Defined {
-                    body: rule.body.clone(),
-                    layer: mapped_layer(rule.layer),
-                    conditions: rule.conditions.clone(),
-                }));
-                assembled.properties.extend(parsed.properties.iter().map(|rule| Defined {
-                    body: rule.body.clone(),
-                    layer: mapped_layer(rule.layer),
-                    conditions: rule.conditions.clone(),
-                }));
-                assembled.font_faces.extend(parsed.font_faces.iter().map(|rule| Defined {
-                    body: rule.body.clone(),
-                    layer: mapped_layer(rule.layer),
-                    conditions: rule.conditions.clone(),
-                }));
+                assembled.keyframes.extend(parsed.keyframes.iter().map(|rule| globalize(rule, &mapped)));
+                assembled.properties.extend(parsed.properties.iter().map(|rule| globalize(rule, &mapped)));
+                assembled.font_faces.extend(parsed.font_faces.iter().map(|rule| globalize(rule, &mapped)));
                 assembled.unsupported.extend(parsed.unsupported.iter().cloned());
                 if let Some(units) = &mut assembled.units {
                     units.push(parsed.clone());
@@ -220,7 +206,26 @@ fn parse_rule(text: &str, atoms: &mut Atoms, validator: &mut Validator) -> Parse
         .into_iter()
         .map(|rule| LocalRule { body: rule.body, layer: rule.layer.map(LocalLayer), conditions: rule.conditions })
         .collect();
-    ParsedRule { rules, keyframes: sheet.keyframes, properties: sheet.properties, font_faces: sheet.font_faces, unsupported: sheet.unsupported, layers }
+    ParsedRule {
+        rules,
+        keyframes: localize(sheet.keyframes),
+        properties: localize(sheet.properties),
+        font_faces: localize(sheet.font_faces),
+        unsupported: sheet.unsupported,
+        layers,
+    }
+}
+
+fn localize<T>(definitions: Vec<Defined<T>>) -> Vec<Defined<T, LocalLayer>> {
+    definitions
+        .into_iter()
+        .map(|rule| Defined { body: rule.body, layer: rule.layer.map(LocalLayer), conditions: rule.conditions })
+        .collect()
+}
+
+/// A definition's layer is turned into the document's like a rule's is, by the answer of [`Layers::replay_into`].
+fn globalize<T>(rule: &Defined<T, LocalLayer>, mapped: &[LayerId]) -> Defined<T> {
+    Defined { body: rule.body.clone(), layer: rule.layer.map(|layer| mapped[layer.0.index()]), conditions: rule.conditions.clone() }
 }
 
 /// `rules` in cascade order, without the selectors that name a pseudo-element and the rules that

@@ -17,14 +17,15 @@ use crate::css::media_query::MediaEnvironment;
 use super::conditions::{self, Conditions};
 use super::layers::{LayerId, LayerOrder};
 
-/// One definition with where it was written.
-pub struct Defined<T> {
+/// One definition with where it was written. `L` is the kind of layer id: the document's, or
+/// (`parse_cache`) one of the tree a single rule was parsed against.
+pub struct Defined<T, L = LayerId> {
     pub body: Arc<T>,
-    pub layer: Option<LayerId>,
+    pub layer: Option<L>,
     pub conditions: Option<Arc<Conditions>>,
 }
 
-impl<T> Clone for Defined<T> {
+impl<T, L: Copy> Clone for Defined<T, L> {
     fn clone(&self) -> Self {
         Defined { body: self.body.clone(), layer: self.layer, conditions: self.conditions.clone() }
     }
