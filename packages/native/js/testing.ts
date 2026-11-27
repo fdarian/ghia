@@ -264,6 +264,7 @@ interface NativeTestRendererApi
   promptForPaths(options?: PathPromptOptions): Promise<string[] | null>
   writeClipboard(items: ClipboardData[]): void
   readClipboard(): ClipboardData[]
+  openUrl(url: string): void
   getOpenedUrls(): string[]
   flush(): void
   flushIfDirty(): void
@@ -731,7 +732,7 @@ export class TestRenderer implements NativeRenderer {
   readonly writeClipboard: NonNullable<NativeRenderer["writeClipboard"]>
   readonly readClipboard: NonNullable<NativeRenderer["readClipboard"]>
   /** Records the request: a test window never starts the system's browser. `openedUrls` has what was asked for. */
-  readonly openUrl: NonNullable<NativeRenderer["openUrl"]>
+  readonly openUrl: (url: string) => void
   readonly setWindowSelectionChange: NonNullable<
     NativeRenderer["setWindowSelectionChange"]
   >

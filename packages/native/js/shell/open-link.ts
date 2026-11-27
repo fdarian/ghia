@@ -1,6 +1,6 @@
 import type { NativeRenderer } from "../host.js"
 
-export type LinkHost = Pick<NativeRenderer, "openUrl">
+export type LinkHost = Required<Pick<NativeRenderer, "openUrl">>
 
 const warned = new Set<string>()
 
