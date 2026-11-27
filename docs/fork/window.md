@@ -305,9 +305,49 @@ its own window's document and window target only. The model and the rules for no
 [the reference](../reference.md#a-document-per-window); how it is built is in [events-and-input.md](events-and-input.md#the-event-path-of-each-window)
 and [web-renderer.md](web-renderer.md#several-windows).
 
-What several windows do not have yet: `window.open` and the adapters' `render()` into a second window's `document.body` are the
-later slice of this work (the test renderer opens several windows at once: [testing.md](testing.md#several-test-windows)).
-Until then a second window is a second renderer with its own `createRoot(renderer)` (React) or `createRoot` (Solid). The
+**`window.open`** (`js/window-open.ts`, `js/window-lifecycle.ts`; the behaviour is in
+[the reference](../reference.md#windowopen-and-the-window-object)). A renderer knows how to open a sibling of itself
+(`bindWindowOpener`): `createNativeRenderer` makes another `createNativeRenderer`, calls its `init` with the title, `fonts` and
+`focus` of the opener's and the size and place of the features, and joins it to the frame loop with the opener's `onTerminated`,
+`onError` and `frameMs` (only when the opener is in a loop; an app that ticks itself keeps ticking itself); the test
+renderer makes another `TestRenderer` and activates it. The new window's root is the adapter's: `registerWindowFactory(renderer,
+factory)` (`@ghia/native/host`) says how to mount an empty root (`html`, `head`, `body` and the node factory through
+`installElementSource`) on a renderer, and what it returns is called once when the window closes. `window.open` checks that the
+opener has an opener binding and a factory before it makes anything, and closes the window it made if the factory throws.
+The Window object is the `GpuixWindow` of the renderer, which extends `Window` (`events/window-targets.ts`: the
+members, the `on<event>` properties, and a prototype chain that falls through to the global object, so one realm's `fetch`,
+`HTMLElement` and `localStorage` are a window's too); its calls that reach outside go through `installWindowHooks`, as `matchMedia`
+does, because `window-lifecycle.ts` imports the registry that imports the window classes.
+
+**`init` from an event handler.** A window opened by `window.open` in a click or key handler is made while GPUI holds the App for
+the input. `init_macos` then opens the window on the App the dispatch holds (`with_active_window`, as `update_window_of` does for a
+read of another window), and fails with a clear error when a native call holds none; outside a handler it uses `GPUI_APP`.
+
+**Closing and the key window.** A window ends when `close()`, the user or the app's end closes it. The frame loop reports a
+window that left it (`releaseClosedWindows`, or `terminate` for all) to `windowGone(renderer)`, which fires `pagehide` and
+`unload` once (a script's `close()` already sent them with `beforeunload`), marks the window closed (`forgetWindowSource`)
+and calls the disposer the adapter's factory returned. `close()` calls the disposer before `closeWindow()`, while the native
+window is still there; for a window the user closed the disposer runs after, and `applyBatch` on a closed window applies to the tree
+only (no invalidation, no focus), so unmounting a root does not throw "window not found". The key window is native's: a view
+observes `observe_window_activation` and, while JS listens for `focus` or `blur` on `window` or `document` (the
+`setWindowEventListeners` set), sends the `windowActive` event (`window_activity.rs`, `value` "true" or "false"), which
+`renderer-state` turns into the `focus` or `blur` event of `windowOf(renderer)`. `document.hasFocus()` reads `isWindowKey()`.
+A test window is active when it opens and `setWindowActive` changes it; `TestRenderer.activateWindow()` makes it the key window
+and every other test window not. The Edit menu's command (`events/clipboard.rs`) goes to the active window, else the front window
+of the app (`window_stack`), else the only window.
+
+**Reads for the Window object.** `getScaleFactor()` (`devicePixelRatio`), `getWindowPosition()` (`screenX`, `screenY`: GPUI's
+bounds are relative to the window's display, so the display's global origin from `screen.rs` is added) and `setWindowSize(width,
+height)` (`resizeTo`, `Window::resize`, which `setContentSize`s the window) are live napi methods; the test renderer has
+`getScaleFactor` and `isWindowKey` and its own `setWindowSize`. GPUI has no call to move a window after it opens, so `moveTo`
+and `moveBy` do nothing.
+
+What several windows do not have yet is the adapters' side: `render(code, container)` (Solid) and `createRoot(container)`
+(React) into a second window's `document.body`, and the factory each registers. Until then a second window is a second renderer
+with its own `createRoot(renderer)` (React) or `createRoot` (Solid), and an app that opens windows with `window.open`
+registers the factory itself (`examples/multi-window-e2e` does, with React's `createRoot`). The test renderer opens several
+windows at once: [testing.md](testing.md#several-test-windows).
+The
 `appearance` option of a window after the first is the App's (`set_window_appearance` is the App's), and the menu bar is the
 App's; both are the platform's single-App model, not a choice here.
 

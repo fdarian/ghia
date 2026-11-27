@@ -455,9 +455,37 @@ How sheets work is in [stylesheets.md](stylesheets.md); the behaviour is in [ref
 - **One frame loop serves every window, and the first renderer decides how it polls.** `frameMs` of a later `startFrameLoop` is
   ignored; the platform is pumped once per iteration whichever renderer asks. `onTerminated` of each renderer that was in the loop
   runs once when the app ends.
-- **The JS globals are not per window yet.** `document`, `window`, `matchMedia` and the adapters' `render()` slot follow one
-  renderer ([window.md](window.md#several-windows)); a second window is made with `createRoot(renderer)` on its own renderer.
-  `window.open` is not there.
+- **The adapters' `render()` keeps one renderer yet.** A second window is made with `createRoot(renderer)` on its own renderer
+  until the adapters register a window factory ([window.md](window.md#several-windows)); `window.open` needs that factory.
+- **`window.open` does not load a document.** A browser's popup navigates to a URL; Ghia has one document and no loading, so
+  `window.open("")` (or `about:blank`) opens an empty window the app renders into, a link to another origin goes to the system
+  (`null` is returned), and any other URL throws `NotSupportedError` rather than opening an empty window the URL never filled.
+  `_self`, `_parent` and `_top` are `location.assign` of the app's one location.
+- **`location`, `history`, `localStorage` and `sessionStorage` are the app's, the same objects in every window.** A browser
+  gives each window its own `location` and session history (`sessionStorage` per browsing context). Here a `pushState` in one
+  window moves the URL of all of them, a `popstate` or `hashchange` goes to the first window only, and `storage` events do not
+  exist. `window.opener.location` and `w.location` are the same object.
+- **There is one JS realm.** `w.Array === Array`, `w.HTMLElement === HTMLElement`, and a message sent with `postMessage` is a
+  structured clone by choice, not by need (it keeps the DOM's semantics for code that mutates what it sent). A global a script
+  sets on the opener (`window.x = 1`) is not on `w`; a window object answers a name it does not define with the global object's.
+- **`postMessage`'s `source` is the window whose event is being handled.** A caller cannot be told apart in one realm, so
+  `source` is the window of the event handler that is running (the renderer that delivered it), and the first window
+  outside a handler (a timer, a promise). `origin` is always `location.origin`, and a `targetOrigin` of another origin drops the
+  message.
+- **`blur()`, `moveTo()` and `moveBy()` do nothing.** Nothing in the platform resigns the key window to another window of the
+  app, and GPUI places a window when it opens and has no call to move it. `outerWidth` and `outerHeight` are `innerWidth` and
+  `innerHeight` (the frame is not measured), `devicePixelRatio` is `1` and `screenX`, `screenY` are `0` while the window has no
+  root. A test window reports a position of `0, 0` (it is offscreen and ignores `x` and `y`).
+- **A window's `focus` and `blur` follow the platform's activity, and only for a window that listens.** `focus` and `blur` are
+  sent to `window` when it becomes or stops being the active window, produced natively only while `window` or `document` has a
+  `focus` or `blur` listener. A window with focus emulation (`GPUIX_BACKGROUND=1`) is never key and sends none, while its elements
+  still fire theirs. `document.hasFocus()` is `isWindowKey`, the platform's answer.
+- **The user's close and `close()` fire `pagehide` and `unload`, not `beforeunload` for the user's.** A browser asks `beforeunload`
+  before the user closes a tab and lets the page cancel; GPUI closes the window first and tells JS after, so a close by the
+  user cannot be stopped. `close()` fires it and ignores a cancel, as a script's close does in a browser. `visibilitychange` and
+  `pageshow` are not sent.
+- **The first window's `dispatchEvent` is the runtime's.** `window.dispatchEvent` reaches the listeners both targets hold (every
+  listener is added to both), while `dispatchEvent` of a window `window.open` made walks that window's target only.
 
 ### Window placement and displays, from Electron
 

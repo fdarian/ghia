@@ -1063,9 +1063,9 @@ startFrameLoop(b, { onTerminated: () => process.exit(0), onWindowClosed: () => c
 
 Each window has its own `document` and window target: `documentOf(renderer)` and `windowOf(renderer)` from
 `@ghia/native/host` (and `@ghia/native/testing`) give them, see [A document per window](#a-document-per-window). The global
-`document` and `window` are the first window's. What is not here yet: `window.open()`, and the adapters' `render()`, which
-keeps one renderer: a second window is made with `createRoot(renderer)` on its own renderer, see
-[window.md](./fork/window.md#several-windows).
+`document` and `window` are the first window's. `window.open()` opens one from script ([below](#windowopen-and-the-window-object));
+the adapters' `render()` keeps one renderer, so until they register a window factory a second window is made with
+`createRoot(renderer)` on its own renderer, see [window.md](./fork/window.md#several-windows).
 
 ### Window drag regions
 
@@ -5551,8 +5551,8 @@ for its window target `innerWidth`, `innerHeight`, `visualViewport`, `resize`, `
 `cancelAnimationFrame`, `getComputedStyle` and the no-op `scrollTo`, `scroll` and `scrollBy`. Two windows of one app are two
 renderers, each with its own root (`createRoot(renderer)`), and `documentOf(renderer)` and `windowOf(renderer)` from
 `@ghia/native/host` (and `@ghia/native/testing`, where a `TestRenderer` also has `.document` and `.windowTarget`) are how code
-reaches them. `window.open()` and a `Window` object for a second window are not here yet, so `documentOf(renderer).defaultView`
-is the window target and not a public `Window`.
+reaches them. The window target of a second window is its public `Window` object: `documentOf(renderer).defaultView` is it,
+and `window.open()` returns it ([below](#windowopen-and-the-window-object)).
 
 **The global `document` and `window` are the first window's,** for as long as its root is mounted. A second window that mounts
 does not take them over. When the first window closes (the user, `closeWindow()`, the app ending) they stay its own: the global
@@ -5578,6 +5578,87 @@ second window's document is the adapters' work (`render(code, container)` and `c
 
 `MutationObserver` works on any node of any window. The `location`, `history` and storage below, and the shell, are the app's,
 and `popstate` and `hashchange` go to the global window.
+
+### `window.open` and the Window object
+
+`window.open(url = "", target = "_blank", features = "")` opens a window, on the global `window` and on every `Window` object,
+as in a browser. A Ghia app has one document and no page loads, so what a window can open is a blank one that the app then
+renders into:
+
+```tsx
+const win = window.open('', 'inspector', 'width=480,height=320,left=900,top=120')
+render(() => <Inspector />, win.document.body) // Solid's render(code, container): the adapters' next slice
+```
+
+| Call | Result |
+|---|---|
+| `open()`, `open("")`, `open("about:blank")` with `_blank` | A new native window on the app, with a `document` whose `<html>`, `<head>` and `<body>` are empty, returned as a `Window`. It opens with the opener's title and `fonts`, and focused unless the opener's window was opened with `focus: false`. |
+| the same with a name (`open("", "inspector")`) | The open window of that name (compared ASCII case-insensitively, as a browser matches target names) when there is one: it is focused and returned, the features are ignored. Otherwise a new window with that `name`. `_blank` always opens a new one. |
+| `open("https://example.org/")` (`http:`, `https:`, `mailto:`, `tel:`, another origin) | Handed to the system's default handler, as a click on a link is ([the `<a>` tag](#the-a-tag)); returns `null`, and no window opens. |
+| `target` `_self`, `_parent` or `_top` | The window itself: a URL navigates it as `location.assign` does ([`location`, `history` and storage](#location-history-and-storage)), and `""` leaves it as it is. Returns the window. |
+| any other URL (this origin's, `data:`, `file:`...) | Throws a `NotSupportedError`: Ghia has no document loading, so open `""` and render into it. A URL that does not parse throws `SyntaxError`. `javascript:` does nothing and returns `null`. |
+
+**Features** are tokenized as the HTML standard does, comma or space separated and case-insensitive. `width` and `innerWidth`,
+`height` and `innerHeight` set the size of the window's content in CSS px (a value that is not a positive integer is ignored);
+`left` and `screenX`, `top` and `screenY` place its top-left corner in [the global display space](#displays) and are used only
+when both are given. `popup` is accepted and changes nothing. `noopener` and `noreferrer` open the window but return `null`
+and give it no `opener`. Any other feature is ignored.
+
+**The adapter makes the root.** A new window needs `<html>`, `<head>` and `<body>` and the node makers of the adapter that
+renders into it, and those are the adapter's. An adapter registers, for the renderer of its root, a factory that mounts an empty
+root on the renderer `window.open` made, and `window.open` of a window with no factory throws an `Error` that says so:
+
+```ts
+import { registerWindowFactory } from '@ghia/native/host'
+
+const unregister = registerWindowFactory(renderer, (opened) => {
+  const root = mountEmptyRoot(opened) // an element source with html, head and body, and the node factory
+  return () => root.unmount()         // optional: called once when the window closes
+})
+```
+
+A window a factory opened has the same factory, so its own `window.open` works. The test renderer opens test windows: a
+`TestRenderer`'s `window.open` makes another `TestRenderer` (size and title from the features and the opener) and a test
+registers the factory for its root.
+
+**The Window object** is the `GpuixWindow` of the new window's renderer (`windowOf(renderer)`); the first window's is the
+global object. `window instanceof Window` holds for both. A window has:
+
+- **Identity.** `document`, `window`, `self`, `frames`, `parent` and `top` (itself: there are no frames), `frameElement`
+  (`null`), `length` (0), `opener` (the window that opened it, `null` after `noopener` or `opener = null`; it stays when
+  the opener closes), and `name` (settable; what `open(url, name)` finds it by).
+- **State.** `closed`, `innerWidth`, `innerHeight`, `outerWidth` and `outerHeight` (the same as the inner size: the frame is
+  not measured), `screenX`, `screenY`, `screenLeft` and `screenTop` (the window's place in the global display space; `0` while it
+  has no root), `devicePixelRatio` (the display's scale factor; `1` while the window has no root), `visualViewport`.
+  `matchMedia`, `getComputedStyle`, `getSelection`, `requestAnimationFrame` and `cancelAnimationFrame` are the window's own.
+- **Actions.** `close()` fires `beforeunload`, `pagehide` and `unload` on the window and closes it (a `beforeunload` listener
+  that cancels does not keep it open, as a script's close is not stopped in a browser); `closed` is `true` at once and its
+  document is empty. `focus()` brings it forward and makes it the key window. `blur()` does nothing: nothing resigns the key
+  window to another window of the app. `resizeTo(width, height)` and `resizeBy` set the size of its content. `moveTo` and
+  `moveBy` do nothing: GPUI places a window when it opens and cannot move it after.
+- **Events.** `addEventListener`, `removeEventListener`, `dispatchEvent` and the handler properties `onresize`, `onfocus`,
+  `onblur`, `onbeforeunload`, `onpagehide`, `onpageshow`, `onunload` and `onmessage`. An event of the window's own tree
+  bubbles to that window and no other. The global object has the same members (`onmessage` where the runtime has none).
+- **`postMessage(message, targetOrigin = "/", transfer)`** (also `postMessage(message, { targetOrigin, transfer })`) clones the
+  message with `structuredClone` (a value that cannot be cloned throws `DataCloneError`) and fires a `MessageEvent` at the
+  window in a later task, with `data`, `origin` the app's origin (`location.origin`) and `source` the sending window. The windows
+  share one JS realm, so nothing else is needed to pass objects between them. A `targetOrigin` other than `"*"`, `"/"` or the
+  app's origin drops the message, and one that is not a URL throws `SyntaxError`. `source` is the window whose event is being
+  handled, and the first window outside a handler.
+- **The realm's members.** What a window does not define it answers with the global object's, because there is one realm:
+  `window.open(...).setTimeout`, `fetch`, `queueMicrotask`, `structuredClone`, `Promise`, `HTMLElement` and the other classes,
+  `localStorage`, `sessionStorage`, `location` and `history` are the same objects. `location`, `history` and storage are the app's,
+  not the window's: a `pushState` in one window moves the URL of all of them ([deviations](./fork/deviations.md#several-windows)).
+
+**Closing.** A window closes when a script calls `close()`, when the user closes it, and when the app ends. The first two fire
+`pagehide` and then `unload` on that window (`close()` fires `beforeunload` first), once, and `closed` is `true` afterwards; the
+app ending fires them on every window that is left. An opener that closes leaves the windows it opened open, as in a browser, and
+the app ends with its last window.
+
+**Focus.** `document.hasFocus()` is the platform's key window (`isWindowKey`), and a window listening for `focus` or `blur`
+(`addEventListener` or `onfocus`) hears them, with the window as `target`, when it becomes or stops being the key window; a
+window that nobody listens for costs nothing. A window opened with `GPUIX_BACKGROUND=1` ([Let an agent drive the app](#let-an-agent-drive-the-app))
+emulates focus for its elements and is never key, so `hasFocus()` is `false` and no window `focus` or `blur` is sent there.
 
 ### `location`, `history` and storage
 

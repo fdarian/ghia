@@ -8,7 +8,7 @@ import { EDIT_INPUT_EVENT, endCompositionOnBlur, runNativeEditInput } from "./ed
 import { EDIT_POINTER_EVENT, runEditingPointer } from "./editing/pointer-selection.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { popoversOfRendererGone } from "./dom/popover.js"
-import { elementOf, GpuixEventTarget, trackFocusedElement, windowOf } from "./events/window-target.js"
+import { elementOf, GpuixEventTarget, knownWindowOf, trackFocusedElement, windowOf } from "./events/window-target.js"
 import type { GpuixWindow } from "./events/window-targets.js"
 import { deliverObservation } from "./observers.js"
 import type {
@@ -561,8 +561,14 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
   // The handlers of an event run as the window it happened in: `postMessage` names it as the sender.
   const dispatchEvent = state.dispatch
   const dispatchSyncEvent = state.dispatchSync
-  state.dispatch = (received) => runAsIncumbent(windowOf(renderer), () => dispatchEvent(received))
-  state.dispatchSync = (received) => runAsIncumbent(windowOf(renderer), () => dispatchSyncEvent(received))
+  state.dispatch = (received) => {
+    const window = knownWindowOf(renderer)
+    return window === undefined ? dispatchEvent(received) : runAsIncumbent(window, () => dispatchEvent(received))
+  }
+  state.dispatchSync = (received) => {
+    const window = knownWindowOf(renderer)
+    return window === undefined ? dispatchSyncEvent(received) : runAsIncumbent(window, () => dispatchSyncEvent(received))
+  }
   allStates().set(renderer, state)
   return state
 }
