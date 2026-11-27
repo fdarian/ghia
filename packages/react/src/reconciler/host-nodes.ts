@@ -105,6 +105,11 @@ export function stateFor(node: HostNode | HostFragment): HostNodeState {
   return state
 }
 
+/** An element React made: what `ref`, `document.body` and `createRoot(container)` hand around. */
+export function isHostInstance(value: unknown): value is Instance {
+  return typeof value === "object" && value !== null && "elementType" in value && hostNodeStates.has(value as HostNode)
+}
+
 export function containerFor(node: HostNode): Container {
   return stateFor(node).container
 }

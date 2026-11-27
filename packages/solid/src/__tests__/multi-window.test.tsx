@@ -5,8 +5,8 @@
 import { createSignal, onCleanup, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { render } from "../index.js"
-import { createTestRoot, hasNativeTestRenderer, type TestRenderer } from "../testing.js"
+import { render, resetRender } from "../index.js"
+import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
 
 const settle = async (...renderers: TestRenderer[]) => {
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -160,5 +160,25 @@ describe.skipIf(!hasNativeTestRenderer)("Solid in another window", () => {
     dispose()
     await settle(app.renderer)
     expect(app.renderer.getAllText()).toEqual([])
+  })
+
+  it("keeps a root for each renderer render() is given, and remounts on the same renderer", async () => {
+    const first = new TestRenderer({ width: 200, height: 100 })
+    const second = new TestRenderer({ width: 200, height: 100 })
+    try {
+      render(() => <div>first</div>, { renderer: first })
+      render(() => <div>second</div>, { renderer: second })
+      await settle(first, second)
+      expect(first.getAllText()).toEqual(["first"])
+      expect(second.getAllText()).toEqual(["second"])
+      render(() => <div>first again</div>, { renderer: first })
+      await settle(first, second)
+      expect(first.getAllText()).toEqual(["first again"])
+      expect(second.getAllText()).toEqual(["second"])
+    } finally {
+      resetRender()
+      first.dispose()
+      second.dispose()
+    }
   })
 })
