@@ -106,7 +106,10 @@ impl GpuixView {
             settled_tapes.settle_rows(window.window_handle().window_id());
             crate::renderer::list_writes_drawn(window.window_handle().window_id());
             if let Some(view) = settled_view.upgrade().filter(|view| !view.is_updating(cx)) {
-                view.update(cx, |view, _| view.forget_left_rows());
+                view.update(cx, |view, _| {
+                    view.forget_left_rows();
+                    view.note_scrolls_translated();
+                });
             }
             // A translate under a wheel leaves the hover where it was: it follows when the scroll ends.
             if hover.follows_translate(window.window_handle().window_id()) {

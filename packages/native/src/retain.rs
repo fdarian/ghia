@@ -1936,6 +1936,12 @@ impl Retain {
         Compared { all, changed, scroll_ids, scrolled, scrolling, scrolls, customs }
     }
 
+    /// A frame moved the content of a scroller in place, which builds nothing: the offsets it left are what the frame
+    /// shown has, so a tick or a build after it does not find the scroller moved again (`Unpatchable::Sourced`).
+    pub(crate) fn note_scrolls_translated(&mut self, scrolls: &HashMap<u64, gpui::ScrollHandle>) {
+        self.seen.scrolls = scroll_bits(scrolls);
+    }
+
     /// Whether something differs from the frame shown that a frame that only moves the content of a scroller would
     /// leave as it was: a source `compute_deltas` finds for a tick (a press, the focus, a selection, a custom
     /// element), a measurement, a link, a command or a hover restyled by paint that no frame has drawn. The scroll of
@@ -6596,6 +6602,23 @@ mod tests {
         page.scrolls[&3].set_offset(gpui::point(gpui::px(0.0), gpui::px(-40.0)));
         page.page(&[], None, None);
         assert!(page.retain.deltas.scrolled.contains(&3), "its first scroll is the change");
+    }
+
+    #[test]
+    fn a_scroller_whose_content_a_frame_moved_in_place_is_where_the_next_frame_finds_it() {
+        let mut page = Units::new();
+        page.scrolls.insert(2, gpui::ScrollHandle::new());
+        page.page(&[], Some(true), None);
+        page.page(&[], Some(true), None);
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
+        // A wheel moves the content and a frame that builds nothing shows it.
+        page.scrolls[&2].set_offset(gpui::point(gpui::px(0.0), gpui::px(-40.0)));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Sourced), "the frame shown has the scroller where it was");
+        page.retain.note_scrolls_translated(&page.scrolls);
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the scroll is the frame shown's now");
+        // The offset that moves again is a change again.
+        page.scrolls[&2].set_offset(gpui::point(gpui::px(0.0), gpui::px(-80.0)));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Sourced));
     }
 
     #[test]

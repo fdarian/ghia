@@ -31,24 +31,50 @@ const ROW_WIDTH = 150
 const TIMEOUT = 120_000
 const VSYNC = 16
 
+/** `transform`: TanStack Virtual's rows, absolute at the top of the box that holds them and moved by a `translateY`. */
+type Layout = "absolute" | "flow" | "transform"
+
 type Log = { scrolls: number[][]; clicks: number[] }
 
-function Page({ log, layout, bar }: { log: Log; layout: "absolute" | "flow"; bar: boolean }) {
-  const rows = Array.from({ length: COUNT }, (_, index) => (
+/**
+ * `hover`: each row takes another background under the pointer. `count`: how many rows the page has. `rich`: rows as the mailbox of
+ * ghia-bench makes them, with positioned boxes in each (an avatar, a column of two lines that an ellipsis cuts): what a row hands to the
+ * stacking context of its own is not painted where its parent's children are.
+ */
+type Options = { hover?: boolean; count?: number; rich?: boolean }
+
+function Page({ log, layout, bar, hover, rich, count = COUNT }: { log: Log; layout: Layout; bar: boolean } & Options) {
+  const rows = Array.from({ length: count }, (_, index) => (
     <div
       key={index}
       testId={`row-${index}`}
       onClick={() => log.clicks.push(index)}
       style={{
-        position: layout === "absolute" ? "absolute" : undefined,
-        top: layout === "absolute" ? index * ROW : undefined,
+        position: layout === "flow" ? undefined : "absolute",
+        top: layout === "absolute" ? index * ROW : layout === "transform" ? 0 : undefined,
+        ...(layout === "transform" ? { transform: `translateY(${index * ROW}px)` } : {}),
         width: ROW_WIDTH,
         height: ROW,
         flexShrink: 0,
+        ...(rich ? { borderBottomWidth: 1, borderBottomStyle: "solid", borderBottomColor: "#445566", userSelect: "none" } : {}),
         backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
+        ...(hover ? { hover: { backgroundColor: "#664422" } } : {}),
       }}
     >
-      <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
+      {rich ? (
+        <>
+          <div style={{ position: "absolute", left: 4, top: 4, width: 12, height: 12, borderRadius: 6, backgroundColor: "#2563eb" }} />
+          <div style={{ position: "absolute", left: 130, top: 8, width: 16, height: 16, borderRadius: 8, backgroundColor: "#7c3aed", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ color: "#ffffff", fontSize: 9 }}>AB</div>
+          </div>
+          <div style={{ position: "absolute", left: 20, top: 2, right: 4, display: "flex", flexDirection: "column" }}>
+            <div style={{ color: "#ffffff", height: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{`row-${index} a sender with a long name`}</div>
+            <div style={{ color: "#aaaaaa", height: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{`the subject of row ${index}, which is long`}</div>
+          </div>
+        </>
+      ) : (
+        <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
+      )}
     </div>
   ))
   return (
@@ -57,8 +83,8 @@ function Page({ log, layout, bar }: { log: Log; layout: "absolute" | "flow"; bar
       onScroll={(event) => log.scrolls.push([event.scrollLeft, event.scrollTop])}
       style={{ width: 200, height: VIEWPORT, overflowY: "auto", scrollbarWidth: bar ? undefined : "none" }}
     >
-      {layout === "absolute" ? (
-        <div testId="inner" style={{ position: "relative", width: "100%", height: COUNT * ROW }}>
+      {layout !== "flow" ? (
+        <div testId="inner" style={{ position: "relative", width: "100%", height: count * ROW }}>
           {rows}
         </div>
       ) : (
@@ -68,12 +94,12 @@ function Page({ log, layout, bar }: { log: Log; layout: "absolute" | "flow"; bar
   )
 }
 
-function open(translate: boolean, layout: "absolute" | "flow", bar = false) {
+function open(translate: boolean, layout: Layout, bar = false, options: Options = {}) {
   const log: Log = { scrolls: [], clicks: [] }
   const root = createTestRoot({ width: 300, height: 200 })
   const renderer = root.renderer
   renderer.clockPause()
-  root.render(<Page log={log} layout={layout} bar={bar} />)
+  root.render(<Page log={log} layout={layout} bar={bar} {...options} />)
   for (let frame = 0; frame < 3; frame++) {
     renderer.flush()
     renderer.dispatchNativeEvents()
@@ -130,7 +156,7 @@ function seen(renderer, points: Array<[number, number]>) {
 }
 
 /** The steps run on a page with the translate on or off; each is seen after. */
-function run(translate: boolean, layout: "absolute" | "flow", steps: number[], points: Array<[number, number]>, bar = false) {
+function run(translate: boolean, layout: Layout, steps: number[], points: Array<[number, number]>, bar = false) {
   const { renderer, unmount, log } = open(translate, layout, bar)
   try {
     // A wheel and its way back record the rows, put them elsewhere and show the bar.
@@ -286,4 +312,154 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
     expect(on.counters.held.A11y).toBeGreaterThan(0)
     expect(on.picture).toEqual(off.picture)
   })
+
+  // The pointer is over the rows, which take a hover colour; each wheel step carries it over another row border or stays in the row,
+  // and the scroll ends on another row than the one it began on.
+  const crossing = [15, 15, -5, 15, 15, 15, 5]
+  const pointer = [20, 60] as const
+  const hits: Array<[number, number]> = [[20, 10], [20, 50], [pointer[0], pointer[1]], [100, 99]]
+
+  const sourced = (renderer) => JSON.parse(renderer.getPatchCounters().unpatchable).Sourced ?? 0
+
+  /** The page after each wheel step under a pointer that stays, and after the scroll has ended and the hover has followed. */
+  function underStill(translate: boolean, layout: Layout) {
+    const { renderer, unmount, log } = open(translate, layout, false, { hover: true, rich: layout === "transform" })
+    try {
+      renderer.nativeSimulateMouseMove(...pointer)
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      renderer.drawFrame()
+      tick(renderer, 4, pointer[0])
+      tick(renderer, -4, pointer[0])
+      log.scrolls.length = 0
+      const translated: boolean[] = []
+      const frames: unknown[] = []
+      for (const step of crossing) {
+        const patched = scroll(renderer).patched
+        tick(renderer, step, pointer[0])
+        translated.push(scroll(renderer).patched > patched)
+        frames.push(seen(renderer, hits))
+      }
+      const during = scroll(renderer)
+      renderer.advanceTime(500)
+      renderer.dispatchNativeEvents()
+      for (let frame = 0; frame < 3; frame++) renderer.drawFrame()
+      return { translated, frames, during, ended: seen(renderer, hits), log }
+    } finally {
+      unmount()
+    }
+  }
+
+  for (const layout of ["absolute", "transform"] as const) {
+    unverified(`moves ${layout} rows under a pointer that stays by translates, and follows the hover when the scroll ends`, () => {
+      const on = underStill(true, layout)
+      const off = underStill(false, layout)
+      expect(on.translated, "every step is a translate, the steps that cross a row border included").toEqual(crossing.map(() => true))
+      expect(on.during.held.Hover ?? 0, "a pointer that did not move holds nothing").toBe(0)
+      expect(on.during.mispredicted).toBe(0)
+      // The picture, the boxes and what is under the points are those of the frames built whole, while the wheel goes on and when it ends.
+      expect(on.frames).toEqual(off.frames)
+      expect(on.ended).toEqual(off.ended)
+      expect(on.ended.picture, "the hover moved to the row now under the pointer").not.toEqual(on.frames.at(-1).picture)
+      expect(on.log.scrolls).toEqual(off.log.scrolls)
+    })
+  }
+
+  unverified("does not decline the tick after translates for the scroll they made", () => {
+    const { renderer, unmount } = open(true, "absolute", false, { hover: true })
+    try {
+      renderer.nativeSimulateMouseMove(...pointer)
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      renderer.drawFrame()
+      tick(renderer, 4, pointer[0])
+      tick(renderer, -4, pointer[0])
+      for (const step of [15, 15, 15]) tick(renderer, step, pointer[0])
+      expect(scroll(renderer).patched).toBeGreaterThanOrEqual(3)
+      const declined = sourced(renderer)
+      // The pointer moves to another row: a tick, drawn after frames that moved the content without building it. The frame shown has
+      // the scroller where those left it, so the scroll is not a source of the tick.
+      renderer.nativeSimulateMouseMove(20, 20)
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      expect(sourced(renderer) - declined).toBe(0)
+    } finally {
+      unmount()
+    }
+  })
+
+  it("draws the rows under a pointer that stays as the build does, under the verifier", () => {
+    if (!verifying) return
+    for (const layout of ["absolute", "transform"] as const) {
+      const { renderer, unmount } = open(true, layout, false, { hover: true, rich: layout === "transform" })
+      try {
+        renderer.nativeSimulateMouseMove(...pointer)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        tick(renderer, 4, pointer[0])
+        tick(renderer, -4, pointer[0])
+        for (const step of crossing) tick(renderer, step, pointer[0])
+        renderer.advanceTime(500)
+        renderer.dispatchNativeEvents()
+        for (let frame = 0; frame < 3; frame++) renderer.drawFrame()
+        expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
+      } finally {
+        unmount()
+      }
+    }
+  })
+
+  /**
+   * A wheel step that has a row come into the scroller in the same frame, as TanStack Virtual's commit makes one (its scroll handler
+   * renders the row the new offset needs), then wheel steps of their own: the frame after the row came in is the frame shown, and the
+   * next step moves it.
+   */
+  function appended(translate: boolean, layout: Layout) {
+    const { renderer, unmount, log, render } = open(translate, layout, false, { count: 5, rich: true })
+    try {
+      tick(renderer, 4)
+      tick(renderer, -4)
+      const translated: boolean[] = []
+      const frames: unknown[] = []
+      let count = 5
+      for (const [index, step] of [3, 5, 8, -4, 9, 7].entries()) {
+        const before = scroll(renderer).patched
+        if (index === 0 || index === 3) {
+          renderer.clockAdvance(VSYNC)
+          renderer.advanceTime(VSYNC)
+          renderer.nativeSimulateScrollWheel(180, 60, 0, step)
+          renderer.dispatchNativeEvents()
+          count += 1
+          render(<Page log={log} layout={layout} bar={false} count={count} rich />)
+          renderer.drawFrame()
+        } else {
+          tick(renderer, step)
+          translated.push(scroll(renderer).patched > before)
+        }
+        frames.push(seen(renderer, [[20, 10], [20, 50], [100, 99]]))
+      }
+      return { translated, frames, counters: scroll(renderer), log }
+    } finally {
+      unmount()
+    }
+  }
+
+  // The rows are the mailbox's: each is a stacking context of its own (a transform) that its positioned boxes are handed to.
+  unverified("moves rows by translates from the tick after a row came into the scroller", () => {
+    const on = appended(true, "transform")
+    const off = appended(false, "transform")
+    expect(on.counters.held["NotRelocatable.unrooted"], "what a row built in the frame hands to its own context is the row's").toBe(0)
+    expect(on.translated, "every step that brings no row is a translate").toEqual([true, true, true, true])
+    expect(on.counters.mispredicted).toBe(0)
+    expect(on.frames).toEqual(off.frames)
+    expect(on.log.scrolls).toEqual(off.log.scrolls)
+  })
+
+  it("draws the same after a row came into the scroller under the verifier", () => {
+    if (!verifying) return
+    const on = appended(true, "transform")
+    const off = appended(false, "transform")
+    expect(on.frames).toEqual(off.frames)
+  })
+
 })
