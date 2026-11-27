@@ -187,6 +187,8 @@ function calls(r, ids) {
     hasPointerCapture: () => r.hasPointerCapture(ids.box, 1),
     isMotionValueAnimating: () => r.isMotionValueAnimating(910),
     jumpMotionValue: () => r.jumpMotionValue(910, 2),
+    openUrl: () => r.openUrl("https://example.com/handler-calls"),
+    openedUrls: () => r.openedUrls(),
     pauseAnimation: () => r.pauseAnimation(r.getAnimations(ids.box)[0].id),
     finishAnimation: () => r.finishAnimation(r.getAnimations(ids.box)[0].id),
     reverseAnimation: () => r.reverseAnimation(r.getAnimations(ids.box)[0].id),
