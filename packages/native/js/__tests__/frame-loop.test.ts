@@ -45,11 +45,12 @@ describe("startFrameLoop on a platform with display-link wakes", () => {
       return true
     })
     const loop = startFrameLoop(renderer)
+    await nextImmediate()
     renderer.wake?.()
     renderer.wake?.()
     renderer.wake?.()
     await nextImmediate()
-    expect(ticks).toBe(1)
+    expect(ticks).toBe(2)
     loop.stop()
   })
 
@@ -138,10 +139,11 @@ describe("startFrameLoop on a platform with display-link wakes", () => {
       throw new Error("boom")
     })
     const loop = startFrameLoop(renderer, { onError: (error) => errors.push(error) })
+    await nextImmediate()
     renderer.wake?.()
     await nextImmediate()
     loop.stop()
-    expect(errors.length).toBe(1)
+    expect(errors.length).toBe(2)
   })
 
   it("keeps polling with a timer when frameMs is set", async () => {
@@ -232,6 +234,9 @@ describe("startFrameLoop without display-link wakes", () => {
       },
     }
     const loop = startFrameLoop(renderer)
+    await nextImmediate()
+    // The wake's tick runs after the frame call's immediate (it is scheduled behind it) and does not queue a second one.
+    renderer.wake?.()
     await nextImmediate()
     await nextImmediate()
     loop.stop()

@@ -723,9 +723,10 @@ Nothing slow goes before the window on the main thread. The `<img>` HTTP client 
 - gpuix `packages/native/js/__tests__/frame-loop.test.ts` runs the loop against a fake renderer: the first tick as its own
   task (after the code that follows `startFrameLoop` and the microtasks queued before it, in the same frame as a mutation
   made right after the call) and a tick on every wake, teardown, termination, tick errors, and timer polling. An idle wake
-  loop ticks once at start and then never, and ticks once per wake and not in between. `frame-loop-yields.test.ts` (2) runs the real loop against a hidden
-  window with synthetic wakes from a Rust thread (`simulateFrameWakes`, `setTickDelay`, test-support builds only) and
-  checks that timers and file reads keep running when every frame outlasts a vsync.
+  loop ticks once at start and then never, and ticks once per wake and not in between. `frame-loop-yields.test.ts` (2)
+  runs the real loop against a hidden window with synthetic wakes from a Rust thread (`simulateFrameWakes`,
+  `setTickDelay`, test-support builds only) and checks that timers and file reads keep running when every frame outlasts
+  a vsync.
 - `packages/native/examples/quit-e2e` ([testing.md](testing.md#the-quit-e2e)) asks a real idle app to quit four ways and checks
   that `onTerminated` ran and the process ended; the zed side is `gpui_macos` `tests/main_run_loop_wakeups.rs`.
 - react `events.test.tsx` "wakes JS once per mouse move, not again when the frame boundary comes" opens a visible window

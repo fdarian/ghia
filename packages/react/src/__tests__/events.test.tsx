@@ -934,6 +934,8 @@ describe("frame loop", () => {
         "const ticksIdle = await ticksInLastWindow(15)",
         "first.stop()",
         "const second = startFrameLoop(host)",
+        // The first tick is its own task; let it run so the wake below is tested on its own.
+        "await new Promise((resolve) => setImmediate(resolve))",
         "first.stop()",
         "const clearsBeforeWake = clears",
         "const ticksBeforeWake = ticks",
