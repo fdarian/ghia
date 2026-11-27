@@ -120,6 +120,8 @@ describeNative("the text input of an editing host (React)", () => {
 
   it("types in frames that replay the host and in frames that are patches of its paragraph", () => {
     const { host, renderer, rerender } = mount(["aa", "bb", "cc"])
+    // Exercises the fallback: a caret the window cannot blink (composed window, effect group) is painted and ticked by the page.
+    renderer.setPaintedCarets(true)
     renderer.simulateKeystrokes("x y")
     expect(host.firstChild!.textContent).toBe("aaxy")
     // Another part of the page changes: the host is replayed, not built.

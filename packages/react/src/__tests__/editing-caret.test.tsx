@@ -336,6 +336,8 @@ describeNative("the caret of an editing host (React)", () => {
     counted("blinks in patched frames that build the paragraph that holds the caret and nothing else", async () => {
       const lines = Array.from({ length: 40 }, (_, index) => `paragraph number ${index}`)
       const { texts, renderer } = await focused(lines)
+      // Exercises the fallback: a caret the window cannot blink (composed window, effect group) is painted and ticked by the page.
+      renderer.setPaintedCarets(true)
       document.getSelection().collapse(texts[5]!, 4)
       await shown(renderer)
       await shown(renderer)

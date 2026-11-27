@@ -333,7 +333,7 @@ export const scenarios: Scenario[] = [
     prepare(session) {
       settle(session)
       return {
-        // GPUI's clock advances too, so the focused input's caret blinks inside the span.
+        // GPUI's clock advances too; the window blinks the focused input's caret on a layer, so the frames do no work.
         run() {
           for (let i = 0; i < STEPS; i++) {
             session.renderer.advanceTime(IDLE_MS / STEPS)

@@ -1015,6 +1015,19 @@ export declare class TestGpuixRenderer {
    */
   setA11yActive(active: boolean): void
   /**
+   * Treats every caret as one the window cannot blink, as a composed window does: the caret is
+   * painted in the phase it is in and its painter ticks. Tests of that fallback (the patch frames
+   * of a blink) turn it on; with it off the window blinks the caret itself.
+   */
+  setPaintedCarets(enabled: boolean): void
+  /**
+   * Whether the last presented frame shows a caret on the platform's layer, where the compositor
+   * blinks it.
+   */
+  getCaretOnLayer(): boolean
+  /** Whether the last presented frame shows a caret that its painter has to tick. */
+  getCaretNeedsTicks(): boolean
+  /**
    * How many subtrees the window has skipped as lying outside their clip, over its life: the
    * work `getPaintedFrameCount` frames did not do. A test compares it before and after a frame.
    */

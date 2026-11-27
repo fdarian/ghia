@@ -1089,6 +1089,12 @@ async function focusProbe(renderer) {
   wholeFrame(renderer)
 }
 
+/** Focuses the probe with the caret as a window that cannot blink it has it (a composed window, an effect group around it): the page paints the phase it is in and ticks at each change, which is the path these tests exercise. A window that can blink it does so with no frame of the page. */
+async function focusPaintedProbe(renderer) {
+  renderer.setPaintedCarets(true)
+  await focusProbe(renderer)
+}
+
 /** A frame built whole: the view is told, as a commit does. */
 function wholeFrame(renderer) {
   renderer.flush()
@@ -1242,7 +1248,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
       const page = await mount(blinking("some text"), nodes)
       try {
         const renderer = page.renderer
-        await focusProbe(renderer)
+        await focusPaintedProbe(renderer)
         wholeFrame(renderer)
         const before = renderer.getPatchCounters()
         const done: Work[] = []
@@ -1286,7 +1292,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
       const page = await mount(head, 500)
       try {
         const renderer = page.renderer
-        await focusProbe(renderer)
+        await focusPaintedProbe(renderer)
         wholeFrame(renderer)
         const before = renderer.getPatchCounters()
         const done: Work[] = []
@@ -1324,7 +1330,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
           const page = await mount(head, 500)
           try {
             const renderer = page.renderer
-            await focusProbe(renderer)
+            await focusPaintedProbe(renderer)
             wholeFrame(renderer)
             if (scrolled) {
               scroll(renderer)
@@ -1372,7 +1378,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
       const renderer = page.renderer
       renderer.scrollTo(renderer.findByTestId("list")!.id, 0, 90)
       wholeFrame(renderer)
-      await focusProbe(renderer)
+      await focusPaintedProbe(renderer)
       wholeFrame(renderer)
       const same = (name: string) => {
         const patched = shot(renderer, `list-${name}-patched`)
@@ -1410,7 +1416,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
     )
     try {
       const renderer = page.renderer
-      await focusProbe(renderer)
+      await focusPaintedProbe(renderer)
       wholeFrame(renderer)
       let last: Buffer | undefined
       for (let step = 0; step < 6; step++) {
@@ -1438,7 +1444,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
       const page = await mount(withProbe(blinking("some text")), 500)
       try {
         const renderer = page.renderer
-        if (focused) await focusProbe(renderer)
+        if (focused) await focusPaintedProbe(renderer)
         wholeFrame(renderer)
         wholeFrame(renderer)
         const before = renderer.getPatchCounters()
@@ -1492,7 +1498,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
       const idle = (what: string) => {
         for (let index = 0; index < 4; index++) expect(frames(work(renderer, () => renderer.advanceTime(500))), `${what}, 500 ms ${index}`).toBe(0)
       }
-      await focusProbe(renderer)
+      await focusPaintedProbe(renderer)
       wholeFrame(renderer)
       wholeFrame(renderer)
       expect(frames(work(renderer, () => renderer.advanceTime(500))), "in view").toBe(1)
@@ -1515,7 +1521,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
     const page = await mount(<div style={{ width: 10, height: 10 }} />, 500, false, <input testId="probe" style={probeStyle} />)
     try {
       const renderer = page.renderer
-      await focusProbe(renderer)
+      await focusPaintedProbe(renderer)
       wholeFrame(renderer)
       wholeFrame(renderer)
       for (let index = 0; index < 4; index++) expect(frames(work(renderer, () => renderer.advanceTime(500))), `500 ms ${index}`).toBe(0)
@@ -1528,7 +1534,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
     const page = await mount(withProbe(blinking("some text")), 500)
     try {
       const renderer = page.renderer
-      await focusProbe(renderer)
+      await focusPaintedProbe(renderer)
       wholeFrame(renderer)
       wholeFrame(renderer)
       for (let phase = 0; phase < 3; phase++) {
@@ -1554,7 +1560,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
       const id = renderer.findByTestId("probe").id
       wholeFrame(renderer)
       for (let index = 0; index < 4; index++) expect(work(renderer, () => renderer.advanceTime(500)).paintedFrames, "idle").toBe(0)
-      await focusProbe(renderer)
+      await focusPaintedProbe(renderer)
       wholeFrame(renderer)
       wholeFrame(renderer)
       expect(work(renderer, () => renderer.advanceTime(500)).patchedFrames, "focused").toBe(1)
@@ -1594,7 +1600,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
         return patched
       }
       const idle = same("idle")
-      await focusProbe(renderer)
+      await focusPaintedProbe(renderer)
       wholeFrame(renderer)
       wholeFrame(renderer)
       const lit = same("lit")
@@ -1632,7 +1638,7 @@ describeNative("the caret of a focused input", { timeout: TIMEOUT }, () => {
     try {
       const renderer = page.renderer
       const id = renderer.findByTestId("probe").id
-      await focusProbe(renderer)
+      await focusPaintedProbe(renderer)
       const steps = ["h e l l o", "Shift+ArrowLeft Shift+ArrowLeft", "ArrowLeft", "Meta+a", "Backspace", "w o r l d Meta+z", "Meta+Shift+z"]
       let previous: Buffer | undefined
       for (const [index, keys] of steps.entries()) {
