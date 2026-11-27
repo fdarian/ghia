@@ -2858,24 +2858,6 @@ impl Retain {
         }
     }
 
-    pub(crate) fn dynamic_is_empty(&self) -> bool {
-        self.dynamic.is_empty()
-    }
-
-    /// Whether something runs in the patch root `root`: an element below it, or it, among the dynamic ones.
-    pub(crate) fn runs_in_root(&self, tree: &crate::retained_tree::RetainedTree, root: u64) -> bool {
-        self.dynamic.keys().any(|&id| {
-            let mut at = Some(id);
-            while let Some(up) = at {
-                if up == root {
-                    return true;
-                }
-                at = tree.elements.get(&up).and_then(|element| element.parent);
-            }
-            false
-        })
-    }
-
     /// Whether a tick that finds `sources` can be drawn by building again the units that hold what
     /// changed, and which they are (by element id, in the order the last frame built them). It
     /// can when, since the last frame that was built whole, nothing but time changed (the animations

@@ -744,10 +744,13 @@ for what a hover started. A frame built whole that finds such a run does not giv
 transitions that only paint (`Node::runs_a_paint_transition`, `Below::busy`; not a run of an opacity or a transform) and is still
 recorded as one while they run (`recording_as`), where any other motion in a root is a reason to build it again and record nothing.
 Not in a scroller (`Node::holds_only_a_run_a_patch_follows`): a scroll moves what a scroller holds without a build, so a row of a list or
-a scroll container that is built by a frame while it runs stays a unit or a frame built whole, as before; a patch root a scroll
-moved since it was built, with a run in it, is declined (`RunningMoved`): the patch paints what the clip culls and the frame built
-whole does not. Without that a whole frame
-inside a run would build the root as one that holds nothing it can patch and leave the run's ticks without a unit.
+a scroll container that is built by a frame while it runs stays a unit or a frame built whole, as before. A patch does not leave a run
+where a frame built whole would not record one: a patch root inside a scroller (`ScratchUnit::in_scroller`, the row of a `<virtual-list>`
+or of a scroll container) whose build finds a transition running is declined (`RunningInScroller`, in `unpatchable`) and the frame is
+built whole, for a hover and a commit alike. The verifier has no recorded root to compare such a patch with, and a tick of the run
+would paint what a scroll moved from where the build left it. A patch root outside a scroller is not moved by one, so a patch of it
+needs no such rule. Where a root outside a scroller holds its run, a whole frame inside the run still records the root, so the
+run's ticks have a unit.
 
 - **`hasHover`.** An ancestor whose `:has(:hover)` state changed is named when its `hasHover` refinement paints only.
 - **A group is `Whole`.** An element that declares a group (`group`) restyles its followers, which may be anywhere below it, and

@@ -9821,6 +9821,7 @@ impl GpuixView {
         self.note_pass(window);
         let mut env = self.retain.unit(id)?.env.clone();
         env.start.now = now;
+        let in_scroller = env.start.scroller.is_some();
         let doc = env.start.doc_path();
         let effects = crate::tape::build_effects_len();
         let tree_arc = self.tree.clone();
@@ -9853,6 +9854,7 @@ impl GpuixView {
             element: crate::tape::Taped::new(element, tape.clone()).into_any_element(),
             tape,
             dynamic,
+            in_scroller,
         })
     }
 
@@ -10346,6 +10348,8 @@ pub(crate) struct ScratchUnit {
     /// What running was found on the elements the build made (`Retain::take_unrecorded_dynamic`), for the patch that
     /// draws it to hand to `Retain::land_patch`.
     pub dynamic: Vec<(u64, u8)>,
+    /// Whether the root is inside a scroller a scroll can move.
+    pub in_scroller: bool,
 }
 
 /// Whether an element can be left alone while nobody sees it, see `retain::Sources::dormant`.

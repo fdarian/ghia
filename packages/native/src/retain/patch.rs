@@ -288,19 +288,6 @@ impl GpuixView {
                 return None;
             }
         }
-        // A root that a scroll moved since it was built, with a run in it: the patch paints the root where the scroll put it,
-        // and what the scroll took out of the clip is painted by a patch and left out by a frame built whole. The frame built
-        // whole finds the root culled, and what runs in it dormant.
-        if !self.retain.dynamic_is_empty() {
-            let tree = self.tree.lock().unwrap();
-            let moved = |id: &u64| {
-                self.retain.is_patch_root(*id) && self.moved_since_built_in(&tree, *id) != gpui::Point::default() && self.retain.runs_in_root(&tree, *id)
-            };
-            if ids.iter().any(moved) {
-                self.patch.decline(key("RunningMoved".to_owned()));
-                return None;
-            }
-        }
         Some(ids)
     }
 
@@ -328,6 +315,13 @@ impl GpuixView {
                 self.patch.decline("NotAUnit".to_owned());
                 return None;
             };
+            // A frame built whole records no run in a scroller (`Node::holds_only_a_run_a_patch_follows`), so a patch that
+            // left one in a root there would be a frame the verifier finds no root to compare with, and its ticks would
+            // paint what a scroll moved from where the build left it. The frame is built whole instead.
+            if unit.in_scroller && unit.dynamic.iter().any(|&(_, bits)| bits & super::Dynamic::Transition as u8 != 0) {
+                self.patch.decline("RunningInScroller".to_owned());
+                return None;
+            }
             tapes.push((id, unit.tape));
             units.push((unit.id, unit.element));
             // A patch root holds the runs that a hover or a commit started in it and that no frame found, so what it
@@ -405,10 +399,6 @@ impl GpuixView {
     /// moved the row and not the root's own recording.
     fn moved_since_built(&self, id: u64) -> gpui::Point<gpui::Pixels> {
         let tree = self.tree.lock().unwrap();
-        self.moved_since_built_in(&tree, id)
-    }
-
-    fn moved_since_built_in(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> gpui::Point<gpui::Pixels> {
         let mut at = Some(id);
         while let Some(up) = at {
             let moved = self.tapes.moved(up);

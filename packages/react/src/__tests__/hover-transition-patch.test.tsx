@@ -391,7 +391,11 @@ async function played(layout: Layout, play: (renderer, snap: Snap) => void) {
     try {
       const pictures: string[] = []
       play(renderer, (name) => pictures.push(picture(renderer, `${layout}-${patch}-${name}`)))
-      results.push({ pictures, mismatches: renderer.getRetainedCounters().mismatches })
+      results.push({
+        pictures,
+        mismatches: renderer.getRetainedCounters().mismatches,
+        unpatchable: JSON.parse(renderer.getPatchCounters().unpatchable) as Record<string, number>,
+      })
     } finally {
       root.unmount()
     }
@@ -508,10 +512,36 @@ describeNative("a colour transition that runs in a root that a patch builds", { 
     )
   })
 
-  // The verifier reports a patched tick of a root that the frame built whole does not record (a run in a scroller is not recorded, see
-  // `Node::holds_only_a_run_a_patch_follows`) for every hover that starts a colour transition in a list row, with or without the frame
-  // built whole in the middle of the run, so the two cases of a list skip there.
-  unverified("shows what patching off shows for a run in the rows of a scroller, with a frame built whole in the middle of it", async () => {
+  // A run in a root inside a scroller is not recorded by a frame built whole (`Node::holds_only_a_run_a_patch_follows`), so a patch
+  // that would start one is declined (`RunningInScroller`) and the frame is built whole.
+  it("builds the hover that starts a colour transition in the rows of a scroller whole, and shows what patching off shows", async () => {
+    const shown = await played("list", (renderer, snap) => {
+      hover(renderer)
+      snap("hovered")
+      elapse(renderer, FRAME * 4)
+      snap("after-4")
+      elapse(renderer, FRAME * 14)
+      snap("end")
+    })
+    sameAsOff(shown)
+    expect(shown.on.unpatchable.RunningInScroller, "the hover").toBeGreaterThanOrEqual(1)
+    expect(shown.off.unpatchable.RunningInScroller).toBeUndefined()
+  })
+
+  it("builds the commit that starts a colour transition in the rows of a scroller whole, and shows what patching off shows", async () => {
+    const shown = await played("list", (renderer, snap) => {
+      commit(renderer)
+      snap("committed")
+      elapse(renderer, FRAME * 4)
+      snap("after-4")
+      elapse(renderer, FRAME * 14)
+      snap("end")
+    })
+    sameAsOff(shown)
+    expect(shown.on.unpatchable.RunningInScroller, "the commit").toBeGreaterThanOrEqual(1)
+  })
+
+  it("shows what patching off shows for a run in the rows of a scroller, with a frame built whole in the middle of it", async () => {
     sameAsOff(
       await played("list", (renderer, snap) => {
         hover(renderer)
@@ -528,7 +558,7 @@ describeNative("a colour transition that runs in a root that a patch builds", { 
     )
   })
 
-  unverified("shows what patching off shows for the run that the hover starts after a scroll, in the rows the translate moved", async () => {
+  it("shows what patching off shows for the run that the hover starts after a scroll, in the rows the translate moved", async () => {
     const shown = await played("list", (renderer, snap) => {
       // Every row measured, by showing each once with the translate off: a row with no measured size is a frame built whole.
       const list = renderer.findByTestId("list").id
