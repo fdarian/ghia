@@ -1394,8 +1394,22 @@ scroller's pixels on both axes (`ShiftPlan` takes `shift.x` too). Code: zed `win
   whether exactly one scroller moved and whether the frame can be a move of its content.
 - **The thumb.** A scroller's bar notes its thumbs (`Window::paint_scroll_thumb(scroll_key, ..)`, one per axis) and is planned and moved as a list's; the
   fade of its thumb is still a built frame (`repaint_thumb` is a list's).
-- **After a translate the next tick is declined** while `Retain::seen.scrolls` holds the offset of the frame built whole (a hover patch or a caret
-  tick after a wheel builds the frame): slice D1b.
+- **After a translate the next tick is declined `Sourced`** (`Retain::seen.scrolls` still holds the offset of the frame built whole, and a tick compares
+  the scroller's offset with it): the hover that follows the end of a scroll (`advanceTime(500)`) is a frame built whole, with the same picture.
+  Slice D1b.
+
+**Measured** (`PHASE=scroll APP=stack A11Y=0`, ghia-bench's Solid stack app: a `div` scroller, TanStack Virtual's rows, release addon, test renderer):
+0 of 720 ticks translate, as before. Median 10.31M instructions a tick (10.09M before; the classification costs about 0.2M), no-batch median 10.18M (9.9M
+before). Every tick is classified and the first reason is `Edited` for 628 and `NotRelocatable.unrooted` for 92. What holds them, from the gate and the
+classifier (a probe at each, not kept):
+- 356 ticks carry a JS batch (a row enters or leaves the window of TanStack): the tree's revision is not the frame shown's (`Edited`), slice D2.
+- 272 of the others have a hover that restyles by paint that no frame has drawn (`Sources::hover_paint`, 2 elements): a frame built whole after a wheel
+  over a `div` follows the hover at once (the pointer chain changes in 0.83 of the ticks), so the next tick is `Edited`, and no tick starts the
+  translates that keep the hover where it was. Slice D1b.
+- the frame shown after a row that entered holds it built and not recorded (a root needs a box from an earlier frame): its lifted operations are
+  `NotRelocatable.unrooted` (75 operations and more) for 591 of the 720 classifications; the frames with none (114 of the classifications) are the
+  translates this slice makes, in the tests (`scroll-patch-div.test.tsx`: every step of a scroller of rows is a translate, the same picture, boxes,
+  hit points, clicks and `scroll` events as the build).
 
 Tests: zed `window/scroll_patch_div_tests.rs` (the translate is the frame built whole for the box that holds the rows, with a hitbox, rows in the flow,
 rows with no hitbox and rows not culled; each cause; the thumb; the verifier; the anchoring; the owner told), `scrollbar.rs`, `retain.rs`
