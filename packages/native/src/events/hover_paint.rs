@@ -164,9 +164,10 @@ pub(crate) fn may_lift(style: &StyleDesc) -> bool {
 
 /// Whether the style the build lays out for an element may be other than the one it declares by anything but a
 /// hover that paints only: an animation, a transition that can run on more than a colour (one of colours only is run
-/// by a patch, as a hover that paints starts it), Motion (`motion`, `motionValues`, `layout`), a `var()`
-/// (one in a state block too: `holds_var_declarations`, as the paint check of a hover does not see a `var()` a state
-/// holds), an `@container` block, a state variant other than `hover` and `hasHover`, or a `hover` or `hasHover` that is
+/// by a patch, as a hover that paints starts it), Motion (`motion`, `motionValues`, `layout`), a `var()` in a property
+/// that is not in `PAINT_KEYS` (one in a state block too: `holds_var_declarations_beyond`, since what it resolves to is not
+/// read before the build and could lift the element; a colour is checked against the custom properties when the hover
+/// happens, `vars_paint_only`), an `@container` block, a state variant other than `hover` and `hasHover`, or a `hover` or `hasHover` that is
 /// more than paint (`hover` is its `paint_hover_of`: an opacity that crosses 1, a transform, a size). It is taken from the
 /// caller's memo, not computed here: folding the states clones the style. Only a paint-only hover is ignored, since it
 /// never changes what an element lifts. A fold like the others can give the element an opacity, a
@@ -723,7 +724,6 @@ mod tests {
         assert!(!held_hover_paints(&format!(r##"{{{theme},"color":"var(--white)","hover":{{"--white":"#000000"}}}}"##)));
         assert!(!held_hover_paints(&format!(r##"{{{theme},"color":"var(--white)","hover":{{"color":"var(--red)","--red":"#000000"}}}}"##)));
         // A property that is not a colour, and a value that is not one.
-        assert!(!held_hover_paints(&format!(r##"{{{theme},"width":"var(--w)","hover":{{"width":"var(--w)","color":"red"}}}}"##)));
         assert!(!held_hover_paints(&format!(r##"{{{theme},"width":10,"hover":{{"width":"var(--w)"}}}}"##)));
         assert!(!held_hover_paints(&format!(r##"{{{theme},"opacity":0.5,"hover":{{"opacity":"var(--w)"}}}}"##)));
         assert!(!held_hover_paints(&format!(r##"{{{theme},"color":"var(--white)","hover":{{"color":"var(--missing)"}}}}"##)));

@@ -84,7 +84,7 @@ const TAILWIND_V4 = String.raw`
   }
 `
 
-type Variant = "v4" | "v3" | "sheet" | "tw4" | "tw4-sets-var" | "tw4-clear" | "icon" | "icon-own" | "icon-fill" | "gradient" | "all"
+type Variant = "v4" | "v3" | "sheet" | "tw4" | "tw4-sets-var" | "tw4-clear" | "tw4-ancestor" | "icon" | "icon-own" | "icon-fill" | "gradient" | "all"
 
 const REST = "#223344"
 const TINT = "#443322"
@@ -111,9 +111,10 @@ function Icon(props: { variant: Variant; filled: boolean }) {
 }
 
 function Row(props: { index: number; variant: Variant; seen: string[]; tint: boolean }) {
-  if (props.variant === "tw4" || props.variant === "tw4-sets-var" || props.variant === "tw4-clear") {
+  if (props.variant === "tw4" || props.variant === "tw4-sets-var" || props.variant === "tw4-clear" || props.variant === "tw4-ancestor") {
     const classes = {
       tw4: "bg-slate-800 text-white hover:bg-orange-800 hover:text-red-500 transition-colors",
+      "tw4-ancestor": "bg-slate-800 text-white hover:bg-orange-800 hover:text-red-500 transition-colors",
       "tw4-clear": "bg-slate-800 text-white hover:bg-orange-800 hover:text-clear transition-colors",
       "tw4-sets-var": "[--x:#223344] bg-[var(--x)] text-white hover:[--x:#664422] transition-colors",
     }[props.variant]
@@ -185,6 +186,8 @@ function Page(props: { variant: Variant; seen: string[] }) {
           overflow: "hidden",
           "--default-transition-duration": `${DURATION}ms`,
           "--default-transition-timing-function": "cubic-bezier(0.4, 0, 0.2, 1)",
+          // A column that sets a theme colour while it holds focus: the rows below may read either, which the tree does not say.
+          ...(props.variant === "tw4-ancestor" ? { focusWithin: { "--color-orange-800": "#00ff00" } } : {}),
         }}
       >
         {Array.from({ length: COUNT }, (_, index) => (
@@ -356,7 +359,7 @@ describeNative("a hover whose element has Tailwind's transition-colors", { timeo
     }
   })
 
-  for (const variant of ["all", "tw4-sets-var", "tw4-clear"] as const) {
+  for (const variant of ["all", "gradient", "tw4-sets-var", "tw4-clear", "tw4-ancestor"] as const) {
     unverified(`stays a frame built whole with ${variant}`, async () => {
       const root = await open(variant, true)
       try {
@@ -369,8 +372,9 @@ describeNative("a hover whose element has Tailwind's transition-colors", { timeo
 
   for (const instant of INSTANTS.filter((instant) => ["enter-6", "enter-12", "leave-6"].includes(instant.name))) {
     // Frames built whole that show what patching off shows: a gradient whose custom property the hover sets, `all`, a hover
-    // that sets `--x` (`tw4-sets-var`) and one whose `var()` text resolves to transparent (`tw4-clear`).
-    for (const variant of ["gradient", "all", "tw4-sets-var", "tw4-clear"] as const) {
+    // that sets `--x` (`tw4-sets-var`), one whose `var()` text resolves to transparent (`tw4-clear`) and one under an ancestor that
+    // sets a theme colour in a state (`tw4-ancestor`: the custom properties of the row are not known).
+    for (const variant of ["gradient", "all", "tw4-sets-var", "tw4-clear", "tw4-ancestor"] as const) {
       it(`shows what patching off shows at ${instant.name}, with ${variant}`, async () => {
         const on = await pictureAt(variant, true, instant)
         const off = await pictureAt(variant, false, instant)
@@ -380,34 +384,47 @@ describeNative("a hover whose element has Tailwind's transition-colors", { timeo
     }
   }
 
-  it("shows what patching off shows for a fill that a commit changes under a hover run, with an icon whose fill transitions", async () => {
-    const pictures = []
-    for (const patch of [true, false]) {
-      const root = await open("icon-fill", patch)
-      const renderer = root.renderer
-      try {
-        const shots: string[] = []
-        const snap = (name: string) => shots.push(picture(renderer, `fill-${patch}-${name}`))
-        move(renderer, ...ON)
-        elapse(renderer, FRAME * 3)
-        tintRows(true)
-        renderer.drawFrame()
-        snap("committed")
-        for (const ticks of [3, 3, 3, 3, 6]) {
-          elapse(renderer, FRAME * ticks)
-          snap(`after-${ticks}`)
+  for (const hovered of [true, false]) {
+    it(`shows what patching off shows for a fill that a commit changes ${hovered ? "under a hover run" : "with no hover"}, with an icon whose fill transitions`, async () => {
+      const pictures = []
+      for (const patch of [true, false]) {
+        const root = await open("icon-fill", patch)
+        const renderer = root.renderer
+        try {
+          const shots: string[] = []
+          const snap = (name: string) => shots.push(picture(renderer, `fill-${hovered}-${patch}-${name}`))
+          if (hovered) {
+            move(renderer, ...ON)
+            elapse(renderer, FRAME * 3)
+          }
+          tintRows(true)
+          renderer.drawFrame()
+          snap("committed")
+          for (const ticks of [3, 3, 3, 3, 6]) {
+            elapse(renderer, FRAME * ticks)
+            snap(`after-${ticks}`)
+          }
+          if (hovered) {
+            move(renderer, ...OFF)
+            elapse(renderer, FRAME * 5)
+            snap("left")
+            elapse(renderer, FRAME * 12)
+            snap("end")
+          }
+          pictures.push({ shots, mismatches: renderer.getRetainedCounters().mismatches })
+        } finally {
+          root.unmount()
         }
-        move(renderer, ...OFF)
-        elapse(renderer, FRAME * 5)
-        snap("left")
-        elapse(renderer, FRAME * 12)
-        snap("end")
-        pictures.push({ shots, mismatches: renderer.getRetainedCounters().mismatches })
-      } finally {
-        root.unmount()
       }
-    }
-    pictures[0].shots.forEach((shot, at) => expect(shot === pictures[1].shots[at], `picture ${at}`).toBe(true))
-    expect(pictures[0].mismatches).toBe(0)
-  })
+      pictures[0].shots.forEach((shot, at) => expect(shot === pictures[1].shots[at], `picture ${at}`).toBe(true))
+      expect(pictures[0].mismatches).toBe(0)
+      if (!hovered) {
+        // Only the fill moves: it is at neither end part-way (the commit, then 3, 6, 9, 12 and 18 ticks later).
+        const [committed, three, , , , eighteen] = pictures[0].shots
+        expect(three, "the run is under way").not.toEqual(committed)
+        expect(three).not.toEqual(eighteen)
+        expect(committed).not.toEqual(eighteen)
+      }
+    })
+  }
 })

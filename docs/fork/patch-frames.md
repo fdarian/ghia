@@ -741,8 +741,8 @@ and a `var()` timing function; v3 the colours, `fill` and `stroke` with literal 
   are written by a commit of the app, which is no hover. A hover that changes `color` reaches an `<svg>` with `currentColor`
   paint through the `color` of the context, and a `currentColor` computes to itself (no transition of `fill` starts, as in a
   browser): the icon follows the colour showing at each tick of the `color` run, and is repainted with it. A transition of `fill`
-  that a commit starts on a shape, under a root that a hover patches, is the one of
-  the one of an `<svg>` whose shapes run a paint-only animation (a unit; an SVG attribute never `changes_layout`). `stroke-width`, `r`, `d` and the other attributes of a shape are not colours.
+  that a commit starts on a shape, under a root that a hover patches, is the run of
+  an `<svg>` whose shapes run a paint-only animation (a unit; an SVG attribute never `changes_layout`). `stroke-width`, `r`, `d` and the other attributes of a shape are not colours.
 - **A custom property matches nothing.** Ghia transitions no custom property, registered by `@property` or not (see [deviations](deviations.md#stylesheets)), so a `--tw-gradient-from` in the list names no
   property and starts nothing; a hover that changes one is not paint-only (a custom property is not in the list of
   `differs_by_paint_only`) and is a frame built whole, which shows what a patch would (the gradient is the same at every instant;
@@ -763,7 +763,7 @@ and a `var()` timing function; v3 the colours, `fill` and `stroke` with literal 
   operation and the hover is whole; a background keeps its quad (`keeps_background_quad` sees a held `backgroundColor`), so one that
   turns transparent is written over it. A value that does not resolve (a missing name, a text that is not a value of its property), a
   `background` that resolves to a gradient and any element on the path that declares a custom property under a state or an
-  `@container` block (it may be in that state, which the tree does not say) are whole, as a `var()` in any other property is. A
+  `@container` block (it may be in that state, which the tree does not say) are whole, as is a state that declares or changes a `var()` in a property that is not a colour; a `var()` that reads the same in both states is patched as it was. A
   commit that changes such a colour (`restyle_paints_of`) is still whole.
 
 **The ticks of the run.** The build of a patch's unit records nothing (`Retain::suspend`), so what it found running on each element
