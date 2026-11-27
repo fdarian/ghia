@@ -48,8 +48,6 @@ import { runEditingComposition, runEditingInput, type EditingCompositionStep } f
 import { documentOf, forgetElementSource, windowOf } from "./events/window-target.js"
 import type { GpuixDocument } from "./events/window-target.js"
 import type { GpuixWindow } from "./events/window-targets.js"
-
-export { documentOf, windowOf }
 import { detachRenderer } from "./detached-renderer.js"
 import type { HostDropEffect } from "./events/types.js"
 import { matchableText } from "./text-match.js"
@@ -71,6 +69,8 @@ export {
   MAC_CPU_THROTTLES,
   readMacCpuThrottle,
 } from "./cpu-throttle.js"
+
+export { documentOf, windowOf }
 export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 export { getComputedStyle, type ComputedStyle } from "./computed-style.js"

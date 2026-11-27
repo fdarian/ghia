@@ -37,7 +37,7 @@ function onMediaChange(window: GpuixWindow, renderer: NativeRenderer): void {
   // The visual viewport goes first: it is the one whose size a library measures a keyboard or a zoom by.
   sendResize(window.visualViewport.listeners, window.visualViewport)
   syncResize(window)
-  sendResize(window.events, window.resizeTarget)
+  sendResize(window.events, window.view)
   syncResize(window)
 }
 

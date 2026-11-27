@@ -419,7 +419,7 @@ describe("shared host runtime", () => {
     }
     expect(seen).toEqual([
       ["pointerlockchange", top.document, top.document],
-      ["pointerlockerror", top.document, top.resizeTarget],
+      ["pointerlockerror", top.document, top.view],
     ])
   })
 

@@ -295,12 +295,21 @@ which write to GPUI's profiler journal (its own thread-local): a `GPUI_APP` regi
 **One pump.** The platform is pumped once per iteration and the run-loop wake hook is shared:
 [frames-and-wakes.md](frames-and-wakes.md#several-windows-one-loop).
 
-What several windows do not have yet: a JS `document` and `window` per window, `window.open` and the adapters' `render()` into a
-second window are the later slices of this work (the test renderer opens several windows at once: [testing.md](testing.md#several-test-windows)). Until then a second window is a
-second renderer with its own `createRoot(renderer)` (React) or `createRoot` (Solid), and the JS globals (`document`,
-`window`, `matchMedia`) follow the renderer that mounted last. The `appearance` option of a window after the first is the
-App's (`set_window_appearance` is the App's), and the menu bar is the App's; both are the platform's single-App model, not a
-choice here.
+**A JS `document` and `window` per window.** Each renderer's window has its own `GpuixDocument` and `GpuixWindow` in JS
+(`documentOf(renderer)`, `windowOf(renderer)` in `@ghia/native/host`; `events/window-target.ts` and `events/window-targets.ts`):
+the roots (`<html>`, `<head>`, `<body>`), `activeElement`, selection, `adoptedStyleSheets`, `elementFromPoint`, node makers,
+and the window's size, `matchMedia`, `resize`, `requestAnimationFrame` list and the top of the event path.
+`mountedRenderer()` is gone: nothing is answered from "the last window that mounted". The global `document` and `window` are
+the first window's while its root is mounted, and a closed first window leaves them its own, empty. An event bubbles through
+its own window's document and window target only. The model and the rules for nodes are in
+[the reference](../reference.md#a-document-per-window); how it is built is in [events-and-input.md](events-and-input.md#the-event-path-of-each-window)
+and [web-renderer.md](web-renderer.md#several-windows).
+
+What several windows do not have yet: `window.open` and the adapters' `render()` into a second window's `document.body` are the
+later slice of this work (the test renderer opens several windows at once: [testing.md](testing.md#several-test-windows)).
+Until then a second window is a second renderer with its own `createRoot(renderer)` (React) or `createRoot` (Solid). The
+`appearance` option of a window after the first is the App's (`set_window_appearance` is the App's), and the menu bar is the
+App's; both are the platform's single-App model, not a choice here.
 
 Checked by `window_map`, `window_set` and `shared_wake` unit tests, `frame-loop.test.ts`, and
 [the multi-window e2e](testing.md#the-multi-window-e2e).

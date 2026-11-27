@@ -199,6 +199,8 @@ export interface DomEventRoot {
    * the error is reported to the global handler, as the DOM does.
    */
   reportError?: (error: unknown) => void
+  /** The window object the events of this root have as `view`, when it is not the global `window` (the first window's). */
+  view?: object
 }
 
 /** What `stopPropagation()` and `stopImmediatePropagation()` have done so far. */
@@ -302,6 +304,7 @@ export function createDomEvent(
     if (!isElementField(key)) event[key] = fields[key]
   }
   event.target = path[0] ?? pathlessTarget
+  if (root.view !== undefined && "view" in event) event.view = root.view
   event.relatedTarget = optionalElement(root, payload.relatedTarget)
   if (payload.formEntries) Object.assign(event, formSubmission(root, payload.formEntries, payload.submitterId))
   // An edit has no data unless it inserted text, and the DOM says so with null.

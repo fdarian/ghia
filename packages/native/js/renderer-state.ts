@@ -181,6 +181,8 @@ export type ActiveRoot = RendererRootBinding & {
   scoped: GpuixEventTarget
   /** The window of the root: the top of the event path of every event of its tree. */
   window: GpuixWindow
+  /** The window object its events have as `view`: only a window other than the first has one of its own. */
+  view: object | undefined
 }
 
 /** What native sends in the frame steps of a window that was asked for `requestAnimationFrame`. */
@@ -336,6 +338,10 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         elementById: (id) => elementOf(renderer, id),
         scoped,
         window: windowOf(renderer),
+        get view() {
+          const view = this.window.view
+          return view === globalThis ? undefined : view
+        },
         windowKeyEventId: generation,
         windowSelectionEventId: generation,
         windowAppearanceEventId: generation,

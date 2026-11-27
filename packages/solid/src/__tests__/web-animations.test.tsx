@@ -1,6 +1,7 @@
 import { createSignal } from "solid-js"
 import { describe, expect, it } from "vitest"
 import { CSSAnimation, CSSTransition, defineKeyframes, document } from "../index.js"
+import { documentOf } from "@ghia/native/host"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import type { HostElement } from "../host.js"
 
@@ -459,9 +460,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid Web animations", () => {
     expect(document.getAnimations()).toHaveLength(0)
   })
 
-  it("lists the animations of the latest window only when an earlier root was never unmounted", () => {
-    // The test window is one per thread: `left` is never unmounted, and its renderer would answer
-    // for the window of `app`.
+  it("lists the animations of the window a document is the document of when an earlier root was never unmounted", () => {
+    // `left` is never unmounted and holds the global `document`; `app` is a second window with its own.
     const left = createTestRoot()
     left.render(() => <div testId="left" style={{ width: 50, height: 20 }} />)
     const app = createTestRoot()
@@ -469,7 +469,8 @@ describe.skipIf(!hasNativeTestRenderer)("Solid Web animations", () => {
     let box!: HostElement
     app.render(() => <div ref={(element) => (box = element)} style={{ width: 50, height: 20, animation: "solid-wa-grow 1s linear" }} />)
     app.renderer.clockFastForward(0)
-    const listed = document.getAnimations()
+    expect(document.getAnimations()).toHaveLength(0)
+    const listed = documentOf(app.renderer).getAnimations()
     expect(listed).toHaveLength(1)
     expect(listed[0]).toBe(box.getAnimations()[0])
     app.unmount()

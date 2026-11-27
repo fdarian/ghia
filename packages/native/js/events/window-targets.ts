@@ -101,18 +101,18 @@ export class GpuixWindow {
   /** A root is attached to the renderer (`attach` of its renderer state): set by the renderer state only. */
   attached = false
 
-  /** What `resize` is sent to as its target. */
-  private readonly self: object
+  /** What the window is to code: the global object for the first window, the window target itself for another. The `currentTarget` of its own listeners, the `target` of `resize` and the `view` of its events. */
+  readonly view: object
   private readonly mounted: () => boolean
   #document: GpuixDocument | undefined
 
   constructor(links: WindowLinks) {
-    this.self = links.owner ?? this
+    this.view = links.owner ?? this
     this.mounted = links.mounted
     this.events = new GpuixEventTarget(() => {
       links.onTypesChange()
       this.syncResize()
-    }, this.self)
+    }, this.view)
   }
 
   /** The window's own document. */
@@ -206,11 +206,6 @@ export class GpuixWindow {
    */
   syncResize(): void {
     installedHooks?.syncResize(this)
-  }
-
-  /** @internal What `resize` is sent to as its target. */
-  get resizeTarget(): object {
-    return this.self
   }
 
   /** @internal Whether anything listens for `resize` on the window or its visual viewport. */

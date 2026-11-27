@@ -464,6 +464,24 @@ export class GpuixDocument<Element = unknown> extends Document {
     return this.documentElements().body as Element
   }
 
+  /** `"complete"`: a window has no page to load. */
+  get readyState(): "complete" {
+    return "complete"
+  }
+
+  /**
+   * `"visible"` while a root is mounted in this document's window and the window is open, `"hidden"`
+   * otherwise. Native does not report an occluded or minimized window, so a window that is open is visible.
+   */
+  get visibilityState(): "visible" | "hidden" {
+    return this.window.isMounted ? "visible" : "hidden"
+  }
+
+  /** `visibilityState === "hidden"`. */
+  get hidden(): boolean {
+    return !this.window.isMounted
+  }
+
   /** `"CSS1Compat"`: the document is laid out as a standards-mode page, which is what a library that tests for quirks mode expects. */
   get compatMode(): "CSS1Compat" {
     return "CSS1Compat"
@@ -747,6 +765,7 @@ export function forgetElementSource(renderer: object): void {
   bumpTreeVersion()
   const owner = records.get(renderer)
   if (owner === undefined) return
+  owner.attached = false
   if (owner === globalRecord) owner.closed = false
   owner.syncResize()
 }
