@@ -147,7 +147,7 @@ fn register(bytes: Vec<u8>, host: &mut dyn Host) -> Result<String, String> {
     if bytes.starts_with(b"wOFF") || bytes.starts_with(b"wOF2") {
         return Err("WOFF and WOFF2 are not supported, list a TrueType or OpenType file".to_owned());
     }
-    crate::renderer::check_font(&bytes)?;
+    crate::text::font_check::check_font(&bytes)?;
     let family = family_of(&bytes)?;
     host.add(bytes).map_err(|error| error.to_string())?;
     Ok(family)
