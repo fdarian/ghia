@@ -179,22 +179,27 @@ pub(crate) fn on_translated<E: gpui::StatefulInteractiveElement>(
     id: u64,
     tree: std::sync::Arc<std::sync::Mutex<crate::retained_tree::RetainedTree>>,
 ) -> E {
-    el.on_scroll_translated(move |_, _, translation| {
-        let tree = tree.try_lock().expect("the gate found the tree free, and nothing takes it before the translate");
-        let roots: rustc_hash::FxHashSet<u64> = translation.roots.iter().filter_map(crate::renderer::retained_root_of).collect();
-        let mut built = Vec::new();
-        let mut pending: Vec<u64> = tree.elements.get(&id).map(|element| element.children.clone()).unwrap_or_default();
-        while let Some(child) = pending.pop() {
-            if roots.contains(&child) {
-                continue;
+    let ready = tree.clone();
+    el.on_scroll_translated(
+        move || ready.try_lock().is_ok(),
+        move |_, _, translation| {
+            let tree = tree.try_lock().expect("the translate was planned with the tree free, and nothing runs between the plan and the write");
+            let roots: rustc_hash::FxHashSet<u64> = translation.roots.iter().filter_map(crate::renderer::retained_root_of).collect();
+            let mut built = Vec::new();
+            let scroller = tree.elements.get(&id).expect("the gate found the tree as the frame shown was built from, which has the scroller");
+            let mut pending: Vec<u64> = scroller.children.clone();
+            while let Some(child) = pending.pop() {
+                if roots.contains(&child) {
+                    continue;
+                }
+                built.push(child);
+                if let Some(element) = tree.elements.get(&child) {
+                    pending.extend(element.children.iter().copied());
+                }
             }
-            built.push(child);
-            if let Some(element) = tree.elements.get(&child) {
-                pending.extend(element.children.iter().copied());
-            }
-        }
-        crate::automation::shift_built(window, &built, translation.shift);
-    })
+            crate::automation::shift_built(window, &built, translation.shift);
+        },
+    )
 }
 
 /// `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]` as the DOM

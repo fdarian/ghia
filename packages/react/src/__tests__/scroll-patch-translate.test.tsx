@@ -27,7 +27,10 @@ const COUNT = 60
 const ROW_WIDTH = 150
 const TIMEOUT = 60_000
 
-function Page({ text, tint }: { text: boolean; tint: number }) {
+/** A scroller in a row, as the cards of a mailbox have: its offset is what a script writes, and it is no scroller of the frame shown. */
+type Inners = Record<number, { scrollTop: number }>
+
+function Page({ text, tint, inners, salt = 0 }: { text: boolean; tint: number; inners?: Inners; salt?: number }) {
   return (
     <virtual-list
       testId="list"
@@ -44,11 +47,25 @@ function Page({ text, tint }: { text: boolean; tint: number }) {
             width: ROW_WIDTH,
             height: ROW,
             flexShrink: 0,
-            backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
+            position: inners ? "relative" : undefined,
+            backgroundColor: (index + salt) % 2 === 0 ? "#223344" : "#334455",
             borderBottom: tint > 0 && index === 2 ? "4px solid #ff0000" : undefined,
             hover: { backgroundColor: "#664422" },
           }}
         >
+          {inners ? (
+            <div
+              ref={(instance) => {
+                if (instance !== null) inners[index] = instance
+              }}
+              testId={`inner-${index}`}
+              style={{ position: "absolute", left: 90, top: 4, width: 40, height: 30, overflowY: "auto" }}
+            >
+              {["#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff"].map((color) => (
+                <div key={color} style={{ height: 30, flexShrink: 0, backgroundColor: color }} />
+              ))}
+            </div>
+          ) : null}
           {text ? <div style={{ color: "#ffffff" }}>{`row-${index}`}</div> : null}
         </div>
       ))}
@@ -56,14 +73,20 @@ function Page({ text, tint }: { text: boolean; tint: number }) {
   )
 }
 
-function open(text = true) {
+function open(text = true, inners?: Inners) {
   const root = createTestRoot({ width: 300, height: 200 })
-  root.render(<Page text={text} tint={0} />)
+  root.render(<Page text={text} tint={0} inners={inners} />)
   root.renderer.dispatchNativeEvents()
   root.renderer.flush()
   root.renderer.setA11yActive(false)
   // A commit that is not drawn yet when the next wheel arrives.
-  return { ...root, renderer: root.renderer, commit: () => root.render(<Page text={text} tint={1} />) }
+  return {
+    ...root,
+    renderer: root.renderer,
+    commit: () => root.render(<Page text={text} tint={1} inners={inners} />),
+    // Every row changes: they are built, and a build of the rows records them.
+    rebuild: () => root.render(<Page text={text} tint={0} inners={inners} salt={1} />),
+  }
 }
 
 type Wheel = { x: number; y: number; by: number }
@@ -224,6 +247,54 @@ describeNative("the rows of a list translated by a scroll", { timeout: TIMEOUT }
     } finally {
       unmount()
     }
+  })
+
+  /**
+   * The rows hold a scroller each, which a page moves by script (`scrollTop = n`, instant, no commit) from a handler of another
+   * scroller: such a wheel step is a frame built whole, and the frame after is right. (A row that holds a scroller is no run of the list in
+   * Ghia, so no step here is a translate; the gate's answer for a scroller gpui does not know is pinned by `retain.rs` and zed.)
+   */
+  function scriptedInner(translate: boolean) {
+    const inners: Inners = {}
+    const { renderer, unmount, commit, rebuild } = open(true, inners)
+    try {
+      renderer.setScrollPatchEnabled(translate)
+      wheel(renderer, { x: 180, y: 60, by: 4 })
+      wheel(renderer, { x: 180, y: 60, by: -4 })
+      // The commit builds the rows: the frame shown records the scroller in each, and knows it as no scroller.
+      renderer.setInlineDraws(false)
+      rebuild()
+      renderer.drawFrame()
+      renderer.setInlineDraws(true)
+      const frames: unknown[] = []
+      const translated: boolean[] = []
+      for (const [index, by] of [3, 5, 8, -2, 6].entries()) {
+        inners[1].scrollTop = (index + 1) * 9
+        const before = scroll(renderer).patched
+        wheel(renderer, { x: 180, y: 60, by })
+        translated.push(scroll(renderer).patched > before)
+        const inner = renderer.findByTestId("inner-1")
+        frames.push({ ...seen(renderer, `inner-${translate}-${index}`, [[20, 10]]), inner: renderer.getScrollOffset(inner.id) })
+      }
+      renderer.setInlineDraws(false)
+      commit()
+      renderer.drawFrame()
+      renderer.setInlineDraws(true)
+      const inner = renderer.findByTestId("inner-1")
+      const whole = { ...seen(renderer, `inner-whole-${translate}`, [[20, 10]]), inner: renderer.getScrollOffset(inner.id) }
+      return { frames, translated, whole, counters: scroll(renderer) }
+    } finally {
+      unmount()
+    }
+  }
+
+  it("draws what a build gives when script moved a scroller inside a row, and the frame after it", () => {
+    const on = scriptedInner(true)
+    const off = scriptedInner(false)
+    expect(on.frames).toEqual(off.frames)
+    expect(on.whole).toEqual(off.whole)
+    expect(on.whole.inner, "the inner scroller is where the script put it").toEqual([0, 45])
+    expect(on.counters.mispredicted).toBe(0)
   })
 
   it("draws the frames whole with the translate off", () => {

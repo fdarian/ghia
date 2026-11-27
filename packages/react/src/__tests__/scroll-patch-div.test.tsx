@@ -34,16 +34,16 @@ const VSYNC = 16
 /** `transform`: TanStack Virtual's rows, absolute at the top of the box that holds them and moved by a `translateY`. */
 type Layout = "absolute" | "flow" | "transform"
 
-type Log = { scrolls: number[][]; clicks: number[]; hovers: string[] }
+type Log = { scrolls: number[][]; clicks: number[]; hovers: string[]; inners: Record<number, { scrollTop: number }>; onScroll?: () => void }
 
 /**
  * `hover`: each row takes another background under the pointer. `count`: how many rows the page has. `rich`: rows as the mailbox of
  * ghia-bench makes them, with positioned boxes in each (an avatar, a column of two lines that an ellipsis cuts): what a row hands to the
  * stacking context of its own is not painted where its parent's children are.
  */
-type Options = { hover?: boolean; count?: number; rich?: boolean; events?: boolean }
+type Options = { hover?: boolean; count?: number; rich?: boolean; events?: boolean; inner?: boolean; tint?: boolean; salt?: number }
 
-function Page({ log, layout, bar, hover, rich, events, count = COUNT }: { log: Log; layout: Layout; bar: boolean } & Options) {
+function Page({ log, layout, bar, hover, rich, events, inner, tint, salt = 0, count = COUNT }: { log: Log; layout: Layout; bar: boolean } & Options) {
   const rows = Array.from({ length: count }, (_, index) => (
     <div
       key={index}
@@ -59,10 +59,23 @@ function Page({ log, layout, bar, hover, rich, events, count = COUNT }: { log: L
         height: ROW,
         flexShrink: 0,
         ...(rich ? { borderBottomWidth: 1, borderBottomStyle: "solid", borderBottomColor: "#445566", userSelect: "none" } : {}),
-        backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
+        backgroundColor: (index + salt) % 2 === 0 ? "#223344" : "#334455",
         ...(hover ? { hover: { backgroundColor: "#664422" } } : {}),
       }}
     >
+      {inner ? (
+        <div
+          ref={(instance) => {
+            if (instance !== null) log.inners[index] = instance
+          }}
+          testId={`inner-${index}`}
+          style={{ position: "absolute", left: 90, top: 4, width: 40, height: 30, overflowY: "auto" }}
+        >
+          {["#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff"].map((color) => (
+            <div key={color} style={{ height: 30, flexShrink: 0, backgroundColor: color }} />
+          ))}
+        </div>
+      ) : null}
       {rich ? (
         <>
           <div style={{ position: "absolute", left: 4, top: 4, width: 12, height: 12, borderRadius: 6, backgroundColor: "#2563eb" }} />
@@ -82,8 +95,11 @@ function Page({ log, layout, bar, hover, rich, events, count = COUNT }: { log: L
   return (
     <div
       testId="scroller"
-      onScroll={(event) => log.scrolls.push([event.scrollLeft, event.scrollTop])}
-      style={{ width: 200, height: VIEWPORT, overflowY: "auto", scrollbarWidth: bar ? undefined : "none" }}
+      onScroll={(event) => {
+        log.scrolls.push([event.scrollLeft, event.scrollTop])
+        log.onScroll?.()
+      }}
+      style={{ width: 200, height: VIEWPORT, overflowY: "auto", scrollbarWidth: bar ? undefined : "none", ...(tint ? { backgroundColor: "#101820" } : {}) }}
     >
       {layout !== "flow" ? (
         <div testId="inner" style={{ position: "relative", width: "100%", height: count * ROW }}>
@@ -97,7 +113,7 @@ function Page({ log, layout, bar, hover, rich, events, count = COUNT }: { log: L
 }
 
 function open(translate: boolean, layout: Layout, bar = false, options: Options = {}) {
-  const log: Log = { scrolls: [], clicks: [], hovers: [] }
+  const log: Log = { scrolls: [], clicks: [], hovers: [], inners: {} }
   const root = createTestRoot({ width: 300, height: 200 })
   const renderer = root.renderer
   renderer.clockPause()
@@ -159,12 +175,13 @@ function seen(renderer, points: Array<[number, number]>) {
 
 /** The steps run on a page with the translate on or off; each is seen after. */
 function run(translate: boolean, layout: Layout, steps: number[], points: Array<[number, number]>, bar = false) {
-  const { renderer, unmount, log } = open(translate, layout, bar)
+  const opened = open(translate, layout, bar)
+  const renderer = opened.renderer
   try {
     // A wheel and its way back record the rows, put them elsewhere and show the bar.
     tick(renderer, 4)
     tick(renderer, -4)
-    log.scrolls.length = 0
+    opened.log.scrolls.length = 0
     const warmed = scroll(renderer).patched
     const frames: unknown[] = []
     const translated: boolean[] = []
@@ -174,9 +191,9 @@ function run(translate: boolean, layout: Layout, steps: number[], points: Array<
       translated.push(scroll(renderer).patched > before)
       frames.push(seen(renderer, points))
     }
-    return { frames, translated, counters: scroll(renderer), warmed, log }
+    return { frames, translated, counters: scroll(renderer), warmed, log: opened.log }
   } finally {
-    unmount()
+    opened.unmount()
   }
 }
 
@@ -210,34 +227,36 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
     expect(on.frames).toEqual(off.frames)
     expect(on.log.scrolls).toEqual(off.log.scrolls)
     if (verifying) {
-      const { renderer, unmount } = open(true, "absolute")
+      const opened = open(true, "absolute")
+      const renderer = opened.renderer
       try {
         tick(renderer, 4)
         tick(renderer, -4)
         for (const step of wheels) tick(renderer, step)
         expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
       } finally {
-        unmount()
+        opened.unmount()
       }
     }
   })
 
   unverified("clicks the row under the pointer, read from the hitboxes the translate moved", () => {
     const clicked = (translate: boolean) => {
-      const { renderer, unmount, log } = open(translate, "absolute")
+      const opened = open(translate, "absolute")
+      const renderer = opened.renderer
       try {
         tick(renderer, 4)
         tick(renderer, -4)
         const rows: number[] = []
         for (const step of [13, 9, 30]) {
           tick(renderer, step)
-          const before = log.clicks.length
+          const before = opened.log.clicks.length
           renderer.nativeSimulateClick(20, 50)
-          rows.push(...log.clicks.slice(before))
+          rows.push(...opened.log.clicks.slice(before))
         }
         return { rows, patched: scroll(renderer).patched }
       } finally {
-        unmount()
+        opened.unmount()
       }
     }
     const on = clicked(true)
@@ -249,7 +268,8 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
   })
 
   unverified("reads the box of a row and of the box that holds the rows, and scrollTop, after a translate, without drawing", () => {
-    const { renderer, unmount, log } = open(true, "absolute")
+    const opened = open(true, "absolute")
+    const renderer = opened.renderer
     try {
       tick(renderer, 4)
       tick(renderer, -4)
@@ -264,9 +284,9 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       expect(renderer.getElementBounds(row.id).y).toBeCloseTo(40 - 13, 3)
       expect(renderer.getElementBounds(inner.id).y).toBeCloseTo(-13, 3)
       expect(renderer.getPaintedFrameCount(), "the reads built nothing").toBe(painted)
-      expect(log.scrolls.at(-1)).toEqual([0, 13])
+      expect(opened.log.scrolls.at(-1)).toEqual([0, 13])
     } finally {
-      unmount()
+      opened.unmount()
     }
   })
 
@@ -297,7 +317,8 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
 
   it("is a whole frame while the accessibility tree is built, and the same picture", () => {
     const frame = (translate: boolean) => {
-      const { renderer, unmount } = open(translate, "absolute")
+      const opened = open(translate, "absolute")
+      const renderer = opened.renderer
       try {
         renderer.setA11yActive(true)
         renderer.drawFrame()
@@ -305,7 +326,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
         tick(renderer, 9)
         return { counters: scroll(renderer), picture: picture(renderer) }
       } finally {
-        unmount()
+        opened.unmount()
       }
     }
     const on = frame(true)
@@ -325,7 +346,8 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
 
   /** The page after each wheel step under a pointer that stays, and after the scroll has ended and the hover has followed. */
   function underStill(translate: boolean, layout: Layout) {
-    const { renderer, unmount, log } = open(translate, layout, false, { hover: true, rich: layout === "transform" })
+    const opened = open(translate, layout, false, { hover: true, rich: layout === "transform" })
+    const renderer = opened.renderer
     try {
       renderer.nativeSimulateMouseMove(...pointer)
       renderer.dispatchNativeEvents()
@@ -333,7 +355,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       renderer.drawFrame()
       tick(renderer, 4, pointer[0])
       tick(renderer, -4, pointer[0])
-      log.scrolls.length = 0
+      opened.log.scrolls.length = 0
       const translated: boolean[] = []
       const frames: unknown[] = []
       for (const step of crossing) {
@@ -346,9 +368,9 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       renderer.advanceTime(500)
       renderer.dispatchNativeEvents()
       for (let frame = 0; frame < 3; frame++) renderer.drawFrame()
-      return { translated, frames, during, ended: seen(renderer, hits), log }
+      return { translated, frames, during, ended: seen(renderer, hits), log: opened.log }
     } finally {
-      unmount()
+      opened.unmount()
     }
   }
 
@@ -369,7 +391,8 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
 
   /** Wheel steps with no frame asking the page for anything else, then the end of the scroll: the frames the end draws. */
   function endOfScroll(translate: boolean, layout: Layout) {
-    const { renderer, unmount } = open(translate, layout, false, { hover: true })
+    const opened = open(translate, layout, false, { hover: true })
+    const renderer = opened.renderer
     try {
       renderer.nativeSimulateMouseMove(...pointer)
       renderer.dispatchNativeEvents()
@@ -389,7 +412,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
         picture: picture(renderer),
       }
     } finally {
-      unmount()
+      opened.unmount()
     }
   }
 
@@ -406,7 +429,8 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
    * part of the scroll: the hover (and the `pointerenter` and `pointerleave` of the rows) follows when the wheel is quiet.
    */
   function commitsUnderStill(translate: boolean, layout: Layout) {
-    const { renderer, unmount, log, render } = open(translate, layout, false, { hover: true, events: true, count: 20 })
+    const opened = open(translate, layout, false, { hover: true, events: true, count: 20 })
+    const renderer = opened.renderer
     try {
       renderer.nativeSimulateMouseMove(...pointer)
       renderer.dispatchNativeEvents()
@@ -414,7 +438,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       renderer.drawFrame()
       tick(renderer, 4, pointer[0])
       tick(renderer, -4, pointer[0])
-      log.hovers.length = 0
+      opened.log.hovers.length = 0
       let count = 20
       for (const step of [15, 15, 15, 15, 15]) {
         renderer.clockAdvance(VSYNC)
@@ -422,19 +446,19 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
         renderer.nativeSimulateScrollWheel(pointer[0], pointer[1], 0, step)
         renderer.dispatchNativeEvents()
         count += 1
-        render(<Page log={log} layout={layout} bar={false} count={count} hover events />)
+        opened.render(<Page log={opened.log} layout={layout} bar={false} count={count} hover events />)
         renderer.drawFrame()
       }
-      const during = { hovers: [...log.hovers], picture: picture(renderer) }
+      const during = { hovers: [...opened.log.hovers], picture: picture(renderer) }
       renderer.advanceTime(500)
       for (let frame = 0; frame < 3; frame++) {
         renderer.dispatchNativeEvents()
         renderer.drawFrame()
       }
       renderer.dispatchNativeEvents()
-      return { during, hovers: [...log.hovers], picture: picture(renderer), boxes: boxes(renderer), under: renderer.getElementsAt(...pointer) }
+      return { during, hovers: [...opened.log.hovers], picture: picture(renderer), boxes: boxes(renderer), under: renderer.getElementsAt(...pointer) }
     } finally {
-      unmount()
+      opened.unmount()
     }
   }
 
@@ -453,8 +477,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
     })
   }
 
-  it("follows the hover as the build does under the verifier, after commits", () => {
-    if (!verifying) return
+  it.runIf(verifying)("follows the hover as the build does under the verifier, after commits", () => {
     for (const layout of ["absolute", "flow"] as const) {
       const on = commitsUnderStill(true, layout)
       expect(on.hovers).toEqual(["leave 1", "enter 3"])
@@ -462,7 +485,8 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
   })
 
   unverified("does not decline the tick after translates for the scroll they made", () => {
-    const { renderer, unmount } = open(true, "absolute", false, { hover: true })
+    const opened = open(true, "absolute", false, { hover: true })
+    const renderer = opened.renderer
     try {
       renderer.nativeSimulateMouseMove(...pointer)
       renderer.dispatchNativeEvents()
@@ -480,14 +504,14 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       renderer.drawFrame()
       expect(sourced(renderer) - declined).toBe(0)
     } finally {
-      unmount()
+      opened.unmount()
     }
   })
 
-  it("draws the rows under a pointer that stays as the build does, under the verifier", () => {
-    if (!verifying) return
+  it.runIf(verifying)("draws the rows under a pointer that stays as the build does, under the verifier", () => {
     for (const layout of ["absolute", "transform"] as const) {
-      const { renderer, unmount } = open(true, layout, false, { hover: true, rich: layout === "transform" })
+      const opened = open(true, layout, false, { hover: true, rich: layout === "transform" })
+      const renderer = opened.renderer
       try {
         renderer.nativeSimulateMouseMove(...pointer)
         renderer.dispatchNativeEvents()
@@ -500,7 +524,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
         for (let frame = 0; frame < 3; frame++) renderer.drawFrame()
         expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
       } finally {
-        unmount()
+        opened.unmount()
       }
     }
   })
@@ -511,7 +535,8 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
    * next step moves it.
    */
   function appended(translate: boolean, layout: Layout) {
-    const { renderer, unmount, log, render } = open(translate, layout, false, { count: 5, rich: true })
+    const opened = open(translate, layout, false, { count: 5, rich: true })
+    const renderer = opened.renderer
     try {
       tick(renderer, 4)
       tick(renderer, -4)
@@ -526,7 +551,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
           renderer.nativeSimulateScrollWheel(180, 60, 0, step)
           renderer.dispatchNativeEvents()
           count += 1
-          render(<Page log={log} layout={layout} bar={false} count={count} rich />)
+          opened.render(<Page log={opened.log} layout={layout} bar={false} count={count} rich />)
           renderer.drawFrame()
         } else {
           tick(renderer, step)
@@ -534,9 +559,9 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
         }
         frames.push(seen(renderer, [[20, 10], [20, 50], [100, 99]]))
       }
-      return { translated, frames, counters: scroll(renderer), log }
+      return { translated, frames, counters: scroll(renderer), log: opened.log }
     } finally {
-      unmount()
+      opened.unmount()
     }
   }
 
@@ -551,11 +576,86 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
     expect(on.log.scrolls).toEqual(off.log.scrolls)
   })
 
-  it("draws the same after a row came into the scroller under the verifier", () => {
-    if (!verifying) return
+  it.runIf(verifying)("draws the same after a row came into the scroller under the verifier", () => {
     const on = appended(true, "transform")
     const off = appended(false, "transform")
     expect(on.frames).toEqual(off.frames)
+  })
+
+  /**
+   * A page that keeps two scrollers in step moves one from the `scroll` event of the other, with no commit: the `scrollTop` it writes
+   * is instant. When the frame shown built the rows (a commit did) the scroller inside a row is recorded with it, and the frame knows it
+   * as no scroller: a translate of the outer one would leave it where that frame had it (and hide it from the frame built whole after).
+   * Such a wheel step is a frame built whole. Ghia prepaints the scroller of a replayed row outside its recording, so the frame shown does know it
+   * (it holds the outer scroller as `NotRelocatable.nested`) and no step here is a translate; the case the gate answers for, a scroller gpui does not
+   * know, is pinned by `retain.rs` and zed's `scroll_patch_div_tests.rs`. What is pinned here is what the page shows.
+   */
+  function steppedInner(translate: boolean, move: "event" | "before" | "none") {
+    const opened = open(translate, "absolute", false, { inner: true })
+    const renderer = opened.renderer
+    try {
+      tick(renderer, 4)
+      tick(renderer, -4)
+      opened.render(<Page log={opened.log} layout="absolute" bar={false} inner salt={1} />)
+      renderer.drawFrame()
+      let top = 0
+      if (move === "event") opened.log.onScroll = () => void (opened.log.inners[1].scrollTop = top += 9)
+      const innerOffset = () => renderer.getScrollOffset(renderer.findByTestId("inner-1").id)
+      const translated: boolean[] = []
+      const frames: unknown[] = []
+      for (const step of [3, 5, 8, -2, 6]) {
+        if (move === "before") opened.log.inners[1].scrollTop = top += 9
+        const patched = scroll(renderer).patched
+        tick(renderer, step)
+        translated.push(scroll(renderer).patched > patched)
+        // The event of the step is delivered after its frame, and the next wheel finds the inner scroller moved.
+        renderer.dispatchNativeEvents()
+        frames.push({ ...seen(renderer, points), inner: innerOffset() })
+      }
+      renderer.drawFrame()
+      const settled = { ...seen(renderer, points), inner: innerOffset() }
+      // A commit that changes nothing of the rows draws a frame built whole: the inner scroller is where the script put it.
+      opened.render(<Page log={opened.log} layout="absolute" bar={false} inner salt={1} tint />)
+      renderer.drawFrame()
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      const whole = { ...seen(renderer, points), inner: innerOffset() }
+      return { translated, frames, settled, whole, counters: scroll(renderer), top }
+    } finally {
+      opened.unmount()
+    }
+  }
+
+  for (const move of ["event", "before"] as const) {
+    it(`draws a wheel step whole when script moved a scroller inside a row (${move}), and the frame after it right`, () => {
+      const on = steppedInner(true, move)
+      const off = steppedInner(false, move)
+      expect(on.top).toBeGreaterThan(0)
+      expect(on.frames).toEqual(off.frames)
+      expect(on.settled).toEqual(off.settled)
+      expect(on.whole).toEqual(off.whole)
+      expect(on.whole.inner, "the inner scroller is where the script put it").toEqual([0, on.top])
+      expect(on.counters.mispredicted).toBe(0)
+    })
+  }
+
+  it.runIf(verifying)("draws the same as the build after script moved a scroller inside a row, under the verifier", () => {
+    const opened = open(true, "absolute", false, { inner: true })
+    const renderer = opened.renderer
+    try {
+      tick(renderer, 4)
+      tick(renderer, -4)
+      opened.render(<Page log={opened.log} layout="absolute" bar={false} inner salt={1} />)
+      renderer.drawFrame()
+      for (const [index, step] of [3, 5, 8].entries()) {
+        opened.log.inners[1].scrollTop = (index + 1) * 9
+        tick(renderer, step)
+      }
+      renderer.drawFrame()
+      expect(renderer.getRetainedCounters().mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
+    } finally {
+      opened.unmount()
+    }
   })
 
 })

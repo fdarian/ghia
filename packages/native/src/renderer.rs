@@ -8460,9 +8460,9 @@ impl GpuixView {
         self.retain.forget_left_rows(&left, &tree.lock().unwrap());
     }
 
-    /// A frame moved the content of a scroller in place: the offsets the next frame is compared with are the ones it left.
-    pub(crate) fn note_scrolls_translated(&mut self) {
-        self.retain.note_scrolls_translated(&self.scroll_handles);
+    /// A frame moved the content of the scroller `translated` in place: the offset the next frame is compared with is the one it left.
+    pub(crate) fn note_scrolls_translated(&mut self, translated: gpui::ScrollKey) {
+        self.retain.note_scrolls_translated(&self.scroll_handles, translated);
     }
 
     pub(crate) fn scroll_virtual_list_to_item(

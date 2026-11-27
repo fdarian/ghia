@@ -79,13 +79,13 @@ impl Retain {
 }
 
 impl GpuixView {
-    /// Whether a source other than the scroll of a list differs from the frame shown, see
+    /// Whether a source other than the scroll of the scroller `translating` differs from the frame shown, see
     /// `Retain::sources_changed`. What cannot be read is a change.
-    fn sources_besides_scroll_changed(&self, window: &gpui::Window) -> bool {
+    fn sources_besides_scroll_changed(&self, window: &gpui::Window, translating: Option<gpui::ScrollKey>) -> bool {
         if self.pointer.try_borrow().is_err() {
             return true;
         }
-        self.with_sources(window, self.clock.now(), |sources, _| self.retain.sources_changed(sources))
+        self.with_sources(window, self.clock.now(), |sources, _| self.retain.sources_changed(sources, translating))
     }
 
     /// Turns the classification on unless `GPUIX_SCROLL_PATCH_OFF`, and gives gpui the gate. Once.
@@ -100,7 +100,7 @@ impl GpuixView {
         let settled_tapes = self.tapes.clone();
         let settled_view = view.clone();
         let hover = self.hover_after_scroll.clone();
-        window.set_scroll_patch_settled(Some(Rc::new(move |window: &mut gpui::Window, cx: &mut gpui::App| {
+        window.set_scroll_patch_settled(Some(Rc::new(move |window: &mut gpui::Window, cx: &mut gpui::App, translated: gpui::ScrollKey| {
             // The rows that left are out of the registries before the sweeps read the boxes, and out of
             // the page's records before a frame builds a row that comes in again.
             settled_tapes.settle_rows(window.window_handle().window_id());
@@ -108,7 +108,7 @@ impl GpuixView {
             if let Some(view) = settled_view.upgrade().filter(|view| !view.is_updating(cx)) {
                 view.update(cx, |view, _| {
                     view.forget_left_rows();
-                    view.note_scrolls_translated();
+                    view.note_scrolls_translated(translated);
                 });
             }
             // A translate under a wheel leaves the hover where it was: it follows when the scroll ends.
@@ -118,7 +118,7 @@ impl GpuixView {
             crate::observers::sweep_after_translate(window.window_handle(), window.viewport_size(), &reports, &sweep_tree, &callback, cx);
         })));
         let gate_tapes = self.tapes.clone();
-        window.set_scroll_patch_gate(Some(Rc::new(move |window: &gpui::Window, cx: &gpui::App| {
+        window.set_scroll_patch_gate(Some(Rc::new(move |window: &gpui::Window, cx: &gpui::App, translating: Option<gpui::ScrollKey>| {
             gate_tapes.fold_rows(window.window_handle().window_id());
             let Some(revision) = shown.0.get() else {
                 return Some(ScrollPatchReason::Other);
@@ -146,7 +146,7 @@ impl GpuixView {
             let Some(view) = view.upgrade().filter(|view| !view.is_updating(cx)) else {
                 return Some(ScrollPatchReason::Edited);
             };
-            if view.read(cx).sources_besides_scroll_changed(window) {
+            if view.read(cx).sources_besides_scroll_changed(window, translating) {
                 return Some(ScrollPatchReason::Edited);
             }
             crate::scrollbar::container_bar_stale(window.window_handle().window_id()).then_some(ScrollPatchReason::Thumb)

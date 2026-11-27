@@ -11385,9 +11385,11 @@ with. Set `GPUIX_RETAIN_OFF=1` (or call `setRetainEnabled(false)` on one window)
 to build every frame in full, for timing, `GPUIX_PATCH_OFF=1` (or
 `setPatchEnabled(false)` on one window) to draw every tick of an animation whole
 instead of patching it, `getPatchCounters().scrollPatch` for how the frames after a
-list scroll were classified and how many were drawn by moving the rows of the frame before (`patched`; `applyDeclines`
-says why the others that could be were not; a `<virtual-list>` with a scrollbar is not yet, give it `scrollbarWidth: "none"`
-to measure one; `GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off and draws every frame whole; `rowsMeasuredByLayout`, `rowsMeasuredByDeclaration` and `declarationMismatches` count how the lists measured their rows, and `GPUIX_LIST_SIZES_OFF=1`, or `setListSizesEnabled(false)`, makes them all by layout), and
+wheel over a `<virtual-list>` or a `div` scroller (`overflow: auto` or `scroll`) were classified and how many were drawn by moving the content of the frame before (`patched`; `applyDeclines`
+says why the others that could be were not; `held` counts each reason that holds a frame whole, and by cause under it, so a `div` scroller's frame names what held it:
+`NotRelocatable.entered` (a child culling left out would come into reach), `.unrooted` (the content paints or inserts something no relocatable root holds), `.nested`
+(a list or another scroller is inside it), `.layered` (its children are in a stacking context of their own or an order of their own, or hold a sticky or escaping box) and `.noRun` (none of the content is a relocatable root);
+a scrollbar's thumb is moved with the content, and `Thumb.*` says when it cannot be; `GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off and draws every frame whole; `rowsMeasuredByLayout`, `rowsMeasuredByDeclaration` and `declarationMismatches` count how the lists measured their rows, and `GPUIX_LIST_SIZES_OFF=1`, or `setListSizesEnabled(false)`, makes them all by layout), and
 `GPUIX_RETAIN_VERIFY=1` to build each frame that replayed a second time, whole,
 and compare the two: a difference is printed as `[retained]` and fails
 `unmount()`. Run your suite with it on after a change to a custom element.

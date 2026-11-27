@@ -505,11 +505,17 @@ describeNative("a hover that follows the end of a scroll leaves a row the scroll
       for (let tick = 0; tick < 6; tick += 1) wheel(renderer, 40)
       expect(rowUnder(renderer), "the rows moved under the pointer").toBe(first + 6)
       expect(renderer.getPatchCounters().scrollPatch.patched, "by translates").toBeGreaterThanOrEqual(6)
-      const before = { declined: declined(renderer) }
-      // A commit while the wheel goes on is part of the scroll and leaves the hover: it follows once the wheel is quiet, from the row that
-      // left to the one under the pointer.
+      const before = { declined: declined(renderer), patched: renderer.getPatchCounters().patchedFrames, painted: renderer.getPaintedFrameCount() }
+      // A commit while the wheel goes on is part of the scroll and leaves the hover: it draws its frames with the hover where it was.
       render(<Page rows="paint" salt={1} />)
       renderer.flush()
+      for (let frame = 0; frame < 3; frame += 1) {
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+      }
+      expect(rowColours(renderer, "commit").get(first + 6), "the hover has not moved while the wheel goes on").not.toBe(HOVER)
+      const committed = { patched: renderer.getPatchCounters().patchedFrames, painted: renderer.getPaintedFrameCount() }
+      // It follows once the wheel is quiet, from the row that left to the one under the pointer.
       renderer.advanceTime(500)
       for (let frame = 0; frame < 3; frame += 1) {
         renderer.dispatchNativeEvents()
@@ -517,8 +523,11 @@ describeNative("a hover that follows the end of a scroll leaves a row the scroll
       }
       expect(rowColours(renderer, "after-commit").get(first + 6), "the hover moved").toBe(HOVER)
       expect(declined(renderer) - before.declined, "no hover is declined for the row that left").toBe(0)
-      // Not asserted: whether that frame is a patch of the row it enters. It was while the hover followed the commit; the follow at the end
-      // of the wheel finds a view queued (`PendingView`) here and builds the frame whole. Open, see patch-frames.md (slice D1b).
+      const followed = { patched: renderer.getPatchCounters().patchedFrames - committed.patched, painted: renderer.getPaintedFrameCount() - committed.painted }
+      expect(committed.painted - before.painted, "the commit's frame is the one built whole").toBe(1)
+      expect(committed.patched - before.patched, "and nothing is patched while the hover waits").toBe(0)
+      expect(followed.patched, "the hover follows by a patch of the row it enters").toBe(1)
+      expect(followed.painted, "and builds nothing whole").toBe(0)
     } finally {
       unmount()
     }
