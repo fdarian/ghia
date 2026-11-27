@@ -44,7 +44,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: the caret of a window that blink
     for (const cleanup of cleanups.splice(0)) cleanup()
   })
 
-  async function mountInput() {
+  async function mountInput(inputStyle: Record<string, unknown> = {}) {
     const root = createTestRoot({ width: 400, height: 200 })
     cleanups.push(() => root.unmount())
     const renderer = root.renderer
@@ -54,7 +54,7 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: the caret of a window that blink
     root.render(() => (
       <div style={{ position: "relative", width: 400, height: 200 }}>
         <div style={{ opacity: faded() ? 0.5 : 1, transition: "opacity 300ms linear" }}>
-          <input testId="probe" defaultValue="some text" style={{ width: 200, height: 24 }} />
+          <input testId="probe" defaultValue="some text" style={{ width: 200, height: 24, ...inputStyle }} />
         </div>
         {covered() && <div style={{ position: "absolute", left: 0, top: 0, width: 300, height: 60, background: "#c0c0c0" }} />}
       </div>
@@ -92,6 +92,13 @@ describe.skipIf(!hasNativeTestRenderer)("Solid: the caret of a window that blink
     expect(Array.from({ length: PHASES }, () => framesInPhase(renderer))).toEqual([0, 0, 0, 0])
     await cover(false)
     expect(renderer.getCaretOnLayer(), "uncovered").toBe(true)
+  })
+
+  it("keeps the caret of a bordered input on the layer, with a focus border colour and a radius", async () => {
+    const { renderer } = await mountInput({ border: "1px solid #888", borderRadius: 4, padding: "0 6px", focus: { borderColor: "#36c" } })
+    expect(renderer.getCaretOnLayer(), "on the layer").toBe(true)
+    expect(renderer.getCaretNeedsTicks()).toBe(false)
+    expect(Array.from({ length: PHASES }, () => framesInPhase(renderer))).toEqual([0, 0, 0, 0])
   })
 
   it("blinks a caret the page's way, a patched frame for each phase, once an ancestor's opacity took it off the layer", async () => {
