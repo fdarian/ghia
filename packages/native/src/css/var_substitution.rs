@@ -374,6 +374,28 @@ pub(crate) fn holds_family(style: &StyleDesc, family: &str) -> bool {
     style.var_declarations.as_deref().is_some_and(|held| held.iter().any(|declaration| declaration.key.starts_with(family)))
 }
 
+impl VarDeclaration {
+    /// The property, as written in a style object (camel case).
+    pub(crate) fn key(&self) -> &str {
+        &self.key
+    }
+}
+
+/// The held declarations of `style` itself (not of its states) whose property is none of `keys`, in
+/// written order.
+pub(crate) fn held_outside<'a>(style: &'a StyleDesc, keys: &[&str]) -> Vec<&'a VarDeclaration> {
+    style.var_declarations.as_deref().unwrap_or_default().iter().filter(|held| !keys.contains(&held.key())).collect()
+}
+
+/// Whether every declaration `style` holds (its own, not its states') is a value of its property once `custom`
+/// substitutes it: one that is not is invalid at computed-value time, which unsets the property.
+pub(crate) fn all_resolve(style: &StyleDesc, custom: &CustomProperties) -> bool {
+    style.var_declarations.as_deref().unwrap_or_default().iter().all(|declaration| {
+        custom_properties::substitute(&declaration.text, custom)
+            .is_some_and(|text| parse_declaration(&declaration.key, text.trim()).is_some())
+    })
+}
+
 /// Whether `style` holds a declaration of one of `keys` (camel case, as a style object writes them).
 pub(crate) fn holds_key(style: &StyleDesc, keys: &[&str]) -> bool {
     style.var_declarations.as_deref().is_some_and(|held| held.iter().any(|declaration| keys.contains(&declaration.key.as_str())))

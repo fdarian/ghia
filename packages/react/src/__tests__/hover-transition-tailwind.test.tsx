@@ -46,11 +46,45 @@ const SHEET = `
   }
   .row { width: 150px; height: ${ROW}px; flex-shrink: 0; color: #ffffff; background-color: #223344; border-bottom: 1px solid #112233 }
   .row:hover { color: #ff0000; background-color: #664422 }
-  .vrow { --c1: #223344; --c2: #664422; --c3: #ffffff; --c4: #ff0000; width: 150px; height: ${ROW}px; flex-shrink: 0; color: var(--c3); background-color: var(--c1) }
-  .vrow:hover { color: var(--c4); background-color: var(--c2) }
 `
 
-type Variant = "v4" | "v3" | "sheet" | "sheet-vars" | "icon" | "icon-own" | "icon-fill" | "gradient" | "all"
+/**
+ * Tailwind v4's compiled output for `bg-slate-800 text-white hover:bg-orange-800 hover:text-red-500 transition-colors`, as it
+ * writes it: the theme on `:root, :host` in a layer, the colours as `var()`, the hover inside a media query, the duration and
+ * the timing function as `var()`. The last four rules are `hover:[--x:#664422]`, `bg-[var(--x)]` and `[--x:#223344]`, a
+ * custom property that the hover sets, and `hover:text-clear`, a colour that resolves to transparent.
+ */
+const TAILWIND_V4 = String.raw`
+  @layer theme, base, components, utilities;
+  @layer theme {
+    :root, :host {
+      --color-red-500: #ff0000;
+      --color-orange-800: #664422;
+      --color-slate-800: #223344;
+      --color-white: #ffffff;
+      --color-clear: transparent;
+      --default-transition-duration: ${DURATION}ms;
+      --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+  }
+  @layer utilities {
+    .bg-slate-800 { background-color: var(--color-slate-800); }
+    .text-white { color: var(--color-white); }
+    .transition-colors {
+      transition-property: ${V4_PROPERTY};
+      transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+      transition-duration: var(--tw-duration, var(--default-transition-duration));
+    }
+    .hover\:bg-orange-800 { &:hover { @media (hover: hover) { background-color: var(--color-orange-800); } } }
+    .hover\:text-red-500 { &:hover { @media (hover: hover) { color: var(--color-red-500); } } }
+    .hover\:text-clear { &:hover { @media (hover: hover) { color: var(--color-clear); } } }
+    .hover\:\[--x\:\#664422\] { &:hover { @media (hover: hover) { --x: #664422; } } }
+    .bg-\[var\(--x\)\] { background-color: var(--x); }
+    .\[--x\:\#223344\] { --x: #223344; }
+  }
+`
+
+type Variant = "v4" | "v3" | "sheet" | "tw4" | "tw4-sets-var" | "tw4-clear" | "icon" | "icon-own" | "icon-fill" | "gradient" | "all"
 
 const REST = "#223344"
 const TINT = "#443322"
@@ -77,9 +111,14 @@ function Icon(props: { variant: Variant; filled: boolean }) {
 }
 
 function Row(props: { index: number; variant: Variant; seen: string[]; tint: boolean }) {
-  if (props.variant === "sheet-vars") {
+  if (props.variant === "tw4" || props.variant === "tw4-sets-var" || props.variant === "tw4-clear") {
+    const classes = {
+      tw4: "bg-slate-800 text-white hover:bg-orange-800 hover:text-red-500 transition-colors",
+      "tw4-clear": "bg-slate-800 text-white hover:bg-orange-800 hover:text-clear transition-colors",
+      "tw4-sets-var": "[--x:#223344] bg-[var(--x)] text-white hover:[--x:#664422] transition-colors",
+    }[props.variant]
     return (
-      <div testId={`row-${props.index}`} className="vrow transition-colors">
+      <div testId={`row-${props.index}`} className={classes} style={{ width: 150, height: ROW, flexShrink: 0 }}>
         {`row-${props.index}`}
       </div>
     )
@@ -135,7 +174,8 @@ function Page(props: { variant: Variant; seen: string[] }) {
   tintRows = (next) => flushSync(() => setTinted(next))
   return (
     <>
-      {props.variant === "sheet" || props.variant === "sheet-vars" ? <style>{SHEET}</style> : null}
+      {props.variant === "sheet" ? <style>{SHEET}</style> : null}
+      {props.variant.startsWith("tw4") ? <style>{TAILWIND_V4}</style> : null}
       <div
         testId="column"
         style={{
@@ -243,7 +283,7 @@ async function pictureAt(variant: Variant, patch: boolean, instant: (typeof INST
   }
 }
 
-const PATCHED: Variant[] = ["v4", "v3", "sheet", "icon", "icon-own", "icon-fill"]
+const PATCHED: Variant[] = ["v4", "v3", "sheet", "tw4", "icon", "icon-own", "icon-fill"]
 
 describeNative("a hover whose element has Tailwind's transition-colors", { timeout: TIMEOUT }, () => {
   for (const variant of PATCHED) {
@@ -316,19 +356,21 @@ describeNative("a hover whose element has Tailwind's transition-colors", { timeo
     }
   })
 
-  unverified("stays a frame built whole with a transition of `all`", async () => {
-    const root = await open("all", true)
-    try {
-      expect(frames(root.renderer, () => move(root.renderer, ...ON)).painted).toBeGreaterThan(0)
-    } finally {
-      root.unmount()
-    }
-  })
+  for (const variant of ["all", "tw4-sets-var", "tw4-clear"] as const) {
+    unverified(`stays a frame built whole with ${variant}`, async () => {
+      const root = await open(variant, true)
+      try {
+        expect(frames(root.renderer, () => move(root.renderer, ...ON)).painted).toBeGreaterThan(0)
+      } finally {
+        root.unmount()
+      }
+    })
+  }
 
   for (const instant of INSTANTS.filter((instant) => ["enter-6", "enter-12", "leave-6"].includes(instant.name))) {
-    // `sheet-vars` is Tailwind v4's own output for the colours (`background-color: var(--color-...)`): a `var()` in a colour is
-    // a frame built whole (`restyles_beyond_hover`) whatever the transition is, and shows what patching off shows.
-    for (const variant of ["gradient", "all", "sheet-vars"] as const) {
+    // Frames built whole that show what patching off shows: a gradient whose custom property the hover sets, `all`, a hover
+    // that sets `--x` (`tw4-sets-var`) and one whose `var()` text resolves to transparent (`tw4-clear`).
+    for (const variant of ["gradient", "all", "tw4-sets-var", "tw4-clear"] as const) {
       it(`shows what patching off shows at ${instant.name}, with ${variant}`, async () => {
         const on = await pictureAt(variant, true, instant)
         const off = await pictureAt(variant, false, instant)

@@ -750,11 +750,21 @@ and a `var()` timing function; v3 the colours, `fill` and `stroke` with literal 
 - **A `var()` in the duration, the timing function, the delay or the behavior says how a transition runs, not on what.** Only a
   `var()` in `transition` or `transition-property` leaves the list unknown (`var_substitution::holds_key`). With no list written
   (`transition-duration: var(--d)` alone) the properties are `all`, so that is not colours.
-- **What stays whole.** A `var()` in a colour (v4's own `background-color: var(--color-blue-500)`, `color: var(--color-white)`)
-  makes the element one that `restyles_beyond_hover` (`StyleDesc::holds_var_declarations`: what a `var()` resolves to is not read
-  before the build), so a root that holds it is not recorded for a patch and the hover is a frame built whole, whatever the
-  transition says (`sheet-vars` in `hover-transition-tailwind.test.tsx` pins that it shows what patching off shows). A stylesheet
-  of v4 with its theme colours is therefore not patched yet; literal colours (v3, or a compiled theme) are.
+- **A colour that a `var()` gives is paint, when it resolves to a pair that paints** (`events/hover_vars.rs`, `hover_paint::vars_paint_only`;
+  v4's own `background-color: var(--color-blue-500)` inside `:hover` and `@media (hover: hover)`). The style holds the text until the element
+  is built, so two things are read. Statically (`paints_only`, memoized by style, no tree): the held declarations of the two states differ
+  only in the keys of `PAINT_KEYS` (colours and what draws one), and a hover that sets a custom property is not paint-only
+  (`custom_properties` is compared whole), so every other `var()` reads the same value in both. Such an element is not one that
+  `restyles_beyond_hover`, which only a `var()` outside those keys is (`holds_var_declarations_beyond`), so its root is recorded; a
+  `var()` that differs in a colour counts as a changed colour (`UnlessTransitionBelow`: the text below may inherit it). At the hover
+  (`hover_paints_only`, which has the tree): the custom properties of the element are worked out from the elements above it (a walk of
+  the ancestors, none of the subtree), both states are resolved against them (`var_substitution::resolve`) and the pair passes the
+  rules of a literal pair (`differs_by_paint_only`), so a text, border or shadow that resolves to transparent adds or takes away an
+  operation and the hover is whole; a background keeps its quad (`keeps_background_quad` sees a held `backgroundColor`), so one that
+  turns transparent is written over it. A value that does not resolve (a missing name, a text that is not a value of its property), a
+  `background` that resolves to a gradient and any element on the path that declares a custom property under a state or an
+  `@container` block (it may be in that state, which the tree does not say) are whole, as a `var()` in any other property is. A
+  commit that changes such a colour (`restyle_paints_of`) is still whole.
 
 **The ticks of the run.** The build of a patch's unit records nothing (`Retain::suspend`), so what it found running on each element
 it built is collected by `Retain::dynamic_bits(id, bits)` and handed to `Retain::land_patch` when the patch is drawn
@@ -1816,8 +1826,9 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   ends it, none after, and the same on the leave, with a row that holds an `<svg>` icon painted with `currentColor`, an icon with the
   list on itself, and an icon whose shape has `transition: fill` that a commit changes under the run; `transitionrun` and
   `transitionend` fire at 0 and 208 ms; the pictures at seven instants are what patching off draws (also under the verifier, with 0
-  mismatches); a gradient whose `--tw-gradient-from` the hover changes, a list with `all` and v4's `var()` colours are frames built whole
-  that show the same.
+  mismatches); v4's compiled stylesheet (`@layer theme` on `:root, :host`, `var()` colours, `&:hover` in `@media (hover: hover)`, `var(--tw-duration, ...)`)
+  is a patched hover with patched ticks; a gradient whose `--tw-gradient-from` the hover changes, a list with `all`, a hover that sets
+  `--x` and a colour that resolves to transparent are frames built whole that show the same.
 - react `hover-patch.test.tsx`: a paint-only hover, one that changes the padding and one that a `pointerenter` listener hears,
   over a virtual list and a plain column, cross the rows and back: the picture, the boxes, what is under the pointer and the cursor
   are what patching off draws (also under the verifier, with 0 mismatches), a tick is asked for only by the first, and the listener

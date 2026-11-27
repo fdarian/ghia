@@ -1443,17 +1443,27 @@ impl StyleDesc {
     /// Whether the style, or a state style or `@container` block of it, holds a declaration that
     /// reads the custom properties of the element it is built for.
     pub(crate) fn holds_var_declarations(&self) -> bool {
+        self.holds_var_declaration_where(&|_| true)
+    }
+
+    /// [`holds_var_declarations`](Self::holds_var_declarations) for a declaration of a property that is
+    /// none of `keys`.
+    pub(crate) fn holds_var_declarations_beyond(&self, keys: &[&str]) -> bool {
+        self.holds_var_declaration_where(&|key| !keys.contains(&key))
+    }
+
+    fn holds_var_declaration_where(&self, wanted: &dyn Fn(&str) -> bool) -> bool {
         macro_rules! any_state {
             ($($field:ident),+ $(,)?) => {
-                false $(|| self.$field.as_deref().is_some_and(Self::holds_var_declarations))+
+                false $(|| self.$field.as_deref().is_some_and(|state| state.holds_var_declaration_where(wanted)))+
             };
         }
-        self.var_declarations.is_some()
+        self.var_declarations.as_deref().is_some_and(|held| held.iter().any(|declaration| wanted(declaration.key())))
             || any_state!(
                 hover, active, focus, focus_visible, focus_within, group_hover, group_active, group_focus_within,
                 has_hover, has_active, has_focus, has_focus_visible, disabled, enabled, has_disabled, has_enabled,
             )
-            || self.container_rules.as_ref().is_some_and(|rules| rules.any_style(Self::holds_var_declarations))
+            || self.container_rules.as_ref().is_some_and(|rules| rules.any_style(|block| block.holds_var_declaration_where(wanted)))
     }
 
     /// Whether the style depends on the size of a query container: it has `@container` blocks
@@ -1578,7 +1588,10 @@ impl StyleDesc {
     pub(crate) fn hover_sets_background_color(&self) -> bool {
         [&self.hover, &self.has_hover].into_iter().any(|state| {
             state.as_deref().is_some_and(|state| {
-                state.background_color.is_some() || matches!(state.background, Some(BackgroundValue::Color(_)))
+                state.background_color.is_some()
+                    || matches!(state.background, Some(BackgroundValue::Color(_)))
+                    // A held `background` may turn out a gradient, which keeps a quad nobody paints a colour in.
+                    || crate::css::var_substitution::holds_key(state, &["backgroundColor", "background"])
             })
         })
     }
