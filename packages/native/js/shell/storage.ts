@@ -244,17 +244,17 @@ function onExit(): void {
 }
 
 /**
- * A signal that kills the process runs no `exit` listener, so a queued write would be lost. The handler flushes, removes itself
- * and raises the signal again for its default action. It is installed only for a signal nothing listens for (a listener, such
- * as the one `ghia dev` has for Ctrl-C, decides what the signal does and the process then ends through `exit`), and when one
- * was added since, it flushes and leaves the signal to that listener: raising it would kill the process under it.
+ * A signal that kills the process runs no `exit` listener, so a queued write would be lost. The handler is installed
+ * unconditionally and decides when the signal arrives: it flushes, and then raises the signal again for its default action
+ * only when it is the last listener. Another listener (the one `ghia dev`'s `runMain` installs before the entry is imported,
+ * or one added later) decides what the signal does, and the process then ends through `exit`, where the flush runs again;
+ * raising it would kill the process under that listener. The handler stays installed while another listener handles the signal.
  */
 function installSignalFlush(signal: (typeof EXIT_SIGNALS)[number]): void {
-  if (process.listenerCount(signal) > 0) return
   const handler = () => {
     flushStorage()
+    if (process.listenerCount(signal) > 1) return
     process.off(signal, handler)
-    if (process.listenerCount(signal) > 0) return
     if (!(process.pid > 0)) throw new Error(`Cannot raise ${signal} again: process.pid is ${process.pid}`)
     process.kill(process.pid, signal)
   }
