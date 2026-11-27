@@ -26,7 +26,14 @@ const VERDICT_LIMIT: usize = 4096;
 pub struct Validator {
     /// Keyed by the declaration alone as the style prop's JSON, so a declaration that several
     /// rules repeat is parsed once, and again only after a sheet change if it was forgotten.
-    verdicts: FxHashMap<String, bool>,
+    verdicts: FxHashMap<String, Verdict>,
+}
+
+struct Verdict {
+    accepted: bool,
+    /// A rejection is logged once, by the first rule's declaration that meets it: an `@supports` that asked
+    /// first did not log it, so a later declaration that is rejected still has to.
+    logged: bool,
 }
 
 impl Validator {
@@ -91,19 +98,30 @@ impl Validator {
             return true;
         }
         let alone = object_text(std::slice::from_ref(declaration));
-        if let Some(verdict) = self.verdicts.get(&alone) {
-            return *verdict;
+        if let Some(verdict) = self.verdicts.get_mut(&alone) {
+            if log_rejection && !verdict.accepted && !verdict.logged {
+                verdict.logged = true;
+                warn_ignored(declaration);
+            }
+            return verdict.accepted;
         }
         // A key the style does not know parses and sets nothing, which CSS also ignores.
         let accepted = parse_style(alone.as_bytes()).is_ok_and(|style| style != StyleDesc::default() && is_valid(&style));
-        if log_rejection && !accepted && !initial::is_initial_keyword(declaration) {
-            log::warn!("Stylesheet: declaration ignored, not a valid {}: {}", declaration.key, declaration.value);
+        let logged = log_rejection && !accepted;
+        if logged {
+            warn_ignored(declaration);
         }
         if self.verdicts.len() >= VERDICT_LIMIT {
             self.verdicts.clear();
         }
-        self.verdicts.insert(alone, accepted);
+        self.verdicts.insert(alone, Verdict { accepted, logged });
         accepted
+    }
+}
+
+fn warn_ignored(declaration: &Declaration) {
+    if !initial::is_initial_keyword(declaration) {
+        log::warn!("Stylesheet: declaration ignored, not a valid {}: {}", declaration.key, declaration.value);
     }
 }
 
@@ -118,4 +136,57 @@ fn is_valid(style: &StyleDesc) -> bool {
     [&style.color, &style.outline_color, &style.text_decoration_color]
         .into_iter()
         .all(|color| color.as_deref().is_none_or(|text| colors.resolve(text).is_some()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use super::*;
+
+    thread_local! {
+        static LOGGED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Records, for the thread that logs, what the `log` macros are given.
+    struct Capture;
+
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+
+        fn log(&self, record: &log::Record) {
+            LOGGED.with(|logged| logged.borrow_mut().push(record.args().to_string()));
+        }
+
+        fn flush(&self) {}
+    }
+
+    fn logged_while(run: impl FnOnce()) -> Vec<String> {
+        static INSTALL: std::sync::Once = std::sync::Once::new();
+        INSTALL.call_once(|| {
+            log::set_logger(&Capture).expect("no other test installs a logger");
+            log::set_max_level(log::LevelFilter::Warn);
+        });
+        LOGGED.with(|logged| logged.borrow_mut().clear());
+        run();
+        LOGGED.with(|logged| logged.borrow().clone())
+    }
+
+    fn invalid_color() -> Declaration {
+        Declaration { key: "color".to_owned(), value: "\"notacolor\"".to_owned() }
+    }
+
+    #[test]
+    fn a_rejected_declaration_is_logged_once_even_after_an_at_supports_asked_about_it() {
+        let mut validator = Validator::default();
+        let declaration = invalid_color();
+        let asked = logged_while(|| assert!(!validator.supports(&declaration)));
+        assert!(asked.is_empty(), "a question is not a mistake: {asked:?}");
+        let used = logged_while(|| assert!(!validator.accepts(&declaration)));
+        assert_eq!(used.len(), 1, "{used:?}");
+        let again = logged_while(|| assert!(!validator.accepts(&declaration)));
+        assert!(again.is_empty(), "{again:?}");
+    }
 }
