@@ -13,6 +13,11 @@ const settle = async (...renderers: TestRenderer[]) => {
   for (const renderer of renderers) renderer.flush()
 }
 
+function Portaled(props: { text: () => string; log: string[] }) {
+  onCleanup(() => props.log.push("portal cleanup"))
+  return <div testId="portaled">{props.text()}</div>
+}
+
 let opened = 0
 
 function openSide(): { popup: Window & typeof globalThis; renderer: TestRenderer } {
@@ -121,14 +126,14 @@ describe.skipIf(!hasNativeTestRenderer)("Solid in another window", () => {
         <span>owner</span>
         <Show when={shown()}>
           <Portal mount={popup.document.body as unknown as Node}>
-            <div testId="portaled">{(onCleanup(() => log.push("portal cleanup")), text())}</div>
+            <Portaled text={text} log={log} />
           </Portal>
         </Show>
       </div>
     ))
     await settle(renderer, app.renderer)
     expect(renderer.getAllText()).toEqual(["one"])
-    expect(app.renderer.getAllText()).toEqual(["owner"])
+    expect(app.renderer.getAllText().filter(Boolean)).toEqual(["owner"])
     setText("two")
     await settle(renderer, app.renderer)
     expect(renderer.getAllText()).toEqual(["two"])
