@@ -219,6 +219,8 @@ function dirname(path: string): string {
 /** Writes of every file storage still waiting for their task; the exit hook and a closed window flush them. */
 const pendingWrites = new Set<() => void>()
 let exitHookInstalled = false
+/** Set once the process is exiting: a change made by an `exit` listener that runs after ours has no later task to wait for. */
+let exiting = false
 
 /**
  * Writes what the file storages hold that is not on disk yet. Called when the process exits and when the last window closes,
@@ -232,6 +234,31 @@ export function flushStorage(): void {
       console.error("[ghia] localStorage could not be written", error)
     }
   }
+}
+
+const EXIT_SIGNALS = ["SIGINT", "SIGTERM"] as const
+
+function onExit(): void {
+  exiting = true
+  flushStorage()
+}
+
+/**
+ * A signal that kills the process runs no `exit` listener, so a queued write would be lost. The handler flushes, removes itself
+ * and raises the signal again for its default action. It is installed only for a signal nothing listens for (a listener, such
+ * as the one `ghia dev` has for Ctrl-C, decides what the signal does and the process then ends through `exit`), and when one
+ * was added since, it flushes and leaves the signal to that listener: raising it would kill the process under it.
+ */
+function installSignalFlush(signal: (typeof EXIT_SIGNALS)[number]): void {
+  if (process.listenerCount(signal) > 0) return
+  const handler = () => {
+    flushStorage()
+    process.off(signal, handler)
+    if (process.listenerCount(signal) > 0) return
+    if (!(process.pid > 0)) throw new Error(`Cannot raise ${signal} again: process.pid is ${process.pid}`)
+    process.kill(process.pid, signal)
+  }
+  process.on(signal, handler)
 }
 
 function writeAtomically(fs: NodeFs, path: string, items: ReadonlyMap<string, string>): void {
@@ -257,7 +284,7 @@ function writeAtomically(fs: NodeFs, path: string, items: ReadonlyMap<string, st
  * A storage backed by the JSON file at `path`: read once now, and written whole to a temporary file that is renamed over it,
  * so a crash leaves the old content or the new. A change updates memory at once and the write (with its fsync) goes out once
  * for a burst of changes, from a task queued by the first; a browser also persists storage after the call returns. A write
- * that fails is reported to the console and tried again by the next change or the exit flush.
+ * that fails is reported to the console and tried again by the next change or the exit flush. During exit a change is written at once.
  */
 export function createFileStorage(path: string): Storage {
   const fs = nodeFs()
@@ -275,11 +302,16 @@ export function createFileStorage(path: string): Storage {
   }
   if (!exitHookInstalled) {
     exitHookInstalled = true
-    process.on("exit", flushStorage)
+    process.on("exit", onExit)
+    for (const signal of EXIT_SIGNALS) installSignalFlush(signal)
   }
   return new Storage(CONSTRUCT, items, (live) => {
     current = live
     pendingWrites.add(flush)
+    if (exiting) {
+      flushStorage()
+      return
+    }
     if (queued) return
     queued = true
     setTimeout(() => {

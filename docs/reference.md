@@ -5547,8 +5547,9 @@ browser (`@solidjs/router`, TanStack Router, React Router) runs unchanged on the
 - **`localStorage`** is the same `Storage`, kept in `~/Library/Application Support/<appId>/Local Storage/localStorage.json`.
   The file is read when `localStorage` is first used. A change updates memory at once and the file is written whole (to a
   temporary file that is fsynced and renamed over it) once for a burst of changes, from a task the first one queues, as a
-  browser persists storage after the call returns; the process exit and the close of the last window write what is still
-  waiting, so a crash leaves the old content or the new and a quit loses nothing. A write that fails is logged and tried again by
+  browser persists storage after the call returns; the process exit, `SIGINT` or `SIGTERM` (when no listener of the app handles it; the signal then
+  still ends the process) and the close of the last window write what is still waiting, and a change made during exit is
+  written at once, so a crash leaves the old content or the new and a quit loses nothing. A write that fails is logged and tried again by
   the next change or the exit flush; a file that is not a JSON object of strings throws, naming the file. There is one file per
   app id and no `storage` event: Ghia has one document. Two processes with the same app id overwrite each other.
 - **The app id** is the `appId` option of `ghia()` (a directory name: no slash), and by default the `name` of the

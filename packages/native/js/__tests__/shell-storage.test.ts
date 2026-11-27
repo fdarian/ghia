@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process"
+import { fileURLToPath } from "node:url"
 import { mkdtempSync, readFileSync, rmSync, existsSync, readdirSync, writeFileSync, mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -148,16 +150,13 @@ describe("a file-backed Storage", () => {
     }
   })
 
-  it("flushStorage writes what is waiting, before the task and so on exit, and the exit hook is flushStorage", () => {
-    const on = vi.spyOn(process, "on")
+  it("flushStorage writes what is waiting, before the task", () => {
     const path = join(directory, "exit", "localStorage.json")
     const storage = createFileStorage(path)
-    on.mockRestore()
     storage.setItem("unsaved", "1")
     expect(existsSync(path)).toBe(false)
     flushStorage()
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ unsaved: "1" })
-    expect(process.listeners("exit")).toContain(flushStorage)
   })
 
   it("starts empty without a file and rejects one that is not a JSON object of strings", () => {
@@ -246,5 +245,112 @@ describe("localStorage of an app id", () => {
     Reflect.set(globalThis, APP_ID_KEY, "../escape")
     const storage = await import("../shell/storage.js")
     expect(() => storage.getLocalStorage()).toThrow(/cannot name a directory/)
+  })
+})
+
+describe("a file-backed Storage in a process that ends", () => {
+  let directory: string
+  beforeEach(() => {
+    directory = mkdtempSync(join(tmpdir(), "ghia-storage-end-"))
+  })
+  afterEach(() => {
+    rmSync(directory, { recursive: true, force: true })
+  })
+
+  const storageModule = fileURLToPath(new URL("../shell/storage.ts", import.meta.url))
+
+  interface Ended {
+    code: number | null
+    signal: NodeJS.Signals | null
+    output: string
+  }
+
+  /** Runs `body` in a Bun child with `createFileStorage`, `path` and a `ready()` that prints and, when `signal` is given, waits for the parent to send it. */
+  function runChild(body: string, signal?: NodeJS.Signals): Promise<Ended> {
+    const script = join(directory, "child.ts")
+    writeFileSync(
+      script,
+      `import { createFileStorage } from ${JSON.stringify(storageModule)}
+const path = process.argv[2]!
+const ready = () => console.log("ready")
+${body}
+`,
+    )
+    const path = join(directory, "data", "localStorage.json")
+    return new Promise((resolve, reject) => {
+      const child = spawn("bun", [script, path], { stdio: ["ignore", "pipe", "pipe"] })
+      let output = ""
+      let sent = false
+      child.stdout.on("data", (chunk: Buffer) => {
+        output += chunk.toString()
+        if (signal !== undefined && !sent && output.includes("ready")) {
+          sent = true
+          child.kill(signal)
+        }
+      })
+      child.stderr.on("data", (chunk: Buffer) => void (output += chunk.toString()))
+      child.on("error", reject)
+      child.on("close", (code, ended) => resolve({ code, signal: ended, output }))
+    })
+  }
+
+  const written = () => JSON.parse(readFileSync(join(directory, "data", "localStorage.json"), "utf8"))
+
+  // Stops the write task, as a signal that arrives before it does, and keeps the process alive for the signal.
+  const NO_TASK = `const keepAlive = setInterval(() => {}, 1000)
+globalThis.setTimeout = (() => 0) as unknown as typeof setTimeout`
+
+  it("writes a change made by an exit listener that was registered after the storage was", async () => {
+    const ended = await runChild(`const storage = createFileStorage(path)
+process.on("exit", () => storage.setItem("late", "1"))`)
+    expect(ended.code, ended.output).toBe(0)
+    expect(written()).toEqual({ late: "1" })
+  })
+
+  it("writes a queued change on SIGTERM and then dies of the signal", async () => {
+    const ended = await runChild(
+      `${NO_TASK}
+createFileStorage(path).setItem("queued", "1")
+ready()`,
+      "SIGTERM",
+    )
+    expect(ended.signal, ended.output).toBe("SIGTERM")
+    expect(written()).toEqual({ queued: "1" })
+  })
+
+  it("writes a queued change on SIGINT and then dies of the signal", async () => {
+    const ended = await runChild(
+      `${NO_TASK}
+createFileStorage(path).setItem("queued", "1")
+ready()`,
+      "SIGINT",
+    )
+    expect(ended.signal, ended.output).toBe("SIGINT")
+    expect(written()).toEqual({ queued: "1" })
+  })
+
+  it("leaves a signal to a listener added after the storage: it flushes and does not raise the signal again", async () => {
+    const ended = await runChild(
+      `${NO_TASK}
+createFileStorage(path).setItem("queued", "1")
+process.on("SIGTERM", () => {
+  console.log("handled")
+  clearInterval(keepAlive)
+})
+ready()`,
+      "SIGTERM",
+    )
+    expect(ended.signal, ended.output).toBeNull()
+    expect(ended.code, ended.output).toBe(0)
+    expect(ended.output).toContain("handled")
+    expect(written()).toEqual({ queued: "1" })
+  })
+
+  it("installs no signal handler where a listener already is", async () => {
+    const ended = await runChild(`process.on("SIGTERM", () => {})
+createFileStorage(path)
+console.log(process.listenerCount("SIGTERM"), process.listenerCount("SIGINT"))`)
+    expect(ended.code, ended.output).toBe(0)
+    expect(ended.output.trim()).toBe("1 1")
   })
 })
