@@ -4805,7 +4805,8 @@ impl GpuixRenderer {
     #[napi]
     pub fn open_url(&self, url: String) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return update_window(move |_view, _window, cx| crate::open_url::open(cx, &url))?
+        // Only the App is needed, so it does not lease the root view: a link handler can run inside a sync input handler.
+        return update_window_without_view(move |_window, cx| crate::open_url::open(cx, &url))?
             .map_err(Error::from_reason);
 
         #[cfg(not(target_os = "macos"))]
