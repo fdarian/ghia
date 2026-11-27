@@ -2,12 +2,15 @@
 //!
 //! `(property: value)` is true when a declaration of it would be kept: the check every
 //! declaration of a sheet goes through (`Validator`). `selector(...)` is true when the selector
-//! parses. `not`, `and` and `or` combine them, and a group in parentheses nests. A condition that
-//! does not parse (a general-enclosed block, a missing operand, `and` mixed with `or`) is false,
-//! and so is everything it is combined with: `None` here, which the caller drops the block for.
+//! parses, `font-tech()` and `font-format()` when this engine loads such a font. `not`, `and` and `or`
+//! combine them, and a group in parentheses nests. A `<general-enclosed>` block (one that is neither a
+//! known feature nor a condition) is false without being an error, so `not` of it holds. A condition
+//! that does not parse (a missing operand, `and` mixed with `or`, a bare word) is false, and so is
+//! everything it is combined with: `None` here, which the caller drops the block for.
 
 use super::atoms::Atoms;
 use super::declarations::parse_declaration;
+use super::font_face;
 use super::selector_parse::{parse_selector_list, Nesting};
 use super::tokenizer::{find_close, trim, Kind, Token};
 use super::validate::Validator;
@@ -61,34 +64,56 @@ impl Condition<'_, '_> {
         Some(result)
     }
 
-    /// `( <condition> )`, `( <declaration> )` or `selector( <selector> )`.
+    /// `( <condition> )`, `( <declaration> )`, `selector( <selector> )`, `font-tech( )`, `font-format( )`, or
+    /// `<general-enclosed>`: any other block or function, which is false and not an error, so that a condition
+    /// of a later spec does not drop the rule it guards in an engine that reads the rest.
     fn in_parens(&mut self) -> Option<bool> {
         self.skip_whitespace();
         let open = self.position;
         let kind = &self.tokens.get(open)?.kind;
-        let is_selector_function = matches!(kind, Kind::Function(name) if name.eq_ignore_ascii_case("selector"));
-        if *kind != Kind::OpenParen && !is_selector_function {
-            return None;
-        }
+        let function = match kind {
+            Kind::OpenParen => None,
+            Kind::Function(name) => Some(name.to_ascii_lowercase()),
+            _ => return None,
+        };
         let close = find_close(self.tokens, open);
         if close >= self.tokens.len() {
             return None;
         }
         self.position = close + 1;
         let inner = trim(&self.tokens[open + 1..close]);
-        if is_selector_function {
-            let parsed = parse_selector_list(self.src, inner, &mut Atoms::default(), Nesting::Top);
-            return Some(matches!(parsed, Ok(list) if list.len() == 1));
+        if let Some(name) = function {
+            return Some(match name.as_str() {
+                "selector" => {
+                    let parsed = parse_selector_list(self.src, inner, &mut Atoms::default(), Nesting::Top);
+                    matches!(parsed, Ok(list) if list.len() == 1)
+                }
+                "font-tech" => Self::names_one_of(inner, &font_face::SUPPORTED_TECHS),
+                "font-format" => Self::names_one_of(inner, &font_face::SUPPORTED_FORMATS),
+                _ => false,
+            });
         }
         let nested = match inner.first().map(|token| &token.kind) {
-            Some(Kind::OpenParen) => true,
+            Some(Kind::OpenParen | Kind::Function(_)) => true,
             Some(Kind::Ident(word)) => word.eq_ignore_ascii_case("not"),
             _ => false,
         };
         if nested {
-            return evaluate(self.src, inner, self.validator);
+            if let Some(result) = evaluate(self.src, inner, self.validator) {
+                return Some(result);
+            }
         }
-        let parsed = parse_declaration(self.src, inner)?;
-        Some(self.validator.supports(&parsed.declaration))
+        Some(parse_declaration(self.src, inner).is_some_and(|parsed| self.validator.supports(&parsed.declaration)))
+    }
+
+    /// Whether `argument` is one identifier or string that is one of `known`.
+    fn names_one_of(argument: &[Token], known: &[&str]) -> bool {
+        match argument {
+            [token] => match &token.kind {
+                Kind::Ident(word) | Kind::Str(word) => known.iter().any(|known| known.eq_ignore_ascii_case(word)),
+                _ => false,
+            },
+            _ => false,
+        }
     }
 }

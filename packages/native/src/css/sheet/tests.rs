@@ -520,6 +520,18 @@ fn supports_is_decided_at_parse_time() {
         ("((display: grid) and (not (bogus-property: 1)))", true),
         ("(--custom: anything)", true),
         ("(z-index: auto)", true),
+        ("(selector(.a))", true),
+        ("(selector(:bogus))", false),
+        ("font-tech(variations)", true),
+        ("font-tech(color-COLRv1)", false),
+        ("font-format(truetype)", true),
+        ("font-format(woff2)", false),
+        ("unknown-function(1, 2)", false),
+        ("not unknown-function(1, 2)", true),
+        ("(unknown tokens here)", false),
+        ("(unknown tokens here) or (display: grid)", true),
+        ("(display: grid) and (unknown tokens here)", false),
+        ("not (unknown tokens here)", true),
     ];
     let text: String =
         cases.iter().enumerate().map(|(index, (condition, _))| format!("@supports {condition} {{ a {{ top: {index}px }} }} ")).collect();
