@@ -899,7 +899,7 @@ loop alive (a `Bun.serve`).
 | `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
 | `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
 | `x` / `y` | CSS px | Where the window's top-left opens, in the global space [`screen`](#displays) reports: origin at the primary display's top-left, y down, so a display to the left of or above it is negative. The window opens on the display that contains the point, else the nearest. Both are needed, otherwise the window is centred on the primary display. With `fullscreen: true` it goes fullscreen on that display. As in Electron |
-| `fonts` | string[] | Font files (`.ttf`, `.otf`) read and passed to [`registerFont()`](#custom-fonts) right after the window opens, so `fontFamily: "Inter"` resolves without a system-wide install. Ghia ships no fonts: the app supplies its own files. Paths resolve against the process's current working directory, so pass absolute ones, e.g. `fileURLToPath(new URL("./fonts/Inter-Regular.ttf", import.meta.url))`. An unreadable path makes `render()` throw. On macOS a variable font follows `fontWeight` and `fontVariationSettings`; elsewhere it only renders its default instance, so pass one static file per weight |
+| `fonts` | string[] | Font files (`.ttf`, `.otf`, `.woff`, `.woff2`) read and passed to [`registerFont()`](#custom-fonts) right after the window opens, so `fontFamily: "Inter"` resolves without a system-wide install. Ghia ships no fonts: the app supplies its own files. Paths resolve against the process's current working directory, so pass absolute ones, e.g. `fileURLToPath(new URL("./fonts/Inter-Regular.ttf", import.meta.url))`. An unreadable path makes `render()` throw. On macOS a variable font follows `fontWeight` and `fontVariationSettings`; elsewhere it only renders its default instance, so pass one static file per weight |
 
 Call it again after a save and it remounts the tree on the same window.
 
@@ -1419,8 +1419,8 @@ background daemon, run the app from a `launchd` agent in
 ### Custom fonts
 
 `registerFont()` makes a font that is not installed on the machine available to
-`fontFamily`. It takes the bytes of a **TrueType or OpenType** file (`.ttf` or
-`.otf`).
+`fontFamily`. It takes the bytes of a **TrueType, OpenType, WOFF or WOFF2** file
+(`.ttf`, `.otf`, `.woff` or `.woff2`).
 
 ```tsx
 import { readFileSync } from 'node:fs'
@@ -1450,7 +1450,8 @@ GPUI aborts the process on a font without the names, and silently drops a font
 without the glyph, so `registerFont()` throws for both and for bytes that are
 not a font. Fonts load into the process and last until it exits.
 
-WOFF and WOFF2 are not supported ([deviations](./fork/deviations.md#text)); convert them to TrueType first. The browser
+A WOFF or WOFF2 file is unpacked and named by the platform's font loader (Core Text on macOS), so
+it needs the same names and glyph, and a file the loader cannot read throws. The browser
 renderer does not have this method, use `FontFace` there.
 
 ### Let an agent drive the app
@@ -10679,10 +10680,10 @@ The rule stands where `@keyframes` and `@property` do (the top of a sheet, `@lay
 
 `src` is a list tried in order; the first source that loads is the face. A source is:
 
-- `url(...)`, read as an [`<img>` `src`](#img) is (and a `url()` in a `background`): an absolute path, a path relative to the process's working directory (there is no document base URL), a `file://` URL or a `data:` URL. A `format()` hint other than `truetype`, `opentype`, `collection`, `truetype-variations` and `opentype-variations` skips the source without reading it. The file has to be TrueType or OpenType (`.ttf`, `.otf`, `.ttc`), with the family, full and PostScript names GPUI needs, as `registerFont()` asks. **WOFF and WOFF2 are not read** (list a `.ttf` source after them), and `http:` and `https:` addresses are not fetched; both are logged.
+- `url(...)`, read as an [`<img>` `src`](#img) is (and a `url()` in a `background`): an absolute path, a path relative to the process's working directory (there is no document base URL), a `file://` URL or a `data:` URL. A `format()` hint other than `truetype`, `opentype`, `collection`, `woff`, `woff2` and their `-variations` forms (`truetype-variations`, `opentype-variations`, `woff-variations`, `woff2-variations`) skips the source without reading it. The file has to be TrueType, OpenType, WOFF or WOFF2 (`.ttf`, `.otf`, `.ttc`, `.woff`, `.woff2`), with the family, full and PostScript names GPUI needs, as `registerFont()` asks; a broken or nameless file is skipped and logged, and the next source is tried. `http:` and `https:` addresses are not fetched, which is logged too.
 - `local(name)`: the installed font family of that name.
 
-A Vite app gets this from a CSS import: `import css from './app.css?inline'` gives the text of the file with each `url()` rewritten by Vite, and `ghia()` makes every font in one (`.ttf`, `.otf`, `.ttc`) a `data:` URL, in `ghia dev` and in `ghia build`, whatever its size (a build would otherwise emit `/assets/name-hash.ttf`, and the dev server answers `/src/name.ttf`, and the document has no base URL that either resolves against). Put the text in a `<style>` element, or a constructed sheet. A bare `import './app.css'` adds nothing in the UI process. Set `build.assetsInlineLimit` on the `ghia` environment to take over the inlining of the build.
+A Vite app gets this from a CSS import: `import css from './app.css?inline'` gives the text of the file with each `url()` rewritten by Vite, and `ghia()` makes every font in one (`.ttf`, `.otf`, `.ttc`, `.woff`, `.woff2`) a `data:` URL, in `ghia dev` and in `ghia build`, whatever its size (a build would otherwise emit `/assets/name-hash.ttf`, and the dev server answers `/src/name.ttf`, and the document has no base URL that either resolves against). Put the text in a `<style>` element, or a constructed sheet. A bare `import './app.css'` adds nothing in the UI process. Set `build.assetsInlineLimit` on the `ghia` environment to take over the inlining of the build.
 
 Faces are loaded synchronously in the frame that first builds with the rule, and text that names the family is laid out again when the face is there, also when the rule arrives or goes after the text. `font-weight`, `font-style` and `font-stretch` do not select among faces yourself: GPUI matches the weight and style of the files registered under one family name, so give the faces of one family files whose own family names agree. What differs from CSS is in [deviations](./fork/deviations.md#stylesheets).
 

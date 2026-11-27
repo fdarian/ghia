@@ -397,7 +397,7 @@ render(() => <App />, {
 })
 ```
 
-**`fonts`** is a convenience over `renderer.registerFont()`: it reads each `.ttf` or `.otf` file and registers its bytes right after the window opens. Pass absolute paths; relative ones resolve against the process's current working directory. An unreadable path throws before the window opens. Ghia ships no fonts. Variable fonts render only their default instance, so pass one static file per weight, and set `fontFamily` to the font's exact family name.
+**`fonts`** is a convenience over `renderer.registerFont()`: it reads each `.ttf`, `.otf`, `.woff` or `.woff2` file and registers its bytes right after the window opens. Pass absolute paths; relative ones resolve against the process's current working directory. An unreadable path throws before the window opens. Ghia ships no fonts. Variable fonts render only their default instance, so pass one static file per weight, and set `fontFamily` to the font's exact family name.
 
 **`createRenderer()`** stays public for tests and custom hosts. Pass `{ renderer }` into `render()` when you already have one.
 
