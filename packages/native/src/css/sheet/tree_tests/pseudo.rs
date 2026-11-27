@@ -1,5 +1,5 @@
 //! `::before` and `::after` rules (`css::sheet::pseudo`): which element a box belongs to, what it
-//! cascades to, and what marks it to be matched again. Nothing is drawn: the tests read the
+//! cascades to, and what marks it to be matched again. The tests read the
 //! style and the content the element holds for each box.
 
 use std::sync::Arc;
@@ -400,4 +400,100 @@ fn a_box_rule_without_content_marks_no_element_to_draw() {
     doc.flush();
     assert_eq!(color(&doc, div, BEFORE).as_deref(), Some("blue"));
     assert_eq!(revision(&doc, div), before, "no box has content, so nothing is drawn differently");
+}
+
+mod generated {
+    //! What the flush makes of a box: the virtual children of the element (`layout::generated`).
+
+    use super::*;
+    use crate::layout::generated::{box_id, is_generated, layout_children, owner_of, state_owner};
+
+    fn with_text(doc: &mut Doc, parent: u64, class: &str, content: &str) -> u64 {
+        let owner = doc.classed("div", parent, class);
+        let text = doc.make("#text");
+        doc.tree.set_text(text, content.into());
+        doc.tree.append_child(owner, text);
+        owner
+    }
+
+    #[test]
+    fn a_box_is_a_child_of_the_layout_and_none_of_the_document() {
+        let mut doc = Doc::new();
+        let owner = with_text(&mut doc, ROOT, "a", "text");
+        doc.style_element(ROOT, ".a::before { content: \"x\" } .a::after { content: \"y\"; display: block }");
+        doc.flush();
+
+        let element = &doc.tree.elements[&owner];
+        let before = box_id(owner, BEFORE);
+        let after = box_id(owner, AFTER);
+        assert_eq!(layout_children(&doc.tree, element)[..], [before, element.children[0], after]);
+        assert_eq!(element.children.len(), 1, "the DOM children are the element's own");
+
+        let made = &doc.tree.elements[&before];
+        assert_eq!(made.parent, Some(owner));
+        assert_eq!(doc.tree.elements[&made.children[0]].content.as_deref(), Some("x"));
+        assert_eq!(doc.tree.elements[&after].style.as_deref().and_then(|style| style.display.as_deref()), Some("block"));
+        assert!(is_generated(before) && owner_of(before) == owner && state_owner(made.children[0]) == owner);
+    }
+
+    #[test]
+    fn a_box_follows_its_rules_and_the_attribute_content_reads_and_goes_with_the_owner() {
+        let mut doc = Doc::new();
+        let owner = doc.classed("div", ROOT, "a off");
+        doc.tree.set_attribute(owner, "data-x", Some("one".into()));
+        doc.style_element(ROOT, ".on::before { content: \"on\" } .a::after { content: attr(data-x) }");
+        doc.flush();
+        let before = box_id(owner, BEFORE);
+        let after = box_id(owner, AFTER);
+        assert!(!doc.tree.elements.contains_key(&before));
+        let text_of = |doc: &Doc, id: u64| doc.tree.elements[&doc.tree.elements[&id].children[0]].content.clone();
+        assert_eq!(text_of(&doc, after).as_deref(), Some("one"));
+
+        doc.tree.set_attribute(owner, "data-x", Some("two".into()));
+        doc.flush();
+        assert_eq!(text_of(&doc, after).as_deref(), Some("two"));
+
+        doc.tree.set_attribute(owner, "class", Some("a on".into()));
+        doc.flush();
+        assert!(doc.tree.elements.contains_key(&before));
+
+        doc.tree.set_attribute(owner, "class", Some("a".into()));
+        doc.flush();
+        assert!(!doc.tree.elements.contains_key(&before), "a box no rule gives content goes");
+
+        let live = doc.tree.elements.len();
+        doc.tree.destroy_element(owner);
+        assert!(!doc.tree.elements.contains_key(&after), "the boxes go with the element");
+        assert_eq!(doc.tree.elements.len(), live - 3, "the element, and the box with its text");
+    }
+
+    #[test]
+    fn a_box_moves_the_revision_of_its_element_and_an_empty_text_makes_no_text_child() {
+        let mut doc = Doc::new();
+        let owner = with_text(&mut doc, ROOT, "a", "text");
+        doc.style_element(ROOT, ".a::before { content: \"\" }");
+        doc.flush();
+        doc.frame();
+        let before = box_id(owner, BEFORE);
+        assert!(doc.tree.elements[&before].children.is_empty());
+        let seen = revision(&doc, owner);
+
+        doc.tree.set_attribute(owner, "class", Some("b".into()));
+        doc.flush();
+        assert!(!doc.tree.elements.contains_key(&before));
+        assert!(revision(&doc, owner) > seen);
+    }
+
+    #[test]
+    fn a_universal_style_does_not_reach_a_box() {
+        let mut doc = Doc::new();
+        let owner = doc.classed("div", ROOT, "a");
+        doc.style_element(ROOT, ".a::before { content: \"x\" }");
+        doc.flush();
+        let before = box_id(owner, BEFORE);
+        let style = doc.tree.styles.intern(br##"{"color": "#ff0000"}"##).unwrap();
+        doc.tree.set_universal_style(Some(style.into_arc()));
+        let color = doc.tree.elements[&before].style.as_deref().and_then(|style| style.color.clone());
+        assert_eq!(color, None);
+    }
 }
