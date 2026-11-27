@@ -307,6 +307,17 @@ fn normalize_unicode_range(text: &str) -> Option<String> {
     (!ranges.is_empty()).then(|| ranges.join(", "))
 }
 
+/// The faces the rules of `css` make, for tests of what loads them.
+#[cfg(test)]
+pub(crate) fn faces_for_tests(css: &str, epoch: u64) -> Arc<SheetFontFaces> {
+    use super::atoms::Atoms;
+    use super::layers::Layers;
+    use super::validate::Validator;
+
+    let sheet = super::parse_sheet(css, &mut Atoms::default(), &mut Layers::default(), &mut Validator::default());
+    Arc::new(SheetFontFaces::for_test(epoch, sheet.font_faces.iter().map(|face| face.body.clone()).collect()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

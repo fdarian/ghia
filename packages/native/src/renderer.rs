@@ -9687,8 +9687,9 @@ impl GpuixView {
         fonts: Fonts,
         start: BuildStart,
     ) -> BuildCtx<'a> {
-        // A build outside `render` (a read that forces layout) sees the sheets' keyframes too.
+        // A build outside `render` (a read that forces layout) sees the sheets' keyframes and fonts too.
         self.keyframes.set_sheet(&tree.sheets.keyframes);
+        fonts.sync_faces(&tree.sheets.font_faces);
         BuildCtx {
             tree,
             inside_marker: None,
@@ -16875,7 +16876,7 @@ mod window_options_tests {
 /// Rejects fonts GPUI's text system cannot load. It unwraps the family, full and
 /// PostScript name records and aborts the whole process when one is missing, and
 /// skips a font without an "m" glyph, which would leave the family unresolvable.
-fn check_font(bytes: &[u8]) -> std::result::Result<(), String> {
+pub(crate) fn check_font(bytes: &[u8]) -> std::result::Result<(), String> {
     use ttf_parser::name_id::{FAMILY, FULL_NAME, POST_SCRIPT_NAME};
 
     let face = ttf_parser::Face::parse(bytes, 0)

@@ -58,6 +58,8 @@ pub use cascade::{CascadeCache, MatchedRules};
 pub use document::{ClassAtoms, ElementCss, StyleSheets};
 pub use declarations::render_declarations;
 pub use definitions::Defined;
+#[cfg(test)]
+pub(crate) use font_face::faces_for_tests;
 pub use font_face::{FaceSource, FaceStyle, FontFaceRule, SheetFontFaces};
 pub use keyframes::{KeyframeBlock, KeyframesRule, SheetKeyframes};
 pub use has::{HasArguments, HasInvalidation, HasRead, RelativeSelector};
