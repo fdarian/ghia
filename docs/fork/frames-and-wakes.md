@@ -703,6 +703,12 @@ drew.
   AppKit's hit test still reaches its hitboxes and the stack order does not change. Not measured on the three apps.
 - Fluid has no overlay, so none of this moves it (180 / 166 MB on main, 168 / 182 with the round, at rest).
 
+## Startup order
+
+`render()` (`@ghia/solid`, `@ghia/react`) mounts the tree and then starts the frame loop, so the first presented frame has content. The loop's first `tick()` draws the window; started before the mount it presented an empty window and the content a frame later (about 50 ms on the scratch app, measured with the window-visible marks of `ghia-startup-2026-11-27`). The mount does not need the loop: it is synchronous.
+
+Nothing slow goes before the window on the main thread. The `<img>` HTTP client (`custom_elements::img::init`) is a `LazyHttpClient` that builds its `ReqwestClient` inside the first http(s) fetch, on GPUI's background executor: `reqwest` loads the macOS trust store when it builds a client (about 150 `SecTrustSettings` calls, ~76 ms), which used to run in the did-finish-launching callback before the window existed. An app with no http(s) image never builds it. Its user agent (`gpuix`) and proxy handling are those of `ReqwestClient::user_agent`.
+
 ## API
 
 - `FrameLoopOptions` is exported from `@ghia/native/runtime`.
