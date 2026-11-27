@@ -271,9 +271,7 @@ impl FrameSteps {
             let Some(offset) = self.reports.borrow_mut().scrolls.take_change(id) else {
                 continue;
             };
-            // A box that scrolls (`overflow: auto` on a `::before`) is a scroll of its element.
-            let target = crate::layout::generated::owner_of(id);
-            sync_dispatch::emit_full(window, cx, &self.callback, target, "scroll", |payload| {
+            sync_dispatch::emit_full(window, cx, &self.callback, id, "scroll", |payload| {
                 payload.scroll_x = Some(f64::from(offset.0));
                 payload.scroll_y = Some(f64::from(offset.1));
             });

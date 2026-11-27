@@ -247,13 +247,13 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     expect(renderer.getRetainedElementCount()).toBe(3)
     done(renderer)
   })
-  it("a scroll of a box with overflow: auto is a scroll of its element", () => {
-    const events: { eventType: string; elementId: number }[] = []
+  it("a box with overflow: auto scrolls and reports nothing; its element's own scroll reports once, with its own offset", () => {
+    const events: { eventType: string; elementId: number; scrollY?: number }[] = []
     const renderer = new TestRenderer({
       width: 400,
       height: 400,
-      dispatchEvent: (event: { eventType: string; elementId: number }) => events.push(event),
-      dispatchSyncEvent: (event: { eventType: string; elementId: number }) => {
+      dispatchEvent: (event: { eventType: string; elementId: number; scrollY?: number }) => events.push(event),
+      dispatchSyncEvent: (event: { eventType: string; elementId: number; scrollY?: number }) => {
         events.push(event)
         return { defaultPrevented: false, propagationStopped: false }
       },
@@ -267,21 +267,29 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
         [
           "setStyleSheet",
           900,
-          `.a::before { content: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen"; display: block; width: 80px; height: 30px; overflow: auto }`,
+          `.a { width: 120px; height: 80px; overflow: auto } .a::before { content: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen"; display: block; width: 80px; height: 30px; overflow: auto } .tall { height: 400px }`,
         ],
         ["setAdoptedStyleSheets", [900]],
         ...element(10, 1, "div", "a"),
+        ...element(11, 10, "div", "tall"),
         ["setEventListener", 10, "scroll", true],
       ])
     )
     renderer.flush()
     const box = renderer.getElementBounds(10)
     if (!box) throw new Error("10 has no box")
+    // On the box: it scrolls, and a listener of its element hears nothing.
     renderer.nativeSimulateScrollWheel(box.x + 10, box.y + 10, 0, 20)
     renderer.flush()
+    expect(events.filter((event) => event.eventType === "scroll")).toEqual([])
+    // Below the box: the element scrolls, and its event is its own, once.
+    renderer.nativeSimulateScrollWheel(box.x + 10, box.y + 60, 0, 20)
+    renderer.flush()
     const scrolls = events.filter((event) => event.eventType === "scroll")
-    expect(scrolls.length).toBeGreaterThan(0)
-    expect(scrolls.every((event) => event.elementId === 10)).toBe(true)
+    expect(scrolls).toHaveLength(1)
+    expect(scrolls[0].elementId).toBe(10)
+    expect(scrolls[0].scrollY).toBeLessThan(0)
+    expect(-(scrolls[0].scrollY ?? 0)).toBe(renderer.getScrollOffset(10)?.[1])
     renderer.dispose()
   })
   it("keeps the caret of an editing host out of a placeholder box, and does not crash beside it", () => {

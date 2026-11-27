@@ -93,15 +93,6 @@ pub(crate) fn layout_children<'a>(tree: &RetainedTree, element: &'a RetainedElem
     Cow::Owned(all)
 }
 
-/// The event types `element` is listened to for: a box is listened to as its owner is, since a pointer
-/// on it is a pointer on the owner and what it reports (a scroll) is reported by the owner.
-pub(crate) fn listeners_of<'a>(tree: &'a RetainedTree, element: &'a RetainedElement) -> &'a std::collections::HashSet<String> {
-    if !is_generated(element.id) {
-        return element.events();
-    }
-    tree.elements.get(&owner_of(element.id)).expect("a box has its owner in the tree").events()
-}
-
 /// Whether `element` has no child to lay out: no child and no box.
 pub(crate) fn childless(tree: &RetainedTree, element: &RetainedElement) -> bool {
     element.children.is_empty() && boxes_of(tree, element).next().is_none()

@@ -10714,13 +10714,10 @@ impl gpui::Render for GpuixView {
         // back reports the size again, like a fresh observer.
         {
             let mut reports = self.paint_reports.borrow_mut();
-            // A box that scrolls reports to the element it is the box of (`generated::listeners_of`).
             reports.scrolls.retain(|id| {
-                tree.elements.contains_key(&id)
-                    && tree
-                        .elements
-                        .get(&crate::layout::generated::owner_of(id))
-                        .is_some_and(|owner| owner.events().contains("scroll"))
+                tree.elements
+                    .get(&id)
+                    .is_some_and(|element| element.events().contains("scroll"))
             });
             crate::observers::prune(
                 &mut reports.observers,
@@ -13029,7 +13026,7 @@ pub(crate) fn build_host_container(
     } else {
         selection_start_flag(style)
     };
-    let scroll_report = scroll_reporter(element.id, crate::layout::generated::listeners_of(ctx.tree, element), ctx);
+    let scroll_report = scroll_reporter(element.id, element.events(), ctx);
     if scroll_report.is_some() {
         ctx.retain.exclude(crate::retain::Exclusion::PaintReporter);
     }
