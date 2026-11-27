@@ -15,6 +15,13 @@ use crate::css::url;
 use super::keyframes::split_declarations;
 use super::tokenizer::{trim, Kind, Token};
 
+/// The `format()` hints of a source this engine can load, and what `@supports font-format()` answers for.
+pub(crate) const SUPPORTED_FORMATS: [&str; 5] = ["truetype", "opentype", "collection", "truetype-variations", "opentype-variations"];
+
+/// The `tech()` keywords of a source this engine can use, and what `@supports font-tech()` answers for: the
+/// text system applies OpenType features and variation axes, and has no colour glyph formats.
+pub(crate) const SUPPORTED_TECHS: [&str; 2] = ["variations", "features-opentype"];
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum FaceSource {
     /// An address as written in `url()`, read as an `<img>` `src` is. `format` is the lowercased `format()` hint.
@@ -122,10 +129,9 @@ pub(super) fn parse(src: &str, contents: &[Token]) -> Result<FontFaceRule, Strin
     let Some(family) = family else {
         return Err("no valid font-family".to_owned());
     };
-    let sources = sources.unwrap_or_default();
-    if sources.is_empty() {
+    let Some(sources) = sources else {
         return Err("no valid src".to_owned());
-    }
+    };
     let identity = format!(
         "{}|{}-{}|{:?}|{}-{}|{}",
         family.to_lowercase(),
@@ -155,9 +161,9 @@ fn family_name(value: &[Token]) -> Option<String> {
             _ => return None,
         }
     }
-    const RESERVED: [&str; 14] = [
+    const RESERVED: [&str; 19] = [
         "serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded",
-        "inherit", "initial", "unset", "default",
+        "emoji", "math", "fangsong", "inherit", "initial", "unset", "revert", "revert-layer", "default",
     ];
     match words.as_slice() {
         [] => None,
@@ -167,7 +173,7 @@ fn family_name(value: &[Token]) -> Option<String> {
 }
 
 /// The valid items of a `src` list, in order: `url(...)` and `local(...)`, each optionally followed
-/// by `format()` and `tech()`.
+/// by `format()` and `tech()`; an item that needs a technology the text system lacks is skipped.
 fn parse_sources(text: &str) -> Vec<FaceSource> {
     split_commas(text).into_iter().filter_map(parse_source).collect()
 }
@@ -179,7 +185,11 @@ fn parse_source(item: &str) -> Option<FaceSource> {
     for word in words {
         if let Some(arguments) = crate::css::syntax::function_args(word, "format") {
             format = Some(unquote(arguments)?.to_ascii_lowercase());
-        } else if crate::css::syntax::function_args(word, "tech").is_none() {
+        } else if let Some(technologies) = crate::css::syntax::function_args(word, "tech") {
+            if !split_commas(technologies).into_iter().all(|tech| SUPPORTED_TECHS.iter().any(|known| known.eq_ignore_ascii_case(tech.trim()))) {
+                return None;
+            }
+        } else {
             return None;
         }
     }
@@ -218,7 +228,7 @@ fn quoted(text: &str) -> Option<&str> {
     text.strip_prefix(quote)?.strip_suffix(quote)
 }
 
-/// `normal`, `bold`, `auto`, or one or two numbers from 1 to 1000 (a range for a variable font).
+/// `auto`, or one or two of `normal`, `bold` and numbers from 1 to 1000 (a range for a variable font).
 fn weight_range(text: &str) -> Option<(f32, f32)> {
     let words = split_whitespace(text);
     let value = |word: &str| match word.to_ascii_lowercase().as_str() {
@@ -229,15 +239,11 @@ fn weight_range(text: &str) -> Option<(f32, f32)> {
     match words.as_slice() {
         [one] => value(one).map(|weight| (weight, weight)),
         [from, to] => {
-            let (from, to) = (number_only(from)?, number_only(to)?);
+            let (from, to) = (value(from)?, value(to)?);
             Some((from.min(to), from.max(to)))
         }
         _ => None,
     }
-}
-
-fn number_only(word: &str) -> Option<f32> {
-    word.parse::<f32>().ok().filter(|number| (1.0..=1000.0).contains(number))
 }
 
 /// `normal`, `italic`, `auto`, or `oblique` with up to two angles.
@@ -292,6 +298,10 @@ fn normalize_unicode_range(text: &str) -> Option<String> {
         .into_iter()
         .map(|item| {
             let digits = item.strip_prefix("U+").or_else(|| item.strip_prefix("u+"))?;
+            // The wildcard split below cuts by bytes, which is only a cut of characters in ASCII.
+            if !digits.is_ascii() {
+                return None;
+            }
             let valid_run = |run: &str| (1..=6).contains(&run.len()) && run.chars().all(|c| c.is_ascii_hexdigit());
             let valid = match digits.split_once('-') {
                 Some((from, to)) => valid_run(from) && valid_run(to),
@@ -411,6 +421,40 @@ mod tests {
                 "@font-face: no valid font-family",
                 "@font-face: no valid src"
             ]
+        );
+    }
+
+    #[test]
+    fn a_non_ascii_unicode_range_is_invalid_and_does_not_panic() {
+        let rule = only("@font-face { font-family: A; src: url(a); unicode-range: U+é }");
+        assert_eq!(rule.unicode_range, None);
+        let rule = only("@font-face { font-family: A; src: url(a); unicode-range: U+4?\u{e9}, U+0-7F }");
+        assert_eq!(rule.unicode_range, None);
+    }
+
+    #[test]
+    fn weight_ranges_take_the_keywords() {
+        assert_eq!(only("@font-face { font-family: A; src: url(a); font-weight: normal bold }").weight, (400.0, 700.0));
+        assert_eq!(only("@font-face { font-family: A; src: url(a); font-weight: bold 300 }").weight, (300.0, 700.0));
+        assert_eq!(only("@font-face { font-family: A; src: url(a); font-weight: auto auto }").weight, (400.0, 400.0));
+    }
+
+    #[test]
+    fn css_wide_keywords_and_generic_families_are_not_face_names() {
+        for name in ["revert", "revert-layer", "math", "emoji", "fangsong", "REVERT"] {
+            let parsed = sheet(&format!("@font-face {{ font-family: {name}; src: url(a) }}"));
+            assert!(parsed.font_faces.is_empty(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_source_needing_a_technology_the_text_system_lacks_is_skipped() {
+        let rule = only(
+            "@font-face { font-family: A; src: url(a.ttf) tech(color-COLRv1), url(b.ttf) tech(variations), url(c.ttf) tech(variations, features-opentype), url(d.ttf) tech(variations, palettes) }",
+        );
+        assert_eq!(
+            rule.sources,
+            vec![FaceSource::Url { address: "b.ttf".into(), format: None }, FaceSource::Url { address: "c.ttf".into(), format: None }]
         );
     }
 

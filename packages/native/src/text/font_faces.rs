@@ -16,11 +16,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::css::sheet::{FaceSource, FaceStyle, FontFaceRule, SheetFontFaces};
+use crate::css::sheet::{FaceSource, FaceStyle, FontFaceRule, SheetFontFaces, SUPPORTED_FORMATS};
 use crate::custom_elements::img::{self, ImgSource};
-
-/// The `format()` hints of a source this engine can load.
-const SUPPORTED_FORMATS: [&str; 5] = ["truetype", "opentype", "collection", "truetype-variations", "opentype-variations"];
 
 /// A face that loaded: the family GPUI knows it as, and what the rule said it covers.
 #[derive(Clone, Debug, PartialEq)]
