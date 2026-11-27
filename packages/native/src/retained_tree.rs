@@ -2540,10 +2540,17 @@ impl RetainedTree {
         let marker_hit = || {
             (walk.painted_box)(crate::layout::list_marker_paint::marker_box_id(id)).is_some_and(|bounds| inside(&bounds, true, true))
         };
+        // A box generated for the element (`::before`, `::after`) is where the element is hit, though it may lie outside it.
+        let generated_hit = || {
+            crate::layout::generated::boxes_of(self, element)
+                .any(|box_id| (walk.painted_box)(box_id).is_some_and(|bounds| inside(&bounds, true, true)))
+        };
         let own = (!clipped
             && !none
             && !hidden
-            && (own_box.is_some_and(|bounds| inside(&bounds, true, true)) || (element.display().as_deref() == Some("list-item") && marker_hit())))
+            && (own_box.is_some_and(|bounds| inside(&bounds, true, true))
+                || (element.display().as_deref() == Some("list-item") && marker_hit())
+                || generated_hit()))
         .then_some(id);
         match own_context {
             Some(own_context) => own_context.paint_order(own, in_flow),

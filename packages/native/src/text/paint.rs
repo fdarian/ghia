@@ -60,6 +60,8 @@ pub(crate) struct RegEntry {
     line: Option<Arc<str>>,
     /// See [`selection::RegisteredText::cell`].
     cell: Option<selection::TableCell>,
+    /// See [`selection::RegisteredText::holes`].
+    holes: Arc<[Range<usize>]>,
     /// From the space `layout` is in to the window: a press hits the text where it is drawn.
     pub(crate) to_window: TransformationMatrix,
     /// The bytes the node selection washed, which a replay of the text puts back with it.
@@ -386,6 +388,7 @@ pub(crate) fn same_text_apart_from_transform(
         && left.group == right.group
         && left.line == right.line
         && left.cell == right.cell
+        && left.holes == right.holes
         && left.node_wash == right.node_wash
         && left.caret == right.caret
 }
@@ -462,7 +465,7 @@ fn describe_text(entry: &RegEntry, doc: &selection::DocPos, with_matrix: bool, m
         entry.group,
         entry.line,
         entry.cell,
-    )
+    ) + &(if entry.holes.is_empty() { String::new() } else { format!(" holes {:?}", entry.holes) })
 }
 
 /// Last painted start region that contains `position`.
@@ -604,6 +607,8 @@ pub struct SelectableText {
     pub line: Option<Arc<str>>,
     /// See [`crate::text::selection::RegisteredText::cell`].
     pub cell: Option<selection::TableCell>,
+    /// See [`crate::text::selection::RegisteredText::holes`].
+    pub holes: Arc<[Range<usize>]>,
     pub highlight: Option<HighlightSource>,
     /// The ends of the text whose empty line space `text-box-trim` cuts.
     pub text_box_trim: gpui::TextBoxTrim,
@@ -674,6 +679,7 @@ impl SelectableText {
             group: None,
             line: None,
             cell: None,
+            holes: Arc::from([]),
             highlight: None,
             text_box_trim: gpui::TextBoxTrim::default(),
             inline_targets: None,
@@ -740,6 +746,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         group,
         line,
         cell,
+        holes,
         highlight,
         text_box_trim,
         inline_targets,
@@ -912,6 +919,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     group,
                     line: line.clone(),
                     cell,
+                    holes: holes.clone(),
                     to_window: window.transform(),
                     node_wash,
                     caret: painted_caret,
@@ -1276,6 +1284,7 @@ fn resolve_drag(window: WindowId, selection: &SharedSelection, head: (usize, usi
                 let text = selection::RegisteredText {
                     line: e.line.as_deref(),
                     cell: e.cell,
+                    holes: &e.holes,
                     ..selection::RegisteredText::whole(e.key.as_ref(), e.text.as_ref(), e.group)
                 };
                 (text, &e.doc)
@@ -1732,6 +1741,7 @@ mod tests {
                 group: None,
                 line: None,
                 cell: None,
+                holes: Arc::from([]),
                 to_window: TransformationMatrix::unit(),
                 node_wash: Vec::new(),
                 caret: None,

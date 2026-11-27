@@ -1,6 +1,6 @@
 /**
  * `::before` and `::after` rules in a stylesheet match the box of the element and cascade to its
- * style, which `getComputedStyle(element, "::before")` reads (nothing is drawn for them yet). The
+ * style, which `getComputedStyle(element, "::before")` reads (what is drawn is in `css-pseudo-box.test.ts`). The
  * box inherits from its element, `content` reads like Chrome writes it, and everything that
  * matches an element again (a class, an attribute, the pointer, the window) matches its boxes.
  */
@@ -219,17 +219,5 @@ describe.skipIf(!hasNativeTestRenderer)("::before and ::after in a stylesheet", 
     renderer.flush()
     expect(content(renderer, 10, "before")).toBe("none")
     renderer.dispose()
-  })
-
-  it("draws nothing for a box yet: the element's own box is what it was", () => {
-    const boundsOf = (sheet: string) => {
-      const renderer = mount(sheet, element(10, 1, "div", "a", sized(10, 100, 20)))
-      const bounds = renderer.getElementBounds(10)
-      renderer.dispose()
-      return bounds
-    }
-    const without = boundsOf("")
-    expect(without).not.toBeNull()
-    expect(boundsOf(`.a::before { content: "xxxxxxxx"; display: block; width: 200px }`)).toEqual(without)
   })
 })

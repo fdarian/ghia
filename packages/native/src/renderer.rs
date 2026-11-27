@@ -13824,7 +13824,7 @@ fn paragraph_content(
     let line = ctx
         .inline_line
         .take()
-        .or_else(|| (paragraph.atomics().next().is_some() || paragraph.has_placeholder()).then(|| paragraph.key()));
+        .or_else(|| (paragraph.atomics().next().is_some() || paragraph.has_placeholder() || paragraph.has_generated()).then(|| paragraph.key()));
     let (aligned_boxes, atomics) = build_atomics(paragraph, &styles, &motion, line.as_ref(), ctx, window, cx);
     let verifying = ctx.retain.verifying();
     let (paragraph_element, subtree, boxes_digest) = {
@@ -13893,6 +13893,7 @@ fn paragraph_content(
             group: None,
             line,
             cell: ctx.inherited.table_cell,
+            holes: paragraph.generated_ranges().into(),
             selectable: ctx.inherited.selectable,
             highlight: ctx
                 .inherited

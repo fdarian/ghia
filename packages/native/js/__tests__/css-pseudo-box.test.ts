@@ -36,6 +36,7 @@ function mount(sheet: string, build: Op[], delivered: Delivered[] = [], width = 
     },
   })
   renderer.clockPause()
+  renderer.setRetainVerify(true)
   renderer.applyBatch(
     encodeWireBatchForTest([
       ["createElement", 1, "div"],
@@ -44,6 +45,9 @@ function mount(sheet: string, build: Op[], delivered: Delivered[] = [], width = 
       ["setStyleSheet", 900, sheet],
       ["setAdoptedStyleSheets", [900]],
       ...build,
+      // Unchanged while the rest moves, so the frames replay it and the verifier compares the replay.
+      ...element(90, 1, "div", "other"),
+      ...text(91, 90, "Other"),
     ])
   )
   renderer.flush()
@@ -66,6 +70,13 @@ const apply = (renderer: TestRenderer, ops: Op[]) => {
   renderer.flush()
 }
 
+/** Disposes a renderer once the frames that replayed something were built whole and agreed. */
+const done = (renderer: TestRenderer) => {
+  expect(renderer.getRetainMismatches()).toEqual([])
+  expect(renderer.getRetentionMismatches()).toEqual([])
+  renderer.dispose()
+}
+
 const OUT: [number, number] = [395, 395]
 
 describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () => {
@@ -80,13 +91,13 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     expect(widened.width).toBeGreaterThan(bare.width + 5)
     expect(widened.height).toBeCloseTo(bare.height, 1)
     expect(renderer.getPaintedText().some((painted) => painted.includes("→ Hello"))).toBe(true)
-    renderer.dispose()
+    done(renderer)
   })
 
   it("an inline ::after follows the text of its element", () => {
     const renderer = mount(`.a::after { content: " ←" }`, [...element(10, 1, "div", "a"), ...text(11, 10, "Hello")])
     expect(renderer.getPaintedText().some((painted) => painted.includes("Hello ←"))).toBe(true)
-    renderer.dispose()
+    done(renderer)
   })
 
   it("a block ::after adds a line below the text", () => {
@@ -99,7 +110,7 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     const grown = bounds(renderer, 10)
     expect(grown.height).toBeGreaterThan(bare.height * 1.8)
     expect(renderer.getPaintedText()).toEqual(expect.arrayContaining(["Hello", "more"]))
-    renderer.dispose()
+    done(renderer)
   })
 
   it("an absolute overlay with no text takes no room, and a pointer on it is a pointer on the element", () => {
@@ -123,7 +134,7 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     expect(clicks.length).toBe(1)
     expect(clicks[0].target).toBe(10)
     expect(clicks[0].offsetX).toBeCloseTo(x - bounds(renderer, 10).x, 0)
-    renderer.dispose()
+    done(renderer)
   })
 
   it("a ::before of a flex container is its first item and a ::after its last, and order applies to them", () => {
@@ -136,12 +147,12 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     const renderer = mount(sheet, build)
     expect(bounds(renderer, 11).x - bounds(renderer, 10).x).toBeCloseTo(10, 0)
     expect(bounds(renderer, 12).x - bounds(renderer, 11).x).toBeCloseTo(40, 0)
-    renderer.dispose()
+    done(renderer)
 
     const ordered = mount(`${sheet} .row::before { order: 5 }`, build)
     expect(bounds(ordered, 11).x - bounds(ordered, 10).x).toBeCloseTo(0, 0)
     expect(bounds(ordered, 12).x - bounds(ordered, 11).x).toBeCloseTo(40, 0)
-    ordered.dispose()
+    done(ordered)
   })
 
   it("a state of the element restyles its box: .btn:hover::before", () => {
@@ -152,7 +163,21 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     expect(bounds(renderer, 10).width).toBeCloseTo(rest + 40, 0)
     renderer.nativeSimulateMouseMove(...OUT)
     expect(bounds(renderer, 10).width).toBeCloseTo(rest, 0)
-    renderer.dispose()
+    expect(renderer.getRetainedCounters().verified, "frames that replayed the unchanged element were compared").toBeGreaterThan(0)
+    done(renderer)
+  })
+
+  it("a focus variant of the element restyles its box: .btn:focus::before", () => {
+    const sheet = `.btn::before { content: ""; display: inline-block; width: 10px; height: 10px } .btn:focus::before { width: 50px }`
+    const renderer = mount(sheet, [...element(10, 1, "div", "btn", [["setCustomProp", 10, "tabIndex", 0]]), ...text(11, 10, "Go")])
+    const rest = bounds(renderer, 10).width
+    renderer.focusElement(10)
+    renderer.flush()
+    expect(bounds(renderer, 10).width).toBeCloseTo(rest + 40, 0)
+    renderer.blurElement(10)
+    renderer.flush()
+    expect(bounds(renderer, 10).width).toBeCloseTo(rest, 0)
+    done(renderer)
   })
 
   it("content: attr() follows the attribute", () => {
@@ -164,7 +189,7 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     apply(renderer, [["setAttribute", 10, "data-label", "Second"]])
     expect(renderer.getPaintedText().some((painted) => painted.includes("Second x"))).toBe(true)
     expect(renderer.getPaintedText().some((painted) => painted.includes("One"))).toBe(false)
-    renderer.dispose()
+    done(renderer)
   })
 
   it("follows the class: a box comes with a rule and goes with it", () => {
@@ -174,7 +199,7 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     expect(bounds(renderer, 10).width).toBeGreaterThan(bare + 5)
     apply(renderer, [["setAttribute", 10, "class", "off"]])
     expect(bounds(renderer, 10).width).toBeCloseTo(bare, 1)
-    renderer.dispose()
+    done(renderer)
   })
 
   it("the text of a box is not selected or copied", () => {
@@ -188,15 +213,38 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     expect(selected).toContain("Hello")
     expect(selected).not.toContain("BEFORE")
     expect(selected).not.toContain("AFTER")
-    renderer.dispose()
+    done(renderer)
+  })
+
+  it("a box that lies outside its element is where the element is hit", () => {
+    const sheet = `.a { position: relative; margin-top: 40px } .a::after { content: ""; position: absolute; bottom: 100%; left: 0; width: 30px; height: 30px }`
+    const renderer = mount(sheet, [...element(10, 1, "div", "a"), ...text(11, 10, "Hello")])
+    const box = bounds(renderer, 10)
+    expect(renderer.getElementsAt(box.x + 10, box.y - 10)).toContain(10)
+    expect(renderer.getElementsAt(box.x + 50, box.y - 10)).not.toContain(10)
+    done(renderer)
+  })
+
+  it("getComputedStyle reads the used size of the box that was drawn", () => {
+    const renderer = mount(`.a::before { content: ""; display: block; width: 30px; height: 12px }`, [
+      ...element(10, 1, "div", "a"),
+      ...text(11, 10, "Hello"),
+    ])
+    const pairs = renderer.getComputedStyle(10, "before")
+    if (!pairs) throw new Error("10 is not in the document")
+    const values = new Map<string, string>()
+    for (let at = 0; at < pairs.length; at += 2) values.set(pairs[at], pairs[at + 1])
+    expect(values.get("width")).toBe("30px")
+    expect(values.get("height")).toBe("12px")
+    done(renderer)
   })
 
   it("an element that is destroyed takes its boxes along", () => {
     const renderer = mount(`.a::before { content: "x" }`, [...element(10, 1, "div", "a"), ...text(11, 10, "Hello")])
-    // The root, the element and its text, the box and its text.
-    expect(renderer.getRetainedElementCount()).toBe(5)
+    // The root, the element and its text, the box and its text, and the element that stays.
+    expect(renderer.getRetainedElementCount()).toBe(7)
     apply(renderer, [["destroyElement", 10]])
-    expect(renderer.getRetainedElementCount()).toBe(1)
-    renderer.dispose()
+    expect(renderer.getRetainedElementCount()).toBe(3)
+    done(renderer)
   })
 })

@@ -901,10 +901,16 @@ fn collect_paragraph(tree: &RetainedTree, paragraph: &super::inline::Paragraph, 
             out.push(Group::within_run(key.clone(), range.start, paragraph.text[range].to_string()));
         }
     };
-    for (atomic, piece) in paragraph.atomics() {
-        push(start..piece.range.start, out);
-        collect_into(tree, atomic, false, out);
-        start = piece.range.end;
+    for piece in &paragraph.pieces {
+        // The text of a generated box is painted and is no text of the document: no match crosses or starts in it.
+        if piece.generated {
+            push(start..piece.range.start, out);
+            start = piece.range.end;
+        } else if let Some(atomic) = piece.atomic {
+            push(start..piece.range.start, out);
+            collect_into(tree, atomic, false, out);
+            start = piece.range.end;
+        }
     }
     push(start..paragraph.text.len(), out);
 }

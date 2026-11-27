@@ -255,6 +255,16 @@ impl Paragraph {
             .filter_map(|piece| piece.atomic.map(|id| (id, piece)))
     }
 
+    /// The bytes of the text of generated boxes, which are painted and are no text of the document.
+    pub fn generated_ranges(&self) -> Vec<Range<usize>> {
+        self.pieces.iter().filter(|piece| piece.generated).map(|piece| piece.range.clone()).collect()
+    }
+
+    /// Whether the paragraph holds the text of a generated box: it is one line for copy, as with an atomic inline.
+    pub fn has_generated(&self) -> bool {
+        self.pieces.iter().any(|piece| piece.generated)
+    }
+
     /// Whether the paragraph has the placeholder of an empty inline box, which cuts the text for
     /// selection like an atomic inline does.
     pub fn has_placeholder(&self) -> bool {

@@ -27,13 +27,16 @@ use crate::style::{DimensionValue, StyleDesc};
 pub(crate) struct Boxes {
     pub own: Option<ElementBounds>,
     pub parent: Option<ElementBounds>,
+    /// The box of the `::before` or `::after` that is read, when it was drawn.
+    pub generated: Option<ElementBounds>,
 }
 
 impl Boxes {
-    pub(crate) fn read(window: gpui::WindowId, id: u64, parent: Option<u64>) -> Self {
+    pub(crate) fn read(window: gpui::WindowId, id: u64, parent: Option<u64>, pseudo: Option<crate::css::sheet::Pseudo>) -> Self {
         Self {
             own: crate::automation::get_bounds(window, id),
             parent: parent.and_then(|parent| crate::automation::get_bounds(window, parent)),
+            generated: pseudo.and_then(|pseudo| crate::automation::get_bounds(window, crate::layout::generated::box_id(id, pseudo))),
         }
     }
 }
@@ -82,7 +85,7 @@ pub(crate) fn read_in_window(
         cx,
         SkippedContent::Force,
         gpui::Window::draw_if_dirty,
-        |window_id| Boxes::read(window_id, id, parent),
+        |window_id| Boxes::read(window_id, id, parent, pseudo_element),
     )?;
     let view = window
         .root::<GpuixView>()
@@ -145,6 +148,9 @@ pub(crate) fn read(
         }
     };
     let own = ctx.inherited.clone().descend_with_custom(Some(&style), element.has_inert_prop(), custom);
+    // The box of a generated box is the one drawn for it, and its parent is the element.
+    let of_box = pseudo.map(|_| Boxes { own: boxes.generated.clone(), parent: boxes.own.clone(), generated: None });
+    let boxes = of_box.as_ref().unwrap_or(boxes);
     let rtl = own.direction.direction.is_rtl();
     let mirrored = rtl.then(|| style.mirrored_inline_pairs()).flatten();
     let style = mirrored.as_ref().unwrap_or(&style);
@@ -157,7 +163,7 @@ pub(crate) fn read(
         content,
         parent: &parent,
         rtl,
-        no_box: pseudo.is_some() || crate::layout::box_generation::is_display_none(element) || boxes.own.is_none(),
+        no_box: (pseudo.is_none() && crate::layout::box_generation::is_display_none(element)) || boxes.own.is_none(),
         viewport_width: ctx.inherited.lengths.viewport_width,
     };
     Some(view.values())
