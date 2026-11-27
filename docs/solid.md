@@ -403,11 +403,13 @@ render(() => <App />, {
 
 **`resetRender()`** stops the frame loop and unmounts the global slot. Tests use it between cases.
 
+**`ownRenderer()`** (from `@ghia/native/host`) is the renderer of the window `render()` opened itself, for a test or a script that drives the app's window; it is `undefined` before the window opens and after it closes. The slots `render()` keeps are shared with `@ghia/react`.
+
 One renderer drives **one root**. `createRoot()` throws if that renderer already has a mounted root. `render()` unmounts the previous root first. `render()` keeps one root for each renderer it mounts on: the window it opens itself, and each `{ renderer }` it is given.
 
 ### Rendering into another window
 
-`window.open('')` opens a window with an empty document, and `render(code, container)` renders into an element of it, as `solid-js/web`'s `render(code, element)` does. The second argument is told apart from `options` by being an element of a Ghia window:
+`window.open('')` opens a window with an empty document, and `render(code, container)` renders into an element of it, as `solid-js/web`'s `render(code, element)` does. The second argument is told apart from `options` by being an `Element`:
 
 ```tsx
 import { createSignal } from 'solid-js'
@@ -425,7 +427,7 @@ function openInspector() {
 render(() => <button onClick={() => setCount(count() + 1)}>Click</button>, { title: 'Main' })
 ```
 
-Nothing has to be registered: every `render()` and `createRoot()` gives its window a factory that `window.open` uses to make the new window's empty root. The content is an ordinary Solid root, so a signal of the main window updates the popup. `useGpuix()` inside it is the popup's window, and events in it reach its handlers. The returned function disposes the render and removes what it rendered; closing the window (`win.close()`, the user's close button, the app ending) does the same, running `onCleanup`. `container` must be in a window with a mounted root, or `render` throws a `TypeError`. A `<Portal mount={win.document.body}>` in the main tree mounts its content in the popup and follows the state of the component that renders it. The window's `onKeyDown` and the other window-level `RenderOptions` handlers belong to the window `render(code, options)` opened; use `window` listeners (`windowOf(renderer)` in `@ghia/native/host`) for the others. All windows share the one frame loop of the app, and the app ends, and `onTerminated` runs once, when its last window closes. See [window.open and the Window object](reference.md#windowopen-and-the-window-object) and [what differs](fork/deviations.md).
+Nothing has to be registered: every `render()` and `createRoot()` gives its window a factory that `window.open` uses to make the new window's empty root. The content is an ordinary Solid root, so a signal of the main window updates the popup. `useGpuix()` inside it is the popup's window, and events in it reach its handlers. The returned function disposes the render and removes what it rendered, and only that: the nodes another render into the same element, a `<Portal>` or your own code put there stay. Closing the window (`win.close()`, the user's close button, the app ending) does the same, running `onCleanup`; `win.close()` sets `closed` at once and tears down in a later task, as a browser queues it, so a handler in the popup can call it on its own window. The first window works the same way: when the user closes it while a popup stays open, its root unmounts and `window` hears `pagehide` and `unload`. `container` must be in a window with a mounted root, or `render` throws a `TypeError`: any element is taken for a container, so the body of a window that has closed throws, and does not mount the app again. `window.open('', 'inspector')` with the name of an open window whose root is gone finds that window again and gives it a fresh root to render into. A `<Portal mount={win.document.body}>` in the main tree mounts its content in the popup and follows the state of the component that renders it. The window's `onKeyDown` and the other window-level `RenderOptions` handlers belong to the window `render(code, options)` opened; use `window` listeners (`windowOf(renderer)` in `@ghia/native/host`) for the others. All windows share the one frame loop of the app, and the app ends, and `onTerminated` runs once, when its last window closes. See [window.open and the Window object](reference.md#windowopen-and-the-window-object) and [what differs](fork/deviations.md).
 
 ## `createRoot()`
 

@@ -5410,7 +5410,7 @@ Code that is not the framework (a library such as `@dnd-kit/dom`) changes the tr
 | `substringData(offset, count)`, `appendData(data)`, `insertData(offset, data)`, `deleteData(offset, count)`, `replaceData(offset, count, data)`, `length` | On `Text`, with the standard's "replace data": an `offset` past the end throws `IndexSizeError` and a `count` that runs past it is cut to the end. Every write, `data`, `nodeValue` and `textContent` included, is one `replaceData`, so a `MutationObserver` gets one `characterData` record and the live [`Range`s](#range-and-staticrange) are adjusted. |
 | `splitText(offset)`, `wholeText` | `splitText` keeps the text before `offset`, makes the rest a new `Text` that follows it in the same parent (a `childList` record, then a `characterData` one) and returns it; `IndexSizeError` past the end. A node with no parent gets no sibling: the new node is in no tree. `wholeText` is the data of the text nodes next to this one, joined. |
 | `document.adoptNode(node)`, `document.importNode(node, deep = false)` | `adoptNode` takes `node` out of the tree it is in and makes the document its owner, with every node under it; it throws `HierarchyRequestError` for a node a window mounted that another window's document would adopt, and `NotSupportedError` for a `document`. `importNode` is a copy (`cloneNode`) that the document owns, in no tree. A node no window mounted that is inserted into another window's tree is adopted by it without either call: see [A document per window](#a-document-per-window). |
-| `document.createRange()`, `document.hasFocus()` | `createRange()` is a new `Range` collapsed at `(document, 0)`. `hasFocus()` is `true` for the open window that heard a focus event last, and for the first open window while none has: see [deviations](./fork/deviations.md#dom-building-from-code). |
+| `document.createRange()`, `document.hasFocus()` | `createRange()` is a new `Range` collapsed at `(document, 0)`. `hasFocus()` is `true` when the platform reports the window as the key window (`isWindowKey`): see [Focus](#windowopen-and-the-window-object) below. |
 | `cloneNode(deep = false)` | On elements and text, and on the comments of a [parsed document](#html-parsing-and-serialization), where a clone is a comment of the same document. A window's tree has no comment nodes (`innerHTML` leaves them out), so a clone of a window's element has none. An element is made again as the same type by the window that owns the original (an SVG element stays an `SVGElement`), with every attribute prop (`id`, `className`, `role`, `tabIndex`, `data-*`, `aria-*`, a `false` one too) and a copy of the live style, code-written properties such as `--x` included; with `deep`, the same for every descendant, in order, and a text node is a copy of its data. A parsed `<template>`'s `content` is copied with `deep` and empty without it. The clone is in no tree (`isConnected` is `false`, `parentNode` is `null`) and has no native element until it is inserted; no framework owns it, so the framework's next update of the original never reaches it. It has **no event handlers**: the `on*` props and listeners from `addEventListener` are not copied, as in the DOM; refs, keys, children props and the `motion` and `layout` props are not copied either ([deviations](fork/deviations.md#dom-building-from-code)). `NotSupportedError` for `document`. |
 
 A node that code takes out of the document is kept: it stays an object with its children, props, text, style and listeners, `isConnected` is `false`, and it can be inserted again. Native drops the element at the next flush if the node is still out of the document by then, and makes it again, with all of it, when it is inserted; a node put back in the same turn is never dropped (it keeps its focus and scroll offset, [deviations](fork/deviations.md#dom-building-from-code)). A node a framework removes by itself (a `<Show>` that hides it, an unmounted React child) is destroyed as before. A node a window mounted cannot move to another window: inserting it under another window's tree throws `HierarchyRequestError` (build the node with that window's `document`, or `importNode` a copy); a node no window mounted is adopted by the tree it goes into. As in React DOM, a node React places a sibling before has to still be a child of the same parent: code that takes it out makes React's next placement before it throw. `document.createDocumentFragment()` makes a `DocumentFragment` of the document's window (it needs a mounted root, like `createElement`): a node that holds children and is never mounted, so native never hears of it. It has `childNodes`, `firstChild`, `children`, `append`, `prepend`, `replaceChildren`, `textContent`, `querySelector(All)` and `cloneNode`, and can be built from created elements and text. Inserting one (`appendChild`, `insertBefore`, `replaceChild`, `append`, `before`, `after`, `replaceWith`, `Range.insertNode`, ...) moves its children into the target in order and leaves it empty, so a fragment can be filled and inserted again; live ranges and `MutationObserver` hear ordinary moves out of the fragment and into the target (one `childList` record per child, [deviations](fork/deviations.md#dom-building-from-code)). `new DocumentFragment()` still throws `TypeError: Illegal constructor`.
@@ -5627,7 +5627,7 @@ createRoot(win.document.body).render(<Inspector />) // React: createRoot(contain
 | Call | Result |
 |---|---|
 | `open()`, `open("")`, `open("about:blank")` with `_blank` | A new native window on the app, with a `document` whose `<html>`, `<head>` and `<body>` are empty, returned as a `Window`. It opens with the opener's title and `fonts`, and focused unless the opener's window was opened with `focus: false`. |
-| the same with a name (`open("", "inspector")`) | The open window of that name (compared ASCII case-insensitively, as a browser matches target names) when there is one: it is focused and returned, the features are ignored. Otherwise a new window with that `name`. `_blank` always opens a new one. |
+| the same with a name (`open("", "inspector")`) | The open window of that name (compared ASCII case-insensitively, as a browser matches target names) when there is one: it is focused and returned (`null` with `noopener` or `noreferrer`), the features are ignored. A window whose root is gone (the app unmounted it) gets a fresh root from the opener's factory first, so it can be rendered into again. A closed window, and a test window that was disposed, is not found. Otherwise a new window with that `name`. `_blank` always opens a new one. |
 | `open("https://example.org/")` (`http:`, `https:`, `mailto:`, `tel:`, another origin) | Handed to the system's default handler, as a click on a link is ([the `<a>` tag](#the-a-tag)); returns `null`, and no window opens. |
 | `target` `_self`, `_parent` or `_top` | The window itself: a URL navigates it as `location.assign` does ([`location`, `history` and storage](#location-history-and-storage)), and `""` leaves it as it is. Returns the window. |
 | any other URL (this origin's, `data:`, `file:`...) | Throws a `NotSupportedError`: Ghia has no document loading, so open `""` and render into it. A URL that does not parse throws `SyntaxError`. `javascript:` does nothing and returns `null`. |
@@ -5636,13 +5636,16 @@ createRoot(win.document.body).render(<Inspector />) // React: createRoot(contain
 `height` and `innerHeight` set the size of the window's content in CSS px (a value that is not a positive integer is ignored);
 `left` and `screenX`, `top` and `screenY` place its top-left corner in [the global display space](#displays) and are used only
 when both are given. `popup` is accepted and changes nothing. `noopener` and `noreferrer` open the window but return `null`
-and give it no `opener`. Any other feature is ignored.
+and give it no `opener`; on a named window that is found they return `null` and focus it, as a browser does. Names and values are
+case-insensitive (`NOOPENER=YES`). Any other feature is ignored.
 
 **The adapter makes the root.** A new window needs `<html>`, `<head>` and `<body>` and the node makers of the adapter that
 renders into it, and those are the adapter's. `@ghia/solid` and `@ghia/react` register, for every renderer they own a root on
 (`render()` and `createRoot(renderer)`), a factory that mounts an empty root on the renderer `window.open` made: an app calls
-`window.open('')` and renders into `win.document.body`, with nothing registered. The factory's disposer unmounts that root, and
-what the app rendered into the window with it, when the window closes. `window.open` of a window with no factory (a root made by
+`window.open('')` and renders into `win.document.body`, with nothing registered. The root registers a window disposer of its own (`registerWindowDisposer(renderer, dispose)` from `@ghia/native/host`, which
+the returned function takes back), and the window going away runs it once: the root and what the app rendered into the window
+with it unmount when the window closes, the first window's root too, which is what a window the user closed while a popup stays
+open does (the factory's own returned disposer, below, does the same for a custom host). `window.open` of a window with no factory (a root made by
 other means) throws an `Error` that says so, and a custom host registers one itself:
 
 ```ts
@@ -5653,6 +5656,14 @@ const unregister = registerWindowFactory(renderer, (opened) => {
   return () => root.unmount()         // optional: called once when the window closes
 })
 ```
+
+`unmountAllRoots()` (`@ghia/native/roots`, which `ghia dev` runs before it runs the entry again) closes the windows `window.open`
+made, with the roots, so a reload does not leave the old popups open beside the new ones.
+
+The adapters keep one slot for each renderer a `render()` mounts on, in `@ghia/native/host` (`renderSlotFor`, `renderSlots`,
+`resetRenderSlots`): a slot is dropped when its window is gone, so a later `render()` makes a window again. `ownRenderer()` is the
+renderer of the window `render()` opened itself (`undefined` before it opens and after it closes), for a test or a script that
+drives the app's window.
 
 A window a factory opened has the same factory, so its own `window.open` works. The test renderer opens test windows: a
 `TestRenderer`'s `window.open` makes another `TestRenderer` (size and title from the features and the opener) and a test
@@ -5668,9 +5679,10 @@ global object. `window instanceof Window` holds for both. A window has:
   not measured), `screenX`, `screenY`, `screenLeft` and `screenTop` (the window's place in the global display space; `0` while it
   has no root), `devicePixelRatio` (the display's scale factor; `1` while the window has no root), `visualViewport`.
   `matchMedia`, `getComputedStyle`, `getSelection`, `requestAnimationFrame` and `cancelAnimationFrame` are the window's own.
-- **Actions.** `close()` fires `beforeunload`, `pagehide` and `unload` on the window and closes it (a `beforeunload` listener
-  that cancels does not keep it open, as a script's close is not stopped in a browser); `closed` is `true` at once and its
-  document is empty. `focus()` brings it forward and makes it the key window. `blur()` does nothing: nothing resigns the key
+- **Actions.** `close()` sets `closed` at once and, in a later task as a browser queues it, fires `beforeunload`, `pagehide` and
+  `unload` on the window, unmounts its root and closes it (a `beforeunload` listener that cancels does not keep it open, as a
+  script's close is not stopped in a browser); the document is empty once that task has run, so the handler that called `close()`
+  is not unmounted under itself. `focus()` brings it forward and makes it the key window. `blur()` does nothing: nothing resigns the key
   window to another window of the app. `resizeTo(width, height)` and `resizeBy` set the size of its content. `moveTo` and
   `moveBy` do nothing: GPUI places a window when it opens and cannot move it after.
 - **Events.** `addEventListener`, `removeEventListener`, `dispatchEvent` and the handler properties `onresize`, `onfocus`,
@@ -5688,9 +5700,11 @@ global object. `window instanceof Window` holds for both. A window has:
   not the window's: a `pushState` in one window moves the URL of all of them ([deviations](./fork/deviations.md#several-windows)).
 
 **Closing.** A window closes when a script calls `close()`, when the user closes it, and when the app ends. The first two fire
-`pagehide` and then `unload` on that window (`close()` fires `beforeunload` first), once, and `closed` is `true` afterwards; the
-app ending fires them on every window that is left. An opener that closes leaves the windows it opened open, as in a browser, and
-the app ends with its last window.
+`pagehide` and then `unload` on that window (`close()` fires `beforeunload` first, in a later task: `closed` is `true` at once),
+once, and the root of the window unmounts with them; the app ending fires them on every window that is left. That holds for the
+first window too: when the user closes it while popups stay open, its root unmounts and the global `window` hears `pagehide` and
+`unload`, and the global `window` and `document` stay that closed window's. An opener that closes leaves the windows it opened
+open, as in a browser, and the app ends with its last window.
 
 **Focus.** `document.hasFocus()` is the platform's key window (`isWindowKey`), and a window listening for `focus` or `blur`
 (`addEventListener` or `onfocus`) hears them, with the window as `target`, when it becomes or stops being the key window; a
