@@ -320,4 +320,30 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     expect(renderer.getPaintedNodeSelection()).toBeDefined()
     done(renderer)
   })
+  it("reads the rules of a box that has no content when asked, and makes no box for them", () => {
+    // Tailwind's preflight declares no `content`: no element has a box, and the rules are still read.
+    const renderer = mount(`*, ::before, ::after { opacity: 0.5 } .a::after { content: "x" }`, [
+      ...element(10, 1, "div", "a"),
+      ...text(11, 10, "Hello"),
+      ...element(12, 1, "div", "b"),
+      ...text(13, 12, "Other"),
+    ])
+    const read = (id: number, pseudo: string) => {
+      const pairs = renderer.getComputedStyle(id, pseudo)
+      if (!pairs) throw new Error(`${id} is not in the document`)
+      const values = new Map<string, string>()
+      for (let at = 0; at < pairs.length; at += 2) values.set(pairs[at], pairs[at + 1])
+      return values
+    }
+    expect(read(12, "before").get("opacity")).toBe("0.5")
+    expect(read(12, "after").get("opacity")).toBe("0.5")
+    expect(read(10, "after").get("opacity")).toBe("0.5")
+    expect(read(10, "after").get("content")).toBe('"x"')
+    expect(read(10, "before").get("content")).toBe("none")
+    // A rematch of an element no content rule reaches makes no box.
+    const held = renderer.getRetainedElementCount()
+    apply(renderer, [["setAttribute", 12, "class", "b c"]])
+    expect(renderer.getRetainedElementCount()).toBe(held)
+    done(renderer)
+  })
 })
