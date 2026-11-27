@@ -253,13 +253,13 @@ A quit from another thread (the Apple Event) wakes an idle host through the run-
 
 An app makes a window the way the first one is made: a `GpuixRenderer` and its `init()`. The thread has one GPUI App, which
 the first renderer's `init` creates (`MAC_PLATFORM`, `GPUI_APP`, the quit mode, the menu bar); a renderer whose `init` finds it
-opens another window on it with `cx.open_window` and the same `to_gpui_window_options` mapping (`open_gpuix_window`,
-`renderer.rs`), and never throws "a GPUI application already exists". `app_menu::init` and `window_set::observe_closes` run
+opens another window on it with `cx.open_window` and the same `to_gpui_window_options` mapping (`open_gpuix_window` in
+`renderer.rs`, called by `window_set::open_another`), and never throws "a GPUI application already exists". `app_menu::init` and `window_set::observe_closes` run
 once, with the App.
 
 **A window handle per renderer.** `GpuixRenderer::window` holds the `WindowHandle<GpuixView>` that `init` opened, and every
 native call goes through it (`update_window`, `update_window_or_defer`, `update_window_without_view` and `invalidate_window`
-are methods on the renderer): the `GPUI_WINDOW` thread-local is gone. The same call made while a sync handler is running has
+are methods on the renderer, and the helpers they call live in `window_set.rs`): the `GPUI_WINDOW` thread-local is gone. The same call made while a sync handler is running has
 two cases (`events/sync_dispatch.rs`): for the window being dispatched it uses the stashed window as before, and for another
 window (a handler of one window that reads or writes another renderer) it updates that window through the app the dispatch
 holds, which the window being dispatched is out of and every other is in (`update_view_of`, `update_window_of`). The sync
@@ -273,9 +273,13 @@ their kept copies for a forced read, the virtual-list scrolls queued for the nex
 (`scrollbar`: another window's frames in between do not age a bar) and the `anchor-size()` records (`layout/anchor_size`).
 The a11y links are kept per `RetainedTree::id` (`accessibility/links`), and a `display` transition's hold is a flag on the
 elements of the tree (`RetainedElement::display_held`), since `is_display_none(element)` has no window to ask. Bounds,
-host nodes, the hit registry, painted text, carets and search ordinals were keyed by window before. Still ambient, and fine
+host nodes, the hit registry, painted text, carets and search ordinals were keyed by window before, and they are dropped
+with the window too (`text::paint`'s frames, `text::inline_hit`'s paragraphs, `text::search`'s ordinals, `editing::caret`'s
+blink anchor and empty-line box, `text::inline_focus`'s press focus: each has a `forget_window`). Still ambient, and fine
 because the draws of two windows never interleave: the scrollbar's per-frame clock, scroller style and draw counter, and
-the per-frame scratch of `tape` and `text`. `LAYOUT_PENDING` is keyed by the view's `EntityId`, which GPUI makes unique.
+the per-frame scratch of `tape` and `text`. The layout a window owes a read (`LAYOUT_PENDING`) and its quiet list writes (`LIST_WRITTEN`) are keyed by
+window: a read settles the reading window's own entry (`settle_pending_layout`, `layout_awaits_a_read(window)`), so a read in one window
+neither discards the patch another window prepared nor notifies its view, and a window that closes drops its entry.
 
 **Closing.** A window closes when the user closes it, when `closeWindow()` does, or when the App quits. In each case GPUI
 removes the window and calls `App::on_window_closed`, which `window_set` listens to: the window is no longer open

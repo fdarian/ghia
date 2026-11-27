@@ -137,7 +137,7 @@ thread_local! {
     #[cfg(target_os = "macos")]
     static MAC_PLATFORM: RefCell<Option<Rc<gpui_macos::MacPlatform>>> = const { RefCell::new(None) };
     #[cfg(target_os = "macos")]
-    static GPUI_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
+    pub(crate) static GPUI_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static WEB_APP: RefCell<Option<gpui::ApplicationHandle>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -437,7 +437,7 @@ fn recv_ui_response<T>(receiver: std::sync::mpsc::Receiver<T>, operation: &str) 
 
 /// What a window of a renderer is opened from.
 #[cfg(target_os = "macos")]
-struct WindowRequest {
+pub(crate) struct WindowRequest {
     width: f64,
     height: f64,
     title: String,
@@ -452,7 +452,7 @@ struct WindowRequest {
 
 /// Opens the window of one renderer on the App, with the root view that draws its tree.
 #[cfg(target_os = "macos")]
-fn open_gpuix_window(
+pub(crate) fn open_gpuix_window(
     cx: &mut gpui::App,
     request: &WindowRequest,
 ) -> std::result::Result<gpui::WindowHandle<GpuixView>, String> {
@@ -490,85 +490,6 @@ fn open_gpuix_window(
         },
     )
     .map_err(|error| error.to_string())
-}
-
-/// `update_window_in` for a change that returns nothing. When it is called while the
-/// root view is already being updated, it runs once that update has returned.
-#[cfg(target_os = "macos")]
-fn update_window_or_defer_in(
-    handle: gpui::WindowHandle<GpuixView>,
-    update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) + 'static,
-) -> Result<()> {
-    crate::events::sync_dispatch::route(
-        update,
-        |update| crate::events::sync_dispatch::update_view_of_or_defer(handle, update),
-        Error::from_reason,
-        |update| update_window_outside(handle, update),
-    )
-}
-
-/// Updates the root view of `handle`, the window of one renderer. Inside a sync call that is the
-/// window being dispatched, unless a handler of another window called this renderer.
-#[cfg(target_os = "macos")]
-fn update_window_in<R>(
-    handle: gpui::WindowHandle<GpuixView>,
-    update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) -> R,
-) -> Result<R> {
-    crate::events::sync_dispatch::native_call(|| {
-        crate::events::sync_dispatch::route(
-            update,
-            |update| crate::events::sync_dispatch::update_view_of(handle, update),
-            Error::from_reason,
-            |update| update_window_outside(handle, update),
-        )
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn update_window_outside<R>(
-    handle: gpui::WindowHandle<GpuixView>,
-    update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) -> R,
-) -> Result<R> {
-    GPUI_APP.with(|app| {
-        let app = app.borrow();
-        let app = app
-            .as_ref()
-            .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
-        app.update(|cx| {
-            handle
-                .update(cx, update)
-                .map_err(|error| Error::from_reason(error.to_string()))
-        })
-    })
-}
-
-#[cfg(target_os = "macos")]
-// A sync input handler can reach the view through its own renderer calls, so the work that
-// only needs the window runs without leasing the root view.
-fn update_window_without_view_in<R>(
-    handle: gpui::WindowHandle<GpuixView>,
-    update: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> R,
-) -> Result<R> {
-    crate::events::sync_dispatch::native_call(|| {
-        crate::events::sync_dispatch::route(
-            update,
-            |update| crate::events::sync_dispatch::update_window_of(handle, update),
-            Error::from_reason,
-            |update| {
-                GPUI_APP.with(|app| {
-                    let app = app.borrow();
-                    let app = app.as_ref().ok_or_else(|| {
-                        Error::from_reason("GPUI application is not initialized")
-                    })?;
-                    app.update(|cx| {
-                        gpui::AnyWindowHandle::from(handle)
-                            .update(cx, move |_view, window, cx| update(window, cx))
-                            .map_err(|error| Error::from_reason(error.to_string()))
-                    })
-                })
-            },
-        )
-    })
 }
 
 #[cfg(target_os = "macos")]
@@ -627,22 +548,23 @@ pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui
     if dirty == Dirty::Clean {
         return;
     }
+    let window_id = window.window_handle().window_id();
     discard_prepared_patch(window, cx, view, PendingLayout::Waiting);
     // The batches before this one that moved boxes are still owed their layout, and this one does not take that away.
-    let dirty = dirty.merge(layout_owed(view));
+    let dirty = dirty.merge(layout_owed(window_id));
     match dirty {
         Dirty::Clean => {}
         Dirty::PaintPatchable => window.request_tick(),
         Dirty::LayoutPatchable => {
-            LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Waiting));
+            LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(window_id, OwedLayout { view, state: PendingLayout::Waiting }));
             window.request_tick();
         }
         Dirty::Paint => {
-            note_pending(view, PendingLayout::Notified);
+            note_pending(window_id, PendingLayout::Notified);
             cx.notify_paint_only(view)
         }
         Dirty::Layout => {
-            note_pending(view, PendingLayout::Notified);
+            note_pending(window_id, PendingLayout::Notified);
             invalidate_after_commit(cx, view)
         }
     }
@@ -650,8 +572,8 @@ pub(crate) fn invalidate_after_mutation(window: &mut gpui::Window, cx: &mut gpui
 
 /// What the layout the view is owed asks of the window, as the batches that owe it did: [`Dirty::LayoutPatchable`] while a read has
 /// not prepared the patch for them, [`Dirty::Layout`] once the view is invalidated.
-fn layout_owed(view: gpui::EntityId) -> Dirty {
-    LAYOUT_PENDING.with(|pending| match pending.borrow().get(&view) {
+fn layout_owed(window: gpui::WindowId) -> Dirty {
+    LAYOUT_PENDING.with(|pending| match pending.borrow().get(&window).map(|owed| owed.state) {
         None => Dirty::Clean,
         Some(PendingLayout::Waiting | PendingLayout::Prepared) => Dirty::LayoutPatchable,
         Some(PendingLayout::Notified) => Dirty::Layout,
@@ -667,14 +589,14 @@ pub(crate) fn discard_prepared_patch(window: &mut gpui::Window, cx: &mut gpui::A
         return;
     }
     window.discard_prepared_patch(cx);
-    note_pending(view, then);
+    note_pending(window.window_handle().window_id(), then);
 }
 
-/// Says what the pending layout of `view` is now, if it has one.
-fn note_pending(view: gpui::EntityId, state: PendingLayout) {
+/// Says what the pending layout of `window` is now, if it has one.
+fn note_pending(window: gpui::WindowId, state: PendingLayout) {
     LAYOUT_PENDING.with(|pending| {
-        if let Some(held) = pending.borrow_mut().get_mut(&view) {
-            *held = state;
+        if let Some(held) = pending.borrow_mut().get_mut(&window) {
+            held.state = state;
         }
     });
 }
@@ -690,12 +612,31 @@ pub(crate) enum PendingLayout {
     Notified,
 }
 
+/// The layout a window's root view is owed, and what a read has done about it.
+#[derive(Clone, Copy)]
+struct OwedLayout {
+    view: gpui::EntityId,
+    state: PendingLayout,
+}
+
 thread_local! {
-    /// The views that have a patch of anchors to draw, which moved boxes: the layout is older than the tree.
-    static LAYOUT_PENDING: std::cell::RefCell<rustc_hash::FxHashMap<gpui::EntityId, PendingLayout>> = Default::default();
-    /// The views whose list was written to quietly (`invalidate_after_scroll`) and not drawn since: the boxes of the rows are
-    /// where the write put the offset only in a layout, which a read of boxes runs.
-    static LIST_WRITTEN: std::cell::RefCell<rustc_hash::FxHashSet<gpui::EntityId>> = Default::default();
+    /// By window (a window has one root view): the windows that have a patch of anchors to draw, which moved boxes, so the layout
+    /// is older than the tree. A read of one window settles its own entry and leaves the others' to the reads and frames of theirs.
+    static LAYOUT_PENDING: std::cell::RefCell<rustc_hash::FxHashMap<gpui::WindowId, OwedLayout>> = Default::default();
+    /// By window: the root views whose list was written to quietly (`invalidate_after_scroll`) and not drawn since: the boxes of the
+    /// rows are where the write put the offset only in a layout, which a read of boxes runs.
+    static LIST_WRITTEN: std::cell::RefCell<rustc_hash::FxHashMap<gpui::WindowId, gpui::EntityId>> = Default::default();
+}
+
+/// The window closed: what it was owed goes, and a window that is opened with the id later owes nothing.
+pub(crate) fn forget_pending_layout(window: gpui::WindowId) {
+    LAYOUT_PENDING.with(|pending| pending.borrow_mut().remove(&window));
+    LIST_WRITTEN.with(|written| written.borrow_mut().remove(&window));
+}
+
+#[cfg(test)]
+pub(crate) fn holds_pending_layout(window: gpui::WindowId) -> bool {
+    LAYOUT_PENDING.with(|pending| pending.borrow().contains_key(&window)) || LIST_WRITTEN.with(|written| written.borrow().contains_key(&window))
 }
 
 /// What a read of geometry does before it lays out. A view with a patch of anchors waiting has its
@@ -704,58 +645,61 @@ thread_local! {
 /// draw (patch-frames.md, "Contained-layout patches"). When the patch cannot be prepared (gpui
 /// declines it, or the tree is not a patch any more) the view is invalidated, as a commit that lays
 /// out invalidates it, so the read sees the tree's boxes, and the tick that was asked for is drawn whole.
+///
+/// Only the reading window's own layout is settled: another window's write that waits for a read of its own keeps its patch.
 pub(crate) fn settle_pending_layout(window: &mut gpui::Window, cx: &mut gpui::App) {
+    let window_id = window.window_handle().window_id();
     // A read of boxes after a write to a list's offset sees the rows where the write put them, as a browser's does: the view is
     // notified as a `div` scroller's write notifies it, which a patch that was prepared does not survive.
-    let written: Vec<gpui::EntityId> = LIST_WRITTEN.with(|written| written.borrow_mut().drain().collect());
-    for view in written {
+    let written = LIST_WRITTEN.with(|written| written.borrow_mut().remove(&window_id));
+    if let Some(view) = written {
         discard_prepared_patch(window, cx, view, PendingLayout::Notified);
-        note_pending(view, PendingLayout::Notified);
+        note_pending(window_id, PendingLayout::Notified);
         cx.notify_scroll_only(view);
     }
-    let views: Vec<(gpui::EntityId, PendingLayout)> =
-        LAYOUT_PENDING.with(|pending| pending.borrow().iter().map(|(view, state)| (*view, *state)).collect());
-    let root = window.root::<GpuixView>().flatten();
-    for (view, state) in views {
-        let ours = root.as_ref().filter(|root| root.entity_id() == view);
-        match (state, ours) {
-            (PendingLayout::Prepared, Some(_)) if window.prepared_patch_units().is_some() => continue,
-            (PendingLayout::Waiting, Some(root)) if GpuixView::prepare_for_read(root, window, cx) => {
-                LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Prepared));
-                continue;
-            }
-            _ => {}
+    let Some(owed) = LAYOUT_PENDING.with(|pending| pending.borrow().get(&window_id).copied()) else {
+        return;
+    };
+    let root = window.root::<GpuixView>().flatten().filter(|root| root.entity_id() == owed.view);
+    match (owed.state, root) {
+        (PendingLayout::Prepared, Some(_)) if window.prepared_patch_units().is_some() => return,
+        (PendingLayout::Waiting, Some(root)) if GpuixView::prepare_for_read(&root, window, cx) => {
+            note_pending(window_id, PendingLayout::Prepared);
+            return;
         }
-        invalidate_after_commit(cx, view);
-        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Notified));
+        _ => {}
     }
+    invalidate_after_commit(cx, owed.view);
+    note_pending(window_id, PendingLayout::Notified);
 }
 
 /// [`settle_pending_layout`] for a read that has no window to prepare in: the view is invalidated.
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 pub(crate) fn notify_pending_layout(cx: &mut gpui::App) {
-    let views: Vec<gpui::EntityId> = LAYOUT_PENDING.with(|pending| pending.borrow().keys().copied().collect());
-    for view in views {
+    let owed: Vec<(gpui::WindowId, gpui::EntityId)> =
+        LAYOUT_PENDING.with(|pending| pending.borrow().iter().map(|(window, owed)| (*window, owed.view)).collect());
+    for (window, view) in owed {
         invalidate_after_commit(cx, view);
-        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(view, PendingLayout::Notified));
+        note_pending(window, PendingLayout::Notified);
     }
 }
 
 /// Whether a commit that moved boxes in anchors waits for a read to prepare its patch: no layout
 /// invalidation was counted for it, yet the scroll metrics are older than the tree.
-pub(crate) fn layout_awaits_a_read() -> bool {
-    LAYOUT_PENDING.with(|pending| pending.borrow().values().any(|state| *state == PendingLayout::Waiting))
+/// A commit of another window does not count: its scroll metrics are its own.
+pub(crate) fn layout_awaits_a_read(window: gpui::WindowId) -> bool {
+    LAYOUT_PENDING.with(|pending| pending.borrow().get(&window).is_some_and(|owed| owed.state == PendingLayout::Waiting))
 }
 
-/// A frame is being built: the view's layout is no older than the tree.
-pub(crate) fn layout_is_drawn(view: gpui::EntityId) {
-    LAYOUT_PENDING.with(|pending| pending.borrow_mut().remove(&view));
-    list_writes_drawn(view);
+/// A frame is being built: the window's layout is no older than the tree.
+pub(crate) fn layout_is_drawn(window: gpui::WindowId) {
+    LAYOUT_PENDING.with(|pending| pending.borrow_mut().remove(&window));
+    list_writes_drawn(window);
 }
 
 /// The draw that follows a quiet write to a list's offset is done.
-pub(crate) fn list_writes_drawn(view: gpui::EntityId) {
-    LIST_WRITTEN.with(|written| written.borrow_mut().remove(&view));
+pub(crate) fn list_writes_drawn(window: gpui::WindowId) {
+    LIST_WRITTEN.with(|written| written.borrow_mut().remove(&window));
 }
 
 /// What a read of geometry does about the content of the skipped ancestors of its element.
@@ -957,7 +901,7 @@ pub(crate) fn is_virtual_list(window: gpui::WindowId, id: u64) -> bool {
 pub(crate) fn invalidate_after_scroll(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, list: bool) {
     if list && crate::retain::scroll_gate::list_write_is_quiet(view) {
         window.note_list_scrolled(view);
-        LIST_WRITTEN.with(|written| written.borrow_mut().insert(view));
+        LIST_WRITTEN.with(|written| written.borrow_mut().insert(window.window_handle().window_id(), view));
         return;
     }
     // The view is notified, so the patch of anchors a read prepared is gone and the tick is drawn whole. A layout still owed
@@ -974,7 +918,7 @@ fn invalidate_window_in(handle: gpui::WindowHandle<GpuixView>, dirty: Dirty) -> 
     {
         return crate::events::sync_dispatch::invalidate_root_view(dirty).map_err(Error::from_reason);
     }
-    update_window_in(handle, move |_view, window, cx| {
+    crate::window_set::update_window_in(handle, move |_view, window, cx| {
         let view = cx.entity_id();
         invalidate_after_mutation(window, cx, view, dirty);
     })
@@ -1861,21 +1805,21 @@ impl GpuixRenderer {
         &self,
         update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) -> R,
     ) -> Result<R> {
-        update_window_in(self.window_handle()?, update)
+        crate::window_set::update_window_in(self.window_handle()?, update)
     }
 
     fn update_window_or_defer(
         &self,
         update: impl FnOnce(&mut GpuixView, &mut gpui::Window, &mut gpui::Context<GpuixView>) + 'static,
     ) -> Result<()> {
-        update_window_or_defer_in(self.window_handle()?, update)
+        crate::window_set::update_window_or_defer_in(self.window_handle()?, update)
     }
 
     fn update_window_without_view<R>(
         &self,
         update: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> R,
     ) -> Result<R> {
-        update_window_without_view_in(self.window_handle()?, update)
+        crate::window_set::update_window_without_view_in(self.window_handle()?, update)
     }
 
     fn invalidate_window(&self, dirty: Dirty) -> Result<()> {
@@ -2351,35 +2295,7 @@ impl GpuixRenderer {
         };
 
         if has_app {
-            let open = |cx: &mut gpui::App| {
-                // The appearance override is the App's, not a window's: a window that names
-                // none leaves the one the first window set.
-                if appearance.is_some() {
-                    cx.set_window_appearance(appearance);
-                }
-                let window_handle = open_gpuix_window(cx, &request).map_err(|error| {
-                    Error::from_reason(format!("Failed to open the GPUI window: {error}"))
-                })?;
-                if activate {
-                    cx.activate(true);
-                }
-                Ok::<_, Error>(window_handle)
-            };
-            let window_handle = if crate::events::sync_dispatch::in_sync_call() {
-                // `window.open` from an event handler: GPUI has the App borrowed for the input,
-                // so the window opens on the one the dispatch holds, as a handler of Zed's does.
-                crate::events::sync_dispatch::with_active_window(|_window, cx| open(cx)).ok_or_else(|| {
-                    Error::from_reason(
-                        "A window cannot be opened from inside a native call that holds no window: open it from an event handler or outside the frame",
-                    )
-                })??
-            } else {
-                GPUI_APP.with(|app| {
-                    let app = app.borrow();
-                    let app = app.as_ref().expect("has_app checked it");
-                    app.update(open)
-                })?
-            };
+            let window_handle = crate::window_set::open_another(&request, appearance, activate)?;
             return self.finish_init(window_handle);
         }
 
@@ -10904,7 +10820,7 @@ impl gpui::Render for GpuixView {
         self.paint_reports.borrow_mut().scrolls.begin_pass();
         self.note_pass(window);
         self.apply_pointer_lock(window, cx);
-        layout_is_drawn(cx.entity_id());
+        layout_is_drawn(window.window_handle().window_id());
         self.install_patcher(window, cx);
         self.sync_commit_patching();
         let verifies = self.retain.verifies_frames();
@@ -20405,5 +20321,76 @@ mod running_motion_tests {
         assert!(states[&3].is_animating(now) && states[&4].is_animating(now), "both run");
         let running = running_motion(&tree, &states, None, (&Default::default(), &Default::default()), &Default::default(), now);
         assert_eq!(running, vec![4], "3 is under the host that skips its content, 4 is drawn");
+    }
+}
+
+/// A read of one window settles that window's layout and no other's.
+#[cfg(test)]
+mod layout_scope_tests {
+    use super::*;
+
+    fn page(cx: &mut gpui::TestAppContext) -> gpui::WindowHandle<GpuixView> {
+        let tree = Arc::new(Mutex::new(RetainedTree::new()));
+        {
+            let mut tree = tree.lock().unwrap();
+            tree.create_element(1, "div".to_owned());
+            tree.set_root(1);
+        }
+        let window = cx.add_window(|window, _| {
+            crate::events::enable_dom_hit_testing(window);
+            crate::layout::container::allow_redraw_passes(window);
+            GpuixView::new(
+                tree,
+                None,
+                "test".to_owned(),
+                SharedSelection::default(),
+                crate::events::state::PointerRequests::default(),
+            )
+        });
+        cx.update_window(window.into(), |_, window, app| {
+            window.refresh();
+            window.draw(app).clear(app);
+        })
+        .unwrap();
+        window
+    }
+
+    fn view_of(cx: &mut gpui::TestAppContext, window: gpui::WindowHandle<GpuixView>) -> gpui::EntityId {
+        cx.update_window(window.into(), |_, window, _| window.root::<GpuixView>().flatten().unwrap().entity_id()).unwrap()
+    }
+
+    fn state_of(window: gpui::WindowId) -> Option<PendingLayout> {
+        LAYOUT_PENDING.with(|pending| pending.borrow().get(&window).map(|owed| owed.state))
+    }
+
+    fn settle(cx: &mut gpui::TestAppContext, window: gpui::WindowHandle<GpuixView>) {
+        cx.update_window(window.into(), |_, window, app| settle_pending_layout(window, app)).unwrap();
+    }
+
+    #[gpui::test]
+    fn a_read_in_one_window_leaves_the_layout_another_window_owes_for_its_own_read(cx: &mut gpui::TestAppContext) {
+        let (first, second) = (page(cx), page(cx));
+        let (first_id, second_id) = (first.window_id(), second.window_id());
+        let (first_view, second_view) = (view_of(cx, first), view_of(cx, second));
+        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(first_id, OwedLayout { view: first_view, state: PendingLayout::Prepared }));
+        LAYOUT_PENDING.with(|pending| pending.borrow_mut().insert(second_id, OwedLayout { view: second_view, state: PendingLayout::Waiting }));
+        LIST_WRITTEN.with(|written| written.borrow_mut().insert(second_id, second_view));
+        assert!(layout_awaits_a_read(second_id));
+        assert!(!layout_awaits_a_read(first_id), "the scroll metrics of a window do not wait on another window's commit");
+
+        settle(cx, first);
+
+        // The second window still owes its patch to a read of its own, and its quiet list write is not drawn yet.
+        assert_eq!(state_of(second_id), Some(PendingLayout::Waiting));
+        assert!(LIST_WRITTEN.with(|written| written.borrow().contains_key(&second_id)));
+        assert!(layout_awaits_a_read(second_id));
+
+        settle(cx, second);
+        assert_ne!(state_of(second_id), Some(PendingLayout::Waiting));
+        assert!(!LIST_WRITTEN.with(|written| written.borrow().contains_key(&second_id)));
+
+        forget_pending_layout(first_id);
+        forget_pending_layout(second_id);
+        assert!(!holds_pending_layout(first_id) && !holds_pending_layout(second_id));
     }
 }

@@ -43,7 +43,7 @@ pub(crate) fn forget_window(window: gpui::WindowId) {
 /// no commit is waiting for its patch to be prepared (a commit inside an anchor counts as no
 /// invalidation, but moves the extents).
 pub(crate) fn metrics_current(window: &gpui::Window) -> bool {
-    window.scroll_metrics_are_current() && !crate::renderer::layout_awaits_a_read()
+    window.scroll_metrics_are_current() && !crate::renderer::layout_awaits_a_read(window.window_handle().window_id())
 }
 
 /// What the renderer holds for the element a write is aimed at.

@@ -174,6 +174,16 @@ pub fn frame_reset(window: WindowId) {
     PARAGRAPHS.with(|paragraphs| paragraphs.borrow_mut().insert(window, Layered::default()));
 }
 
+/// The window closed: its paragraphs go.
+pub(crate) fn forget_window(window: WindowId) {
+    PARAGRAPHS.with(|paragraphs| paragraphs.borrow_mut().remove(&window));
+}
+
+#[cfg(test)]
+pub(crate) fn holds_paragraphs(window: WindowId) -> bool {
+    PARAGRAPHS.with(|paragraphs| paragraphs.borrow().contains_key(&window))
+}
+
 /// A subtree that was replayed puts back the paragraphs it painted: they are read from its tape
 /// when something asks.
 pub(crate) fn publish(window: WindowId, live: &crate::tape::Live) {
