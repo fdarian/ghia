@@ -9,6 +9,7 @@ export default defineConfig({
   // A scenario builds three windows (a warm-up and two measured); on a shared CI runner that took 4 to 5.5 s, past vitest's 5 s default.
   test: {
     environment: 'node',
+    setupFiles: ['@ghia/native/testing-setup'],
     include: ['perf-gate/*.test.tsx'],
     testTimeout: 60_000,
     // cold-mount.test.tsx measures the first window of a process, so each file needs a process of its own; one after the other,

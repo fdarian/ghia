@@ -20,6 +20,7 @@ export default defineConfig({
   // The alias `react()` gives an app. It is inlined so Vite, not Node, resolves the imports of `@dnd-kit/react`.
   resolve: { alias: [REACT_DOM_ALIAS] },
   test: {
+    setupFiles: ["@ghia/native/testing-setup"],
     server: { deps: { inline: [/@dnd-kit\/react/] } },
     ...(process.env.CI ? { exclude: [...configDefaults.exclude, ...referencedToThisMachine, ...realTime] } : {}),
   },

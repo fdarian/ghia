@@ -37,6 +37,11 @@
       "import": "./dist/testing.js",
       "default": "./dist/testing.js"
     },
+    "./testing-setup": {
+      "types": "./dist/testing-setup.d.ts",
+      "import": "./dist/testing-setup.js",
+      "default": "./dist/testing-setup.js"
+    },
     "./automation": {
       "types": "./dist/automation/index.d.ts",
       "import": "./dist/automation/index.js",

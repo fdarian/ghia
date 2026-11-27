@@ -126,12 +126,13 @@ impl GpuixView {
 
 /// The native surfaces the elements made and dropped, in order. A dropped surface leaves the
 /// window with the next frame that does not place it.
-pub(crate) fn native_surface_events(cx: &gpui::App) -> Vec<NativeSurfaceEventReading> {
+pub(crate) fn native_surface_events(cx: &gpui::App, window: gpui::WindowId) -> Vec<NativeSurfaceEventReading> {
     cx.global::<SurfaceLog>()
         .0
         .borrow()
         .iter()
-        .map(|event| match event {
+        .filter(|(owner, _)| *owner == window)
+        .map(|(_, event)| match event {
             SurfaceEvent::Created(handle) => {
                 NativeSurfaceEventReading { kind: "created".to_string(), handle: handle.to_string() }
             }

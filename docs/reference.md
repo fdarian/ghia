@@ -966,7 +966,7 @@ mounted root. Call `unmount()` on the first root before you create another;
 **An element outlives its window.** A library keeps elements past the unmount of
 their root and reaches them from a timer or a microtask: Base UI returns focus,
 floating-ui measures. Once the window is gone (the test renderer after
-`dispose()` or after the next test renderer replaced it, a live renderer after
+`dispose()`, a live renderer after
 its last window closed) the members an element reaches answer as a node that is not in
 a document does in a browser, instead of throwing: `getBoundingClientRect()` is a zero
 rect, `getComputedStyle` reads `""`, `focus()`, `blur()`, `scrollIntoView()` and the
@@ -10861,8 +10861,7 @@ handler it runs can read and write the renderer: `getFocusedElementId()`,
 `matches()`, `getBoundingClientRect()` and `document.activeElement` answer
 current values inside an `onMouseDown`, and a `DismissableLayer` (Dialog,
 Popover) can open from one. Only another `nativeSimulate*` call, `advanceTime` or
-`captureScreenshot` throws there. The test window is one per thread: making a
-`TestRenderer` tears down the previous one. Call `renderer.dispose()` when a test is done with its renderer (`createTestRoot().unmount()` does, after unmounting the root); native calls that need the window throw afterwards, except the ones an element reaches, which answer as for a node that is not in a document (see "An element outlives its window" under the renderer and root notes near the top). A renderer nobody disposes is leaked when the thread exits, which is safe but keeps the window until then.
+`captureScreenshot` throws there. **Several test windows are open at once**: every `TestRenderer` opens its own window on the thread's one test app, and each call acts on its own window. Two renderers have their own element ids (both roots have an element `1`), events, bounds, window size, media features, `openedUrls()` and frames; `flush()`, `drawFrame()` and a simulated input draw only the window they were made on. What is the app's is shared: the clipboard (`writeClipboard`, `readClipboard`: one for the app, as the system's is) and the clock (`clockPause`, `clockAdvance` and the others move the time of every test window), and `appearance` (a window made with none clears the one an earlier window asked for). Call `renderer.dispose()` when a test is done with its renderer (`createTestRoot().unmount()` does, after unmounting the root): it closes that window and no other, and the app goes with the last window. Native calls that need the window throw afterwards, except the ones an element reaches, which answer as for a node that is not in a document (see "An element outlives its window" under the renderer and root notes near the top). A window nobody disposes stays open, and a test that leaves one would keep it for every test after it: vitest suites add `@ghia/native/testing-setup` to `test.setupFiles`, which disposes the renderers a test made when it ends (a renderer made in `beforeAll` or at the top of the file stays), and a script that makes windows in a loop calls `startTestRendererScope()` from `@ghia/native/testing` and the function it returns. What is left when the thread exits is leaked, which is safe.
 
 ### Simulating keys
 

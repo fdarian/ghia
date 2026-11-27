@@ -11,5 +11,5 @@ applyMacCpuThrottleFromEnv()
 // the plugin's environment inlines safe-mdx's browser-only dependencies, which the other examples' tests would trip on.
 export default defineConfig({
   plugins: [ghia(), react()],
-  test: { environment: 'node', include: ['lexical/react*.test.tsx'] },
+  test: { environment: 'node', setupFiles: ['@ghia/native/testing-setup'], include: ['lexical/react*.test.tsx'] },
 })

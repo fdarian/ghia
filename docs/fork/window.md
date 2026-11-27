@@ -295,8 +295,8 @@ which write to GPUI's profiler journal (its own thread-local): a `GPUI_APP` regi
 **One pump.** The platform is pumped once per iteration and the run-loop wake hook is shared:
 [frames-and-wakes.md](frames-and-wakes.md#several-windows-one-loop).
 
-What several windows do not have yet: a JS `document` and `window` per window, `window.open`, the adapters' `render()` into a
-second window and the test renderer with several windows are the later slices of this work. Until then a second window is a
+What several windows do not have yet: a JS `document` and `window` per window, `window.open` and the adapters' `render()` into a
+second window are the later slices of this work (the test renderer opens several windows at once: [testing.md](testing.md#several-test-windows)). Until then a second window is a
 second renderer with its own `createRoot(renderer)` (React) or `createRoot` (Solid), and the JS globals (`document`,
 `window`, `matchMedia`) follow the renderer that mounted last. The `appearance` option of a window after the first is the
 App's (`set_window_appearance` is the App's), and the menu bar is the App's; both are the platform's single-App model, not a

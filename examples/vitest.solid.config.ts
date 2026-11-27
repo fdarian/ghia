@@ -7,5 +7,5 @@ import { defineConfig } from 'vitest/config'
 // `bun run test:solid`.
 export default defineConfig({
   plugins: [ghia(), solid({ include: `${import.meta.dirname}/solid/**` })],
-  test: { environment: 'node', include: ['tanstack-virtual.test.tsx'] },
+  test: { environment: 'node', setupFiles: ['@ghia/native/testing-setup'], include: ['tanstack-virtual.test.tsx'] },
 })

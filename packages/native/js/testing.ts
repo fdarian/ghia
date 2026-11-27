@@ -45,7 +45,7 @@ import type {
 import { bindClipboard } from "./clipboard.js"
 import { bindLinkOpener } from "./shell/open-link.js"
 import { runEditingComposition, runEditingInput, type EditingCompositionStep } from "./editing/input.js"
-import { forgetElementSource, forgetWindowSource } from "./events/window-target.js"
+import { forgetElementSource } from "./events/window-target.js"
 import { detachRenderer } from "./detached-renderer.js"
 import type { HostDropEffect } from "./events/types.js"
 import { matchableText } from "./text-match.js"
@@ -697,8 +697,23 @@ export interface A11yTreeDump {
 
 // ── TestRenderer ─────────────────────────────────────────────────────
 
-/** The test window is one per thread: making a renderer tears down the one before it. */
-let latestRenderer: TestRenderer | undefined
+/** The renderers whose windows are open, in the order they were made. Any number of test windows
+ *  are open at once, on one native app; `dispose()` closes one and `startTestRendererScope()`
+ *  closes the ones a test left behind. */
+const liveRenderers = new Set<TestRenderer>()
+
+/**
+ * Starts a scope that closes the windows made after it: the returned function disposes every
+ * renderer made since that is still open, without the retention report `dispose()` makes. A
+ * test's renderer is often not disposed (the root of a test that did not unmount, a suite that
+ * makes one window per test), and with several windows open at once nothing else closes it.
+ * `testing-setup.ts` makes a scope of each vitest test; a script that makes many windows in a
+ * loop calls it itself. Windows made before the scope (a `beforeAll` one) are not touched.
+ */
+export function startTestRendererScope(): () => void {
+  const before = new Set(liveRenderers)
+  return () => TestRenderer.releaseAll([...liveRenderers].filter((renderer) => !before.has(renderer)))
+}
 
 /** Throws if a replayed frame of this window differed from a build of it, or if gpuix's own
  *  check found an element judged unchanged that built differently, and prints the counters when
@@ -759,16 +774,7 @@ export class TestRenderer implements NativeRenderer {
     }
     const fonts = readFontFiles(options.fonts)
     this.native = new NativeTestRenderer(options, options.scaleFactor)
-    if (latestRenderer) {
-      // The native side keeps one window per thread and this constructor replaced it, so the
-      // earlier renderer is as dead as a disposed one: it would reach the new window's state, and
-      // throw once that is disposed.
-      forgetWindowSource(latestRenderer)
-      detachRenderer(latestRenderer)
-      unregisterKeyframesHost(latestRenderer.native)
-      closeWebAnimations(latestRenderer)
-    }
-    latestRenderer = this
+    liveRenderers.add(this)
     for (const font of fonts) this.native.registerFont(font)
     registerKeyframesHost(this.native)
     this.applyBatch = this.native.applyBatch.bind(this.native)
@@ -819,7 +825,16 @@ export class TestRenderer implements NativeRenderer {
   dispose(): void {
     // A run under GPUIX_RETAIN_VERIFY fails at the window that showed a replayed frame that a
     // build would have shown differently, and says which test's window it was.
-    if (process.env.GPUIX_RETAIN_VERIFY !== undefined) reportRetentionMismatches(this.native)
+    if (process.env.GPUIX_RETAIN_VERIFY !== undefined && liveRenderers.has(this)) {
+      reportRetentionMismatches(this.native)
+    }
+    this.release()
+  }
+
+  /** Everything `dispose()` does but the retention report: what is left of a window nobody
+   *  disposed does not fail the test that made it. */
+  private release(): void {
+    if (!liveRenderers.delete(this)) return
     forgetElementSource(this)
     unregisterKeyframesHost(this.native)
     closeWebAnimations(this)
@@ -829,6 +844,11 @@ export class TestRenderer implements NativeRenderer {
     } finally {
       detachRenderer(this)
     }
+  }
+
+  /** @internal `startTestRendererScope` closes the windows a test left open. */
+  static releaseAll(renderers: readonly TestRenderer[]): void {
+    for (const renderer of renderers) renderer.release()
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────

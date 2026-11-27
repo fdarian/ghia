@@ -8,5 +8,5 @@ import { defineConfig } from 'vitest/config'
 // alias is the only difference.
 export default defineConfig({
   plugins: [ghia(), solid()],
-  test: { environment: 'node', include: ['base-ui-solid/**/*.test.tsx'] },
+  test: { environment: 'node', setupFiles: ['@ghia/native/testing-setup'], include: ['base-ui-solid/**/*.test.tsx'] },
 })

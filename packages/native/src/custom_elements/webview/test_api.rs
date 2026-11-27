@@ -114,36 +114,38 @@ fn test_pages(cx: &gpui::App) -> Result<&TestWebviews, String> {
 }
 
 impl GpuixView {
-    pub(crate) fn webview_commands(&mut self, id: u64, cx: &gpui::App) -> Result<Vec<WebviewCommandReading>, String> {
-        let commands = test_pages(cx)?.with_page(id, |page| page.commands.clone())?;
+    pub(crate) fn webview_commands(&mut self, window: gpui::WindowId, id: u64, cx: &gpui::App) -> Result<Vec<WebviewCommandReading>, String> {
+        let commands = test_pages(cx)?.with_page(window, id, |page| page.commands.clone())?;
         Ok(commands.into_iter().map(WebviewCommandReading::from).collect())
     }
 
     /// Makes the page of `id` report `event`, after `change` moved its state.
     pub(crate) fn webview_report(
         &mut self,
+        window: gpui::WindowId,
         id: u64,
         cx: &gpui::App,
         change: impl FnOnce(&mut super::backend::WebviewState),
         event: WebviewEvent,
     ) -> Result<(), String> {
-        test_pages(cx)?.report(id, change, event)
+        test_pages(cx)?.report(window, id, change, event)
     }
 
     pub(crate) fn webview_settle_script(
         &mut self,
+        window: gpui::WindowId,
         id: u64,
         cx: &gpui::App,
         outcome: super::backend::ScriptOutcome,
     ) -> Result<(), String> {
-        test_pages(cx)?.settle_script(id, outcome)
+        test_pages(cx)?.settle_script(window, id, outcome)
     }
 
     /// The page of `id` hands the keyboard on, as it does when Tab leaves its last tabbable
     /// element (`backwards`: Shift+Tab leaves its first). Focus moves on in a turn of the run loop.
-    pub(crate) fn webview_tab_out(&mut self, id: u64, backwards: bool, cx: &gpui::App) -> Result<(), String> {
+    pub(crate) fn webview_tab_out(&mut self, window: gpui::WindowId, id: u64, backwards: bool, cx: &gpui::App) -> Result<(), String> {
         let exit = test_pages(cx)?
-            .with_page(id, |page| page.focus_exit.clone())?
+            .with_page(window, id, |page| page.focus_exit.clone())?
             .ok_or_else(|| format!("Element {id} has no page to leave"))?;
         exit(backwards);
         Ok(())
