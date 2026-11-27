@@ -694,7 +694,9 @@ describeNative("a colour transition that runs in a root that a patch builds", { 
       renderer.drawFrame()
       tintRows(true)
       renderer.drawFrame()
-      // The tick that finds the row asleep is built whole, and so is the edit that follows it: the next one is the patch.
+      // The tick that finds the row asleep is built whole, and so is the first edit after it: a frame that finds a run in a box records no box root
+      // (`Retain::recording_as`), and the commit and that tick still built the row running. The edit builds it asleep, so it records the box root,
+      // and the edit after it is the patch.
       elapse(renderer, FRAME * 4)
       editPage(2)
       renderer.drawFrame()

@@ -2282,15 +2282,24 @@ impl Retain {
     /// ended after the run, so a patch only adds a transition, and keeps the element (`patch_started`) to say when that
     /// run ends in the patches that follow, as a patch root does. A tick looks for the root that holds the element
     /// ([`Self::preview`]).
+    ///
+    /// An element asleep (`dormant`) is skipped in both: its bits stay with the dormancy, and waking it is a frame built whole
+    /// that builds it. Written to `dynamic` as well, it would be counted twice and entered again by the next `preview`.
     pub(crate) fn land_patch(&mut self, found: &[(u64, u8)], started: &[(u64, u8)]) {
         const LANDED: u8 = Dynamic::Transition as u8 | Dynamic::Spliced as u8;
         for &(id, bits) in found {
+            if self.dormant.contains_key(&id) {
+                continue;
+            }
             let before = self.dynamic.get(&id).copied().unwrap_or(0);
             let now = (before & !LANDED) | (bits & LANDED);
             self.track_patch_started(id, before, now);
             self.land(id, now);
         }
         for &(id, bits) in started {
+            if self.dormant.contains_key(&id) {
+                continue;
+            }
             let before = self.dynamic.get(&id).copied().unwrap_or(0);
             let now = if self.patch_started.contains(&id) { (before & !LANDED) | (bits & LANDED) } else { before | (bits & LANDED) };
             self.track_patch_started(id, before, now);
@@ -7048,6 +7057,21 @@ mod tests {
         retain.dormant.insert(2, Dynamic::Blink as u8);
         assert!(retain.runs_a_transition(1), "asleep with a run");
         assert!(!retain.runs_a_transition(2) && !retain.runs_a_transition(3));
+    }
+
+    #[test]
+    fn a_patch_leaves_an_element_asleep_with_its_dormancy() {
+        const TRANSITION: u8 = Dynamic::Transition as u8;
+        let mut retain = Retain::new();
+        retain.dormant.insert(1, TRANSITION);
+        retain.land_patch(&[], &[(1, TRANSITION)]);
+        assert!(!retain.patch_started.contains(&1) && !retain.dynamic.contains_key(&1), "a box root's build of a row asleep");
+        assert_eq!(retain.dormant.get(&1), Some(&TRANSITION));
+        retain.land_patch(&[(1, TRANSITION)], &[]);
+        assert!(!retain.patch_started.contains(&1) && !retain.dynamic.contains_key(&1), "a patch root's build of one asleep");
+        retain.land_patch(&[(1, 0)], &[]);
+        assert!(retain.dynamic.is_empty());
+        assert_eq!(retain.dormant.get(&1), Some(&TRANSITION), "a run that ended in the build of one asleep is not cleared by a patch");
     }
 
     #[test]
