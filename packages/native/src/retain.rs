@@ -2099,6 +2099,11 @@ impl Retain {
         }
     }
 
+    /// Whether the element is asleep and no build has reached it since: the test of `asleep_in` outside a frame's findings.
+    fn sleeps(&self, id: u64) -> bool {
+        self.dormant.contains_key(&id) && !self.woken.contains(&id)
+    }
+
     /// Makes the elements `compute_deltas` found dormant the dormant ones, and wakes those it asked
     /// about again and found otherwise.
     fn settle_dormant(&mut self, verdicts: u64, stale: bool, entered: FxHashSet<u64>) {
@@ -2283,12 +2288,14 @@ impl Retain {
     /// run ends in the patches that follow, as a patch root does. A tick looks for the root that holds the element
     /// ([`Self::preview`]).
     ///
-    /// An element asleep (`dormant`) is skipped in both: its bits stay with the dormancy, and waking it is a frame built whole
-    /// that builds it. Written to `dynamic` as well, it would be counted twice and entered again by the next `preview`.
+    /// An element asleep is skipped in both: its bits stay with the dormancy, and waking it is a frame built whole that builds
+    /// it. Written to `dynamic` as well, it would be counted twice and entered again by the next `preview`. One a build woke
+    /// (`woken`) is still in `dormant` until that frame settles it (patches never do), and may be on screen: a run a patch starts
+    /// on it is noted, since a transition reaches the ticks only through `dynamic`.
     pub(crate) fn land_patch(&mut self, found: &[(u64, u8)], started: &[(u64, u8)]) {
         const LANDED: u8 = Dynamic::Transition as u8 | Dynamic::Spliced as u8;
         for &(id, bits) in found {
-            if self.dormant.contains_key(&id) {
+            if self.sleeps(id) {
                 continue;
             }
             let before = self.dynamic.get(&id).copied().unwrap_or(0);
@@ -2297,7 +2304,7 @@ impl Retain {
             self.land(id, now);
         }
         for &(id, bits) in started {
-            if self.dormant.contains_key(&id) {
+            if self.sleeps(id) {
                 continue;
             }
             let before = self.dynamic.get(&id).copied().unwrap_or(0);
@@ -7066,12 +7073,49 @@ mod tests {
         retain.dormant.insert(1, TRANSITION);
         retain.land_patch(&[], &[(1, TRANSITION)]);
         assert!(!retain.patch_started.contains(&1) && !retain.dynamic.contains_key(&1), "a box root's build of a row asleep");
-        assert_eq!(retain.dormant.get(&1), Some(&TRANSITION));
+        assert_eq!(retain.dormant.get(&1), Some(&TRANSITION), "the bits stay with the dormancy, which clears them when the element wakes");
         retain.land_patch(&[(1, TRANSITION)], &[]);
         assert!(!retain.patch_started.contains(&1) && !retain.dynamic.contains_key(&1), "a patch root's build of one asleep");
         retain.land_patch(&[(1, 0)], &[]);
         assert!(retain.dynamic.is_empty());
         assert_eq!(retain.dormant.get(&1), Some(&TRANSITION), "a run that ended in the build of one asleep is not cleared by a patch");
+    }
+
+    #[test]
+    fn a_patch_notes_the_run_it_starts_on_an_element_a_build_woke_that_no_frame_has_settled() {
+        const TRANSITION: u8 = Dynamic::Transition as u8;
+        let mut retain = Retain::new();
+        retain.dormant.insert(1, 0);
+        retain.woken.insert(1);
+        retain.land_patch(&[], &[(1, TRANSITION)]);
+        assert_eq!(retain.dynamic.get(&1), Some(&TRANSITION), "a hover that starts a run on a row on screen: its ticks find it through dynamic");
+        assert!(retain.patch_started.contains(&1));
+        retain.land_patch(&[(1, 0)], &[]);
+        assert!(retain.dynamic.is_empty() && !retain.patch_started.contains(&1), "the patch root that sees it end clears it");
+        retain.dormant.insert(2, 0);
+        retain.woken.insert(2);
+        retain.land_patch(&[(2, TRANSITION)], &[]);
+        assert_eq!(retain.dynamic.get(&2), Some(&TRANSITION));
+    }
+
+    #[test]
+    fn a_patch_that_builds_an_element_asleep_leaves_the_next_tick_nothing_to_settle() {
+        const TRANSITION: u8 = Dynamic::Transition as u8;
+        let mut page = Units::new();
+        let culled = |_: u64| true;
+        dormancy_frame(&mut page, &culled, 0);
+        dormancy_frame(&mut page, &culled, 0);
+        dormancy_frame(&mut page, &culled, 0);
+        assert!(page.retain.is_dormant(3) && page.retain.is_dormant(4));
+        let preview = |page: &Units| {
+            let mut sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &[], false);
+            sources.dormant = &culled;
+            sources.motion = vec![3, 4];
+            page.retain.preview(&sources, false, false)
+        };
+        assert_eq!(preview(&page), Ok(vec![]));
+        page.retain.land_patch(&[], &[(3, TRANSITION)]);
+        assert_eq!(preview(&page), Ok(vec![]), "a patch that builds 3 asleep does not make it enter the dormant set again");
     }
 
     #[test]
