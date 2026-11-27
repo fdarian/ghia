@@ -115,6 +115,14 @@ The guard is `events.test.tsx`, "wakes an idle test-renderer wake loop for input
 
 The frame-loop tests (a fake renderer, and the real loop with synthetic wakes: `simulateFrameWakes` and `setTickDelay`, test-support builds only) are listed in [frames-and-wakes.md](frames-and-wakes.md#tests). `GPUIX_PRESENT_LOG` (a zed commit) logs when each `MTLDrawable` is presented; it is how present gaps are measured.
 
+### Live windows in tests stay invisible
+
+A suite must not put windows in front of the person running it. The `TestRenderer` window is on no screen already; the tests that open a live window (a `GpuixRenderer` in a spawned `bun` or `node` script, `render()` from an adapter, `ghia dev` apps) need the real pump, the display link and input posted to the window, so they cannot use it. They run with `GHIA_TEST_INVISIBLE_WINDOWS=1`, which `bindTestRendererScope` sets (unless the environment already has it, so `=0` shows the windows again) in the vitest worker and so in every process the worker spawns.
+
+- **What it does.** Every window the `test-support` addon opens is fully transparent (`alphaValue` 0), ignores the mouse and is at the floating level, from before it is ordered in (zed `MacPlatform::invisible_windows`, branch `claude/offscreen-live-tests`). The switch is read at the first `init()` and exists only in the `test-support` build; an app's window is never invisible and there is no option for it.
+- **Why not off screen.** A window at (-10000, -10000) with `keepsFrame` (the `TestRenderer`'s way) has no `NSScreen`, `start_display_link` needs one (`display_id_for_screen`), and AppKit calls it occluded: measured, 0 display-link wakes and 0 frames in 2 s while a visible window of the same script got 150 wakes. Alpha 0 on a screen counts as visible, with the same 150 wakes and frames. Alpha 0 without the level is occluded when another app's window covers its place (it sits behind the active app's windows): the 7 display-link tests of react `events.test.tsx` skipped themselves with "the window is occluded" on a machine where the editor covered the centre of the display. With the level they run.
+- **Check.** `getPaintedFrameCount` plus `getPatchCounters().patchedFrames` over 2 s of a `requestAnimationFrame` loop, `isWindowVisible()` and `wakes` (a probe over `startFrameLoop`, with the window at the default place), and `CGWindowListCopyWindowInfo` for the processes under vitest, sampled every 250 ms through the whole react `events.test.tsx`: 630 samples of sized windows, 296 at -10000, 334 over a display with alpha 0 or not yet ordered in, 0 over a display ordered in with alpha above 0. Posted input still arrives: `postNativeEvent` routes by window number, not by what the window server hit-tests.
+
 ### The `<webview>` e2e
 
 The test renderer scripts its pages, so what a real `WKWebView` does is checked by an example app that opens a real window, in `packages/native/examples/webview-e2e/`:

@@ -44,6 +44,7 @@ mod native_event;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod open_url;
 mod platform;
+mod invisible_windows;
 mod observers;
 pub mod perf_counters;
 mod renderer;

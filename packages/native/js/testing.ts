@@ -736,11 +736,16 @@ export function startTestRendererScope(): () => void {
  *     import { bindTestRendererScope } from "@ghia/native/testing"
  *     import { afterEach, beforeEach } from "vitest"
  *     bindTestRendererScope({ beforeEach, afterEach })
+ *
+ * It also sets `GHIA_TEST_INVISIBLE_WINDOWS=1` (unless the environment sets it), which makes
+ * every live window a test opens, here or in a process it spawns, fully transparent and deaf to the
+ * mouse, so it never shows on the screen of the person running the suite. `=0` turns it off to look.
  */
 export function bindTestRendererScope(hooks: {
   beforeEach: (hook: () => void) => void
   afterEach: (hook: () => void) => void
 }): void {
+  process.env.GHIA_TEST_INVISIBLE_WINDOWS ??= "1"
   let end: (() => void) | undefined
   hooks.beforeEach(() => {
     end = startTestRendererScope()

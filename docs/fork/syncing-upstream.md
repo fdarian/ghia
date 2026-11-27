@@ -71,6 +71,12 @@ cannot do without); the engine otherwise stays as upstream ships it, and upstrea
 needs the owner's explicit permission and an entry here: the decision, the considerations and the reasoning. A sync keeps
 each entry or applies it again.
 
+### A platform can open its windows invisible (zed `gpui_macos`: `MacPlatform::invisible_windows`, `MacWindow::open`; branch `claude/offscreen-live-tests`)
+
+- **Decision.** A test-support change for what Ghia needs (a suite that opens live windows must not show them), opt-in per platform exactly as `keep_window_frames` is; a platform that does not call it is as before. Not something an upstream GPUI app asks for.
+- **What it changes.** A window opened after it is `alphaValue` 0 and ignores the mouse before it is ordered in, and is at `NSFloatingWindowLevel` after its kind's level is set. Ghia calls it only from the `test-support` build when `GHIA_TEST_INVISIBLE_WINDOWS=1`.
+- **Reasoning.** A display link starts only for a visible window on a screen, so a window on no screen cannot be the answer, and AppKit counts a transparent one as visible. The floating level keeps another app's window from occluding it. See [testing.md](testing.md#live-windows-in-tests-stay-invisible).
+
 ### A node's layout input is normalized before the cache and the computation (zed `third_party/taffy`: `tree/input_norm.rs`, `compute_child_layout` in `tree/taffy_tree.rs`; zed `de983ebaff`, `c72b32891b`)
 
 - **Decision.** A layout-engine change for what Ghia needs (a subtree that mounts should not size its nodes again for inputs that cannot differ), inside the vendored taffy. Owner OK'd 2026-11-16, fork-only. The idea is from zgui (cephal 0.2.0), whose `normalize` runs before its cache. Always on, no switch. Not upstream taffy behaviour.
