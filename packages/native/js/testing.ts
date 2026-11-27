@@ -736,11 +736,18 @@ export function startTestRendererScope(): () => void {
  *     import { bindTestRendererScope } from "@ghia/native/testing"
  *     import { afterEach, beforeEach } from "vitest"
  *     bindTestRendererScope({ beforeEach, afterEach })
+ *
+ * It also sets `GHIA_TEST_INVISIBLE_WINDOWS=1` (unless the environment sets it), which makes
+ * every window a `GpuixRenderer` opens in this process or one it spawns fully transparent, deaf to the mouse
+ * and, where its kind's level is lower, at the floating level, so it never shows on the screen of
+ * the person running the suite. A window opened with `focus: true` (the default) still becomes key. `=0` turns
+ * it off to look.
  */
 export function bindTestRendererScope(hooks: {
   beforeEach: (hook: () => void) => void
   afterEach: (hook: () => void) => void
 }): void {
+  process.env.GHIA_TEST_INVISIBLE_WINDOWS ??= "1"
   let end: (() => void) | undefined
   hooks.beforeEach(() => {
     end = startTestRendererScope()
