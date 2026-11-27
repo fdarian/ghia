@@ -2,7 +2,19 @@ import type { Element } from "../dom/nodes.js"
 import { linkUrl } from "../dom/hyperlink.js"
 import { normalizedInputType } from "../dom/input-type.js"
 import { openLinkExternally } from "../shell/open-link.js"
-import { session } from "../shell/session.js"
+
+/**
+ * Whether `target` differs from the document's URL in its fragment only. Reads the global `location`, as `linkUrl` does:
+ * with two copies of `@ghia/native` the module-level session may not be the one that installed `window.location`.
+ */
+function isFragmentNavigation(target: URL): boolean {
+  const current = location.href
+  const targetFragment = target.href.indexOf("#")
+  if (targetFragment < 0) return false
+  const currentFragment = current.indexOf("#")
+  const currentBase = currentFragment < 0 ? current : current.slice(0, currentFragment)
+  return target.href.slice(0, targetFragment) === currentBase
+}
 
 /** The first element on the path with an activation behaviour, as native picks it (`html::activation_target`). */
 function activationTarget(path: readonly Element[]): Element | undefined {
@@ -33,6 +45,6 @@ export function followLinkOnClick(path: readonly object[]): void {
   if (target.getAttribute("download") !== null) return
   const url = linkUrl(target)
   if (url === null) return
-  if (session.isFragmentNavigation(url)) session.navigateToFragment(url, false)
+  if (isFragmentNavigation(url)) location.assign(url.href)
   else openLinkExternally(url)
 }

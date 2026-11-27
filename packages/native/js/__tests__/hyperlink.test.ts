@@ -5,6 +5,7 @@ import { followLinkOnClick, clickActivatesLink } from "../events/link-activation
 import { followLinkAfterClick } from "../events/activation.js"
 import { MouseEvent } from "../events/classes.js"
 import { bindLinkOpener } from "../shell/open-link.js"
+import { session } from "../shell/session.js"
 import "../dom-globals.js"
 
 class FakeEl extends HTMLElement {
@@ -276,6 +277,20 @@ describe("following a link on a click", () => {
       expect.stringContaining("file:///etc/passwd"),
       expect.stringContaining("slack://open"),
     ])
+  })
+
+  it("navigates through the installed location when this module's session is another copy's", async () => {
+    vi.resetModules()
+    const copy = await import("../events/link-activation.js")
+    const other = await import("../shell/session.js")
+    expect(other.session).not.toBe(session)
+    const before = history.length
+    copy.followLinkOnClick([link("#copy")])
+    expect(location.href).toBe("http://localhost/dir/page#copy")
+    expect(history.length).toBe(before + 1)
+    expect(other.session.url.href).toBe("http://localhost/")
+    await tick()
+    expect(heard.at(-1)).toBe("http://localhost/dir/page -> http://localhost/dir/page#copy")
   })
 
   it("does nothing for a download, a link without href, or a button on the path first", () => {
