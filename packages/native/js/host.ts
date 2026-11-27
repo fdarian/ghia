@@ -78,6 +78,15 @@ export {
 export { type GpuixWindow } from "./events/window-targets.js"
 export { registerWindowFactory, type OpenedWindowOptions, type WindowFactory } from "./window-open.js"
 export { registerWindowDisposer } from "./window-lifecycle.js"
+export {
+  bindRenderSlot,
+  ownRenderer,
+  ownRenderSlot,
+  renderSlotFor,
+  renderSlots,
+  resetRenderSlots,
+  type RenderSlot,
+} from "./render-hosts.js"
 export { registerRoot } from "./roots.js"
 export { isWebBuild } from "./web-build.js"
 export { preventEventDefault, type DomEvent, type RootEvent } from "./events/dispatch.js"
