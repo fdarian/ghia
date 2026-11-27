@@ -69,7 +69,11 @@ describeNative("the caret of a window that blinks it", () => {
     for (const cleanup of cleanups.splice(0)) cleanup()
   })
 
-  async function mountInput(wrap: (input: React.ReactNode) => React.ReactNode = (input) => input, cover = false) {
+  async function mountInput(
+    wrap: (input: React.ReactNode) => React.ReactNode = (input) => input,
+    cover = false,
+    inputStyle: Record<string, unknown> = {}
+  ) {
     const root = createTestRoot({ width: 400, height: 200 })
     cleanups.push(() => root.unmount())
     const renderer = root.renderer
@@ -80,7 +84,7 @@ describeNative("the caret of a window that blinks it", () => {
       root.render(
         <div style={{ position: "relative", width: 400, height: 200 }}>
           <div style={{ opacity: faded ? 0.5 : 1, transition: FADE }}>
-            {wrap(<input testId="probe" defaultValue="some text" style={{ width: 200, height: 24 }} />)}
+            {wrap(<input testId="probe" defaultValue="some text" style={{ width: 200, height: 24, ...inputStyle }} />)}
           </div>
           {native && <nativeview style={{ position: "absolute", left: 250, top: 100, width: 100, height: 50 }} />}
           {covered && <div testId="cover" style={{ position: "absolute", left: 0, top: 0, width: 300, height: 60, background: "#c0c0c0" }} />}
@@ -96,7 +100,7 @@ describeNative("the caret of a window that blinks it", () => {
     return { renderer, render }
   }
 
-  async function mountHost(cover = false) {
+  async function mountHost(cover = false, hostStyle: Record<string, unknown> = {}) {
     const root = createTestRoot({ width: 600, height: 400 })
     cleanups.push(() => root.unmount())
     const renderer = root.renderer
@@ -105,7 +109,7 @@ describeNative("the caret of a window that blinks it", () => {
       root.render(
         <div style={{ padding: 20, position: "relative", ...TEXT }}>
           <div style={{ opacity: faded ? 0.5 : 1, transition: FADE }}>
-            <div contentEditable style={{ width: 400, height: 300 }}>
+            <div contentEditable style={{ width: 400, height: 300, ...hostStyle }}>
               <div>first line</div>
             </div>
           </div>
@@ -149,6 +153,26 @@ describeNative("the caret of a window that blinks it", () => {
     }
     expect(frames).toEqual([0, 0, 0, 0])
     expect(seen, "the clock the window blinks it by").toEqual([false, true, false, true])
+  })
+
+  // GPUI paints a border as a quad after the content, whose box is the whole input: only its band can cover the caret.
+  it("keeps the caret of a bordered input on the layer, with a focus border colour and a radius", async () => {
+    const { renderer } = await mountInput((input) => input, false, {
+      border: "1px solid #888",
+      borderRadius: 4,
+      padding: "0 6px",
+      focus: { borderColor: "#36c" },
+    })
+    expect(renderer.getCaretOnLayer(), "on the layer").toBe(true)
+    expect(renderer.getCaretNeedsTicks()).toBe(false)
+    expect(phases(renderer)).toEqual([0, 0, 0, 0])
+  })
+
+  it("keeps the caret of a bordered contenteditable on the layer", async () => {
+    const { renderer } = await mountHost(false, { border: "1px solid #888", borderRadius: 4, padding: 6, focus: { borderColor: "#36c" } })
+    expect(renderer.getCaretOnLayer(), "on the layer").toBe(true)
+    expect(renderer.getCaretNeedsTicks()).toBe(false)
+    expect(phases(renderer)).toEqual([0, 0, 0, 0])
   })
 
   it("leaves the layer for a caret something is painted over, and goes back to it when that goes", async () => {
