@@ -1059,6 +1059,13 @@ app quit; it is `false` before `init()`. `startFrameLoop` calls the
 `onWindowClosed` option of the renderer whose window closed while the app goes on
 for the others, and `onTerminated` once when the app ends.
 
+A renderer whose window is gone behaves as closed: `applyBatch` only updates the
+tree (so unmounting the root of a closed window works), a setter that only means
+something for a window that is there (`setWindowTitle`, `setWindowSize`,
+`activateWindow`, the window event listeners, `focusNext`, `blur`) does nothing,
+and a native call that needs the window to answer (the window's size, bounds,
+`captureScreenshot`, simulated input) throws `The window is closed`.
+
 ### Several windows on one app
 
 Every `GpuixRenderer` that calls `init()` on a thread gets a window of its own

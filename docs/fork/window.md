@@ -331,8 +331,25 @@ read of another window), and fails with a clear error when a native call holds n
 window that left it (`releaseClosedWindows`, or `terminate` for all) to `windowGone(renderer)`, which fires `pagehide` and
 `unload` once (a script's `close()` already sent them with `beforeunload`), marks the window closed (`forgetWindowSource`)
 and calls the disposer the adapter's factory returned. `close()` calls the disposer before `closeWindow()`, while the native
-window is still there; for a window the user closed the disposer runs after, and `applyBatch` on a closed window applies to the tree
-only (no invalidation, no focus), so unmounting a root does not throw "window not found". The key window is native's: a view
+window is still there; for a window the user closed the disposer runs after, which is when a window is gone to native (below).
+The first window is no exception: its root unmounts when it closes, as a later window's does, and a popup that stays open keeps
+the app and the global `window` (`pagehide` and `unload` fire on it). Window disposers (`registerWindowDisposer`, from
+`@ghia/native/host`) are how an adapter's root asks for that: a disposer runs once, from `windowGone`, with the window's document still the
+root's, and `renderSlotFor` registers one for each slot so that a closed window's slot is dropped and a later `render()` opens a new
+window (`ownRenderer()` is the renderer of the window `render()` opened itself, `undefined` once it is gone). `close()` is
+asynchronous like a browser's: `closed` is `true` at once, and `beforeunload`, `pagehide`, `unload`, the root's unmount and the
+platform close run in a later task, so the handler that called it never has its root unmounted under it.
+
+**A window that is gone to native.** The disposers run after the platform removed the window, so a renderer whose GPUI window is
+gone behaves as closed whichever way it went (the user, `closeWindow()`, the App quitting). `isWindowClosed()` is true as soon as
+GPUI no longer has the window: `window_set::closed` runs from `on_window_closed`, `note_app_ended` runs it for every window left
+when `tick()` sees the quit (GPUI's shutdown drops the windows without telling the observer), and an update that GPUI answers with
+"window not found" marks the window closed too. From then on `applyBatch` only updates the tree (no invalidation, no focus), so
+unmounting a root does not throw; a setter that only means something for a window that is there (the title, size, `activate`,
+`minimize`, `zoom`, fullscreen, appearance, the `selectionChange`, `appearanceChange`, `mediaChange` and window key listeners, focus
+stepping, `blur`, `blurElement`) does nothing and answers success, and a frame request or deferred update does nothing; a native call that needs the window
+to answer (bounds reads, the window's size, scroll metrics, `captureScreenshot`, simulated input) throws "The window is closed",
+not GPUI's "window not found". `closeWindow()` on a window that is gone does nothing. The key window is native's: a view
 observes `observe_window_activation` and, while JS listens for `focus` or `blur` on `window` or `document` (the
 `setWindowEventListeners` set), sends the `windowActive` event (`window_activity.rs`, `value` "true" or "false"), which
 `renderer-state` turns into the `focus` or `blur` event of `windowOf(renderer)`. `document.hasFocus()` reads `isWindowKey()`.
