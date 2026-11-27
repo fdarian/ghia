@@ -7080,6 +7080,7 @@ Markup written for the web works: `<p>`, `<h1>`, `<ul>`, `<strong>`, `<button>`,
 | `address` | `block` | Italic |
 | `fieldset`, `hr` | `block` | A `2px` groove border for the fieldset (role `group`, as for `details`); a `1px` inset grey rule with `0.5em` margins for `hr` (role `separator`) |
 | `dialog` | `none` | Closed: see [Deviations](#html-tag-deviations) |
+| `head`, `area`, `base`, `basefont`, `datalist`, `link`, `meta`, `noembed`, `noframes`, `noscript`, `param`, `rp`, `script`, `style`, `template`, `title` | `none` | The elements that carry data or code for the page: no box, so the text of a `<style>` or `<script>` in the body is never laid out. A sheet rule can still give one a box (`style { display: block }`), as in a browser. An `<area>` is never a tab stop (there is no image map to focus a shape of) |
 | `strong`, `b` | `inline` | Bold |
 | `em`, `i`, `cite`, `var` | `inline` | Italic |
 | `u`, `s` | `inline` | Underline, strikethrough |

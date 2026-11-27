@@ -76,12 +76,12 @@ fn in_sectioning_content(tree: &RetainedTree, element: &RetainedElement) -> bool
 }
 
 /// Whether the tag is focusable and a tab stop without a `tabIndex`: an enabled `button` and an
-/// `a` or `area` with an `href`. A `tabIndex` still sets the order, or takes the element out of it with `-1`.
-/// A disabled `button` is never focusable, whatever its `tabIndex`.
+/// `a` with an `href`. An `area` is not: it is `display: none`, and without image maps has no shape to focus. A `tabIndex`
+/// still sets the order, or takes the element out of it with `-1`. A disabled `button` is never focusable, whatever its `tabIndex`.
 pub(crate) fn is_focusable_by_default(element: &RetainedElement) -> bool {
     match element.element_type.as_str() {
         "button" => !element.is_disabled(),
-        "a" | "area" => has_href(element),
+        "a" => has_href(element),
         _ => false,
     }
 }
@@ -237,6 +237,17 @@ mod tests {
         assert_eq!(role(&tree, 3), None);
         assert!(is_activatable(&tree.elements[&2]) && !is_activatable(&tree.elements[&3]));
         assert!(activation_keys(&tree.elements[&2]).is_some() && activation_keys(&tree.elements[&3]).is_none());
+    }
+
+    #[test]
+    fn an_area_is_not_a_tab_stop_with_or_without_an_href() {
+        let tree = tree(
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"area"],["appendChild",1,2],["setCustomProp",2,"href","/x"],
+                ["createElement",3,"a"],["appendChild",1,3],["setCustomProp",3,"href","/x"]]"#,
+        );
+        assert!(!is_focusable_by_default(&tree.elements[&2]) && !tree.elements[&2].needs_focus());
+        assert!(is_focusable_by_default(&tree.elements[&3]) && tree.elements[&3].needs_focus());
     }
 
     #[test]

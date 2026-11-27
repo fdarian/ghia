@@ -203,6 +203,17 @@ mod tests {
     }
 
     #[test]
+    fn the_elements_that_hold_data_for_the_page_are_not_displayed() {
+        for tag in [
+            "area", "base", "basefont", "datalist", "head", "link", "meta", "noembed", "noframes", "noscript", "param", "rp", "script", "style",
+            "template", "title",
+        ] {
+            assert_eq!(ua_style(tag).expect("a style").display.as_deref(), Some("none"), "<{tag}>");
+        }
+        assert_eq!(ua_style("p").unwrap().display.as_deref(), Some("block"));
+    }
+
+    #[test]
     fn the_values_of_a_heading_resolve_against_its_own_size() {
         let h1 = ua_style("h1").unwrap();
         assert_eq!(h1.font_weight, Some(crate::style::FontWeightValue::Num(700.0)));

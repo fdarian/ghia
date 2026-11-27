@@ -13,6 +13,25 @@ pub(super) const TAGS: &[(&str, &str)] = &[
     // the window and the app's top element sizes against it. `head` has no box: it holds what the page loads.
     ("html", r#"{"display":"block","width":"100%","height":"100%"}"#),
     ("head", r#"{"display":"none"}"#),
+    // Chrome's `area, base, basefont, datalist, head, link, meta, noembed, noframes, param, rp, script, style, template,
+    // title { display: none }`, and `noscript { display: none }` where scripting is enabled, which it is here: elements
+    // that carry data or code for the page, not content. Without it a `<style>` or `<script>` in the body would lay its
+    // text out. An author rule can still give one a box (`style { display: block }`), as in a browser. `head` is above.
+    ("area", r#"{"display":"none"}"#),
+    ("base", r#"{"display":"none"}"#),
+    ("basefont", r#"{"display":"none"}"#),
+    ("datalist", r#"{"display":"none"}"#),
+    ("link", r#"{"display":"none"}"#),
+    ("meta", r#"{"display":"none"}"#),
+    ("noembed", r#"{"display":"none"}"#),
+    ("noframes", r#"{"display":"none"}"#),
+    ("noscript", r#"{"display":"none"}"#),
+    ("param", r#"{"display":"none"}"#),
+    ("rp", r#"{"display":"none"}"#),
+    ("script", r#"{"display":"none"}"#),
+    ("style", r#"{"display":"none"}"#),
+    ("template", r#"{"display":"none"}"#),
+    ("title", r#"{"display":"none"}"#),
     ("body", r#"{"display":"block","width":"100%","height":"100%"}"#),
     ("p", r#"{"display":"block","marginTop":"1em","marginBottom":"1em"}"#),
     ("h1", r#"{"display":"block","fontSize":"2em","fontWeight":700,"marginTop":"0.67em","marginBottom":"0.67em"}"#),
