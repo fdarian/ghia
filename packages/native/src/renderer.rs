@@ -2322,6 +2322,9 @@ impl GpuixRenderer {
         }
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
+        if crate::invisible_windows::enabled() {
+            platform.invisible_windows();
+        }
         // Key handlers run JS, and each key needs its own microtask checkpoint: see
         // docs/fork/frames-and-wakes.md.
         platform.set_yield_after_key_event(true);
