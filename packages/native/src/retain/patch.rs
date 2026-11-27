@@ -92,6 +92,8 @@ pub(crate) struct Built {
     /// The scrollers among the units, which lay out again: what they write into the registries is
     /// taken as the patch made it, not compared with what the frame wrote.
     anchors: Vec<u64>,
+    /// What the units found running on the elements they built, for `Retain::land_patch`.
+    dynamic: Vec<(u64, u8)>,
     stepped: Stepped,
 }
 
@@ -210,7 +212,7 @@ impl GpuixView {
                 let (handle, viewport, tree) = (window.window_handle(), window.viewport_size(), tree.clone());
                 app.defer(move |cx| crate::observers::sweep_after_translate(handle, viewport, &reports, &tree, &callback, cx));
             }
-            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &anchors, &rewritten, cx));
+            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &built.dynamic, &anchors, &rewritten, cx));
             true
         };
         window.set_frame_patcher(Some(Rc::new(patcher)));
@@ -304,6 +306,7 @@ impl GpuixView {
         let stepped = self.step_clocks(window, now);
         let mut units = Vec::with_capacity(ids.len());
         let mut tapes = Vec::with_capacity(ids.len());
+        let mut dynamic = Vec::new();
         for id in ids {
             let Some(unit) = self.build_unit(id, now, window, cx) else {
                 self.patch.decline("NotAUnit".to_owned());
@@ -311,8 +314,9 @@ impl GpuixView {
             };
             tapes.push((id, unit.tape));
             units.push((unit.id, unit.element));
+            dynamic.extend(unit.dynamic);
         }
-        Some(Built { units, tapes, anchors, stepped })
+        Some(Built { units, tapes, anchors, dynamic, stepped })
     }
 
     /// Lays out and prepaints the patch the tree is waiting for, ahead of the draw, so that a read of
@@ -441,7 +445,17 @@ impl GpuixView {
     }
 
     /// Asks for the frames that what still runs after a patch needs, as the end of a frame does.
-    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, anchors: &[u64], rewritten: &[u64], cx: &mut gpui::Context<Self>) {
+    fn continue_after_patch(
+        &mut self,
+        window: &mut gpui::Window,
+        stepped: &Stepped,
+        dynamic: &[(u64, u8)],
+        anchors: &[u64],
+        rewritten: &[u64],
+        cx: &mut gpui::Context<Self>,
+    ) {
+        // A transition the patch started runs on in the ticks that follow, and one it ended does not.
+        self.retain.land_patch(dynamic);
         // The elements a hover restyled by paint are drawn: the roots that hold them are older than
         // what is shown, and the frame built whole after the patches builds them again.
         let hovered = self.pointer.borrow().take_paint_pending();

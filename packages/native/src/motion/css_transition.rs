@@ -558,6 +558,29 @@ pub(crate) fn leaves_box_size(style: &StyleDesc) -> bool {
         && crate::css::var_substitution::state_blocks(style).into_iter().all(|(_, state)| state.is_none_or(leaves))
 }
 
+/// Whether every transition that `style` declares can only run on a colour property: a list that names
+/// no property other than colours, which is also every list that declares none. `all`, a property that
+/// is not a colour, an SVG attribute and a `var()` in a `transition*` declaration (which says what it is
+/// once the custom properties are known) are not.
+fn declares_colour_transitions_only(style: &StyleDesc) -> bool {
+    !crate::css::var_substitution::holds_family(style, "transition")
+        && TransitionList::parse(style).is_ok_and(|list| {
+            list.0.iter().all(|entry| match &entry.matcher {
+                Matcher::All => false,
+                Matcher::Props(keys) => keys.iter().all(|key| matches!(key, PropKey::Style(prop) if prop.is_colour())),
+            })
+        })
+}
+
+/// [`declares_colour_transitions_only`] for `style` as it is, with the state styles it holds. What a hover
+/// that only paints may start, and the patch frames that follow it can draw (`events/hover_paint.rs`).
+pub(crate) fn transitions_only_colours(style: &StyleDesc) -> bool {
+    declares_colour_transitions_only(style)
+        && crate::css::var_substitution::state_blocks(style)
+            .into_iter()
+            .all(|(_, state)| state.is_none_or(declares_colour_transitions_only))
+}
+
 /// Whether `style` sets a `transition*` field that is more than `none`, or holds a `transition*`
 /// declaration with a `var()`, which says what it is once the custom properties are known.
 fn declares_transition(style: &StyleDesc) -> bool {
@@ -2277,6 +2300,41 @@ mod tests {
     fn entry(list: &TransitionList, index: usize) -> (&Matcher, f64, f64) {
         let entry = &list.0[index];
         (&entry.matcher, entry.duration, entry.delay)
+    }
+
+    #[test]
+    fn a_list_of_colours_only_is_colours_only_and_so_is_no_list() {
+        for only in [
+            r#"{}"#,
+            r#"{ "transition": "none" }"#,
+            r#"{ "transition": "background-color 150ms" }"#,
+            r#"{ "transition": "color 1s, background-color 1s, border-color 1s, outline-color 1s, text-decoration-color 1s" }"#,
+            r#"{ "transition": "border-top-color 1s" }"#,
+            r#"{ "transitionProperty": "background-color", "transitionDuration": "1s" }"#,
+            r#"{ "transition": "cursor 1s" }"#,
+            r#"{ "hover": { "transition": "color 1s" } }"#,
+        ] {
+            assert!(transitions_only_colours(&style(only)), "{only}");
+        }
+    }
+
+    #[test]
+    fn a_list_that_can_run_on_anything_else_is_not() {
+        for other in [
+            r#"{ "transition": "all 1s" }"#,
+            r#"{ "transition": "opacity 1s" }"#,
+            r#"{ "transition": "transform 1s" }"#,
+            r#"{ "transition": "width 1s" }"#,
+            r#"{ "transition": "background-color 1s, opacity 1s" }"#,
+            r#"{ "transition": "box-shadow 1s" }"#,
+            r#"{ "transition": "fill 1s" }"#,
+            r#"{ "transitionDuration": "1s" }"#,
+            r#"{ "transition": "background-color 1s", "transitionProperty": "background-color, width" }"#,
+            r#"{ "hover": { "transition": "all 1s" } }"#,
+            r#"{ "transition": "var(--t)" }"#,
+        ] {
+            assert!(!transitions_only_colours(&style(other)), "{other}");
+        }
     }
 
     #[test]

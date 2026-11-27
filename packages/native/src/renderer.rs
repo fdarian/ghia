@@ -9840,6 +9840,7 @@ impl GpuixView {
             build_element_in(id, &mut ctx, window, cx, None)
         };
         self.retain.resume(recording);
+        let dynamic = self.retain.take_unrecorded_dynamic();
         crate::tape::truncate_build_effects(effects);
         drop(pointer);
         debug_assert!(highlight_events.is_empty(), "a highlight is never inside a unit");
@@ -9851,6 +9852,7 @@ impl GpuixView {
             id: retained_id(id),
             element: crate::tape::Taped::new(element, tape.clone()).into_any_element(),
             tape,
+            dynamic,
         })
     }
 
@@ -10341,6 +10343,9 @@ pub(crate) struct ScratchUnit {
     /// What the element writes into the registries when it is prepainted and painted, see
     /// `Tapes::same_as_recorded`.
     pub tape: crate::tape::SharedTape,
+    /// What running was found on the elements the build made (`Retain::take_unrecorded_dynamic`), for the patch that
+    /// draws it to hand to `Retain::land_patch`.
+    pub dynamic: Vec<(u64, u8)>,
 }
 
 /// Whether an element can be left alone while nobody sees it, see `retain::Sources::dormant`.
@@ -12058,7 +12063,7 @@ fn build_element_unpumped(
     let state_id = crate::layout::generated::state_owner(id);
     crate::perf_counters::element_built();
     if contents_dynamic != 0 {
-        ctx.retain.dynamic_bits(contents_dynamic | crate::retain::Dynamic::Spliced as u8);
+        ctx.retain.dynamic_bits(id, contents_dynamic | crate::retain::Dynamic::Spliced as u8);
     }
 
     // `@container` blocks fold into the declared style before anything reads it, so state
@@ -12142,7 +12147,7 @@ fn build_element_unpumped(
         },
     );
     ctx.retain.measurement(animated.measurement.as_ref());
-    ctx.retain.dynamic_bits(animated.dynamic);
+    ctx.retain.dynamic_bits(id, animated.dynamic);
     if animated.dynamic & crate::retain::Dynamic::OWN != 0 {
         let paints_only = runs_paint_only(
             tree,
@@ -12453,7 +12458,7 @@ fn build_element_unpumped(
                     ctx.now,
                 );
                 if running != 0 {
-                    ctx.retain.dynamic_bits(running);
+                    ctx.retain.dynamic_bits(id, running);
                     ctx.retain.paints_only(runs_paint_only(
                         ctx.tree,
                         element,
