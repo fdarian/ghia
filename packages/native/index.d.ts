@@ -846,6 +846,11 @@ export declare class TestGpuixRenderer {
    */
   constructor(options?: WindowOptions | undefined | null, scaleFactor?: number | undefined | null)
   /**
+   * Whether GPUI no longer has this window: disposed, or taken by an app that ended. Not what a
+   * script's `window.close()` asks, which the JS side keeps.
+   */
+  isWindowClosed(): boolean
+  /**
    * Tears the window and its GPUI app down. Every call that needs the window
    * throws afterwards; the retained tree stays readable. Call it after the
    * root is unmounted.

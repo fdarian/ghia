@@ -52,19 +52,49 @@ pub(crate) fn app_has_ended() -> bool {
     ENDED.get()
 }
 
-/// GPUI answers an update of a window it no longer has with this message (`context("window not found")`).
+/// GPUI answers an update of a window it cannot lend with this message (`context("window not found")`). It
+/// says the same for a window that is gone and for one that is in the middle of its own update: GPUI takes a
+/// window out of its slot while it updates it (`App::update_window_id`), so a handler that runs inside that
+/// update and reaches the window again (a focus listener of window B reading window A, whose click focused B)
+/// gets it too. The message alone does not say which.
 #[cfg(target_os = "macos")]
 const WINDOW_NOT_FOUND: &str = "window not found";
 
-/// The error of an update of `window`. The window being gone is learned here when nothing else told
-/// this module (a quit that dropped it, a close in the middle of a call), so `isWindowClosed()` reads
-/// it from then on.
+/// What a call that reaches a window which is in the middle of its own update is told.
 #[cfg(target_os = "macos")]
-fn update_error(window: WindowId, message: String) -> Error {
-    if message == WINDOW_NOT_FOUND {
-        closed(window);
+pub(crate) const WINDOW_BUSY: &str = "The window is being updated by an input that is being dispatched, so a handler of another window cannot reach it from here. Do the call from the window's own handler, or after the input.";
+
+/// Whether GPUI still lists `window`. A window that is in the middle of its own update is out of its slot but its
+/// id stays in `App::windows()`, which is what tells it from one that is gone.
+#[cfg(target_os = "macos")]
+pub(crate) fn is_listed(cx: &gpui::App, window: WindowId) -> bool {
+    cx.windows().iter().any(|handle| handle.window_id() == window)
+}
+
+/// The error of an update of `window` that GPUI answered with `message`, knowing from `cx` whether the window is
+/// still listed. A window that is gone is learned here when nothing else told this module (a quit that dropped it,
+/// a close in the middle of a call), so `isWindowClosed()` reads it from then on; one that is only busy is open
+/// and stays so.
+#[cfg(target_os = "macos")]
+pub(crate) fn update_error_in(cx: &gpui::App, window: WindowId, message: String) -> Error {
+    if message != WINDOW_NOT_FOUND {
+        return Error::from_reason(message);
     }
+    if is_listed(cx, window) {
+        return Error::from_reason(WINDOW_BUSY);
+    }
+    closed(window);
     Error::from_reason(message)
+}
+
+/// [`update_error_in`] for an update that ran through the app a sync dispatch holds, which this asks for the window
+/// list. Without that app nothing says whether the window is gone, so it is not marked.
+#[cfg(target_os = "macos")]
+pub(crate) fn update_error(window: WindowId, message: String) -> Error {
+    match crate::events::sync_dispatch::with_active_window(|_window, cx| update_error_in(cx, window, message.clone())) {
+        Some(error) => error,
+        None => Error::from_reason(message),
+    }
 }
 
 /// `update_window_in` for a change that returns nothing. When it is called while the
@@ -112,7 +142,7 @@ fn update_window_outside<R>(
         app.update(|cx| {
             handle
                 .update(cx, update)
-                .map_err(|error| update_error(handle.window_id(), error.to_string()))
+                .map_err(|error| update_error_in(cx, handle.window_id(), error.to_string()))
         })
     })
 }
@@ -138,7 +168,7 @@ pub(crate) fn update_window_without_view_in<R>(
                     app.update(|cx| {
                         gpui::AnyWindowHandle::from(handle)
                             .update(cx, move |_view, window, cx| update(window, cx))
-                            .map_err(|error| update_error(handle.window_id(), error.to_string()))
+                            .map_err(|error| update_error_in(cx, handle.window_id(), error.to_string()))
                     })
                 })
             },
@@ -236,6 +266,37 @@ mod tests {
         note_app_ended();
         assert!(app_has_ended() && !is_open(first) && !is_open(second));
         assert_eq!(open_count(), 0);
+    }
+
+    /// GPUI answers "window not found" for a window in the middle of its own update as it does for a gone one,
+    /// and only the window list tells them apart: the id stays listed while the window is out of its slot.
+    #[cfg(target_os = "macos")]
+    #[gpui::test]
+    fn a_window_in_the_middle_of_its_own_update_is_listed_and_a_removed_one_is_not(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        let window = cx.add_window(|_, _| gpui::Empty);
+        let id = window.window_id();
+        let handle: gpui::AnyWindowHandle = window.into();
+        let mut seen = None;
+        cx.update_window(handle, |_, _, cx| {
+            // The window is out of its slot here: GPUI cannot lend it again.
+            let again = gpui::AnyWindowHandle::from(window).update(cx, |_, _, _| ());
+            seen = Some((again.map_err(|error| error.to_string()), is_listed(cx, id)));
+        })
+        .unwrap();
+        let (again, listed) = seen.unwrap();
+        assert_eq!(again, Err(WINDOW_NOT_FOUND.to_string()));
+        assert!(listed);
+        let error = cx.update(|cx| update_error_in(cx, id, WINDOW_NOT_FOUND.to_string()));
+        assert_eq!(error.reason, WINDOW_BUSY);
+
+        cx.update_window(handle, |_, window, _| window.remove_window()).unwrap();
+        cx.run_until_parked();
+        assert!(!cx.update(|cx| is_listed(cx, id)));
+        opened(id);
+        let error = cx.update(|cx| update_error_in(cx, id, WINDOW_NOT_FOUND.to_string()));
+        assert_eq!(error.reason, WINDOW_NOT_FOUND);
+        assert!(!is_open(id), "a window GPUI no longer lists is closed");
     }
 
     /// Test windows repeat ids across suites, so an entry a closed window left would be a later window's.

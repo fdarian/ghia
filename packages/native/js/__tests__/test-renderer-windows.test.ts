@@ -101,6 +101,64 @@ describe.skipIf(!hasNativeTestRenderer)("several test renderers at once", () => 
     expect(read).toMatchObject([{ width: 64, height: 48 }, { width: 250, height: 350 }])
   })
 
+  /**
+   * GPUI takes a window out of its slot while it updates it, so a read of window A from a handler that A's own input
+   * set off in window B (A's click focuses B, B's `focus` listener reads A) finds A "not found". A is open then.
+   */
+  it("keeps a window open when a handler its input set off in another window reads it", () => {
+    const heard: unknown[] = []
+    const focusable = (window: Window): void => {
+      mount(window, { width: 100, height: 100 }, "w")
+      window.renderer.applyBatch(
+        encodeWireBatchForTest([
+          ["setCustomProp", 2, "tabIndex", 0],
+          ["setEventListener", 2, "focus", true],
+        ])
+      )
+      window.renderer.flush()
+    }
+    const first = new TestRenderer({
+      width: 400,
+      height: 400,
+      dispatchEvent: () => {},
+      dispatchSyncEvent: (event) => {
+        if (event.eventType === "click") second.focusElement(2)
+        return { defaultPrevented: false, propagationStopped: false }
+      },
+    })
+    const second = new TestRenderer({
+      width: 300,
+      height: 300,
+      dispatchEvent: () => {},
+      dispatchSyncEvent: (event) => {
+        if (event.eventType === "focus") {
+          try {
+            heard.push(first.getElementBounds(2))
+          } catch (error) {
+            heard.push(String(error))
+          }
+        }
+        return { defaultPrevented: false, propagationStopped: false }
+      },
+    })
+    focusable({ renderer: first, events: [] })
+    focusable({ renderer: second, events: [] })
+
+    first.nativeSimulateClick(50, 50)
+
+    expect(heard).toHaveLength(1)
+    // The read works or says why it cannot; it never calls the window gone.
+    expect(typeof heard[0] === "string" ? heard[0] : "").not.toMatch(/window not found|is closed/)
+    expect(first.isWindowClosed()).toBe(false)
+    expect(second.isWindowClosed()).toBe(false)
+    first.applyBatch(encodeWireBatchForTest([["setText", 3, "after"]]))
+    first.flush()
+    expect(first.getPaintedText()).toEqual(["after"])
+    first.dispose()
+    second.dispose()
+    expect(first.isWindowClosed()).toBe(true)
+  })
+
   it("draws a window only when asked: a frame of one is not a frame of the other", () => {
     const first = open(400, 400)
     const second = open(400, 400)

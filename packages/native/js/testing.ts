@@ -860,9 +860,12 @@ export class TestRenderer implements NativeRenderer {
   private windowTitle: string | undefined
   private windowClosed = false
 
-  /** Whether `closeWindow()` ran: what a script's `window.close()` does to a test window. The native window stays until `dispose()`. */
+  /**
+   * Whether the window is closed: `closeWindow()` ran (what a script's `window.close()` does to a test window; the
+   * native window stays until `dispose()`), or native no longer has it.
+   */
   isWindowClosed(): boolean {
-    return this.windowClosed
+    return this.windowClosed || this.native.isWindowClosed()
   }
 
   /** What `window.close()` asks of the platform: a test window only notes it, and `dispose()` still releases it. */

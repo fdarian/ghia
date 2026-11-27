@@ -344,7 +344,10 @@ platform close run in a later task, so the handler that called it never has its 
 gone behaves as closed whichever way it went (the user, `closeWindow()`, the App quitting). `isWindowClosed()` is true as soon as
 GPUI no longer has the window: `window_set::closed` runs from `on_window_closed`, `note_app_ended` runs it for every window left
 when `tick()` sees the quit (GPUI's shutdown drops the windows without telling the observer), and an update that GPUI answers with
-"window not found" marks the window closed too. From then on `applyBatch` only updates the tree (no invalidation, no focus), so
+"window not found" marks the window closed too, but only when `App::windows()` no longer lists it: GPUI answers the same for a window
+that is in the middle of its own update (it is taken out of its slot, its id stays listed), which is what a `focus` listener of
+window B finds when it reads window A whose click focused B. That window is open, stays open, and the call throws "The window is being
+updated by an input that is being dispatched ..." (`window_set::update_error`). From then on `applyBatch` only updates the tree (no invalidation, no focus), so
 unmounting a root does not throw; a setter that only means something for a window that is there (the title, size, `activate`,
 `minimize`, `zoom`, fullscreen, appearance, the `selectionChange`, `appearanceChange`, `mediaChange` and window key listeners, focus
 stepping, `blur`, `blurElement`) does nothing and answers success, and a frame request or deferred update does nothing; a native call that needs the window

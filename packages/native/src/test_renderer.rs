@@ -666,6 +666,19 @@ impl TestGpuixRenderer {
         crate::frame_steps::as_frame(|| self.with_test_state(f))
     }
 
+    /// The error of a call that a sync dispatch answered with `message`: a window that is only in the
+    /// middle of its own update is open and is told so, one GPUI no longer lists is closed.
+    fn update_error(&self, message: String) -> Error {
+        #[cfg(target_os = "macos")]
+        {
+            crate::window_set::update_error(self.window.window_id(), message)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Error::from_reason(message)
+        }
+    }
+
     /// Runs `update` on the view and the window, from anywhere: from inside a sync event handler
     /// it borrows nothing new and updates this renderer's window through the app the dispatch
     /// holds (the window being dispatched, or another one). The test context is not run until
@@ -678,7 +691,7 @@ impl TestGpuixRenderer {
             crate::events::sync_dispatch::route(
                 update,
                 |update| crate::events::sync_dispatch::update_view_of(self.window, update),
-                Error::from_reason,
+                |message| self.update_error(message),
                 |update| {
                     self.with_test_state(|cx, window, view| {
                         let view = view.clone();
@@ -701,7 +714,7 @@ impl TestGpuixRenderer {
             crate::events::sync_dispatch::route(
                 update,
                 |update| crate::events::sync_dispatch::update_window_of(self.window, update),
-                Error::from_reason,
+                |message| self.update_error(message),
                 |update| {
                     self.with_test_state(|cx, window, _view| {
                         let result = cx
@@ -724,7 +737,7 @@ impl TestGpuixRenderer {
         crate::events::sync_dispatch::route(
             update,
             |update| crate::events::sync_dispatch::update_view_of_or_defer(self.window, update),
-            Error::from_reason,
+            |message| self.update_error(message),
             |update| self.update_view(update),
         )
     }
@@ -978,6 +991,7 @@ impl TestGpuixRenderer {
         };
 
         let id = NEXT_RENDERER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::window_set::opened(window.window_id());
         app.windows.push(TestWindow { owner: id, view, window });
         // Store !Send types on the JS main thread.
         TEST_APP.with(|cell| **cell.borrow_mut() = Some(app));
@@ -1005,6 +1019,13 @@ impl TestGpuixRenderer {
             #[cfg(target_os = "macos")]
             key_event_pending: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// Whether GPUI no longer has this window: disposed, or taken by an app that ended. Not what a
+    /// script's `window.close()` asks, which the JS side keeps.
+    #[napi]
+    pub fn is_window_closed(&self) -> bool {
+        !crate::window_set::is_open(self.window.window_id())
     }
 
     /// Tears the window and its GPUI app down. Every call that needs the window

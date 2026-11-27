@@ -1814,7 +1814,8 @@ impl GpuixRenderer {
 
     /// Runs a setter that only means something for a window that is there: once the window is gone
     /// (closed by the user, by `closeWindow`, or by the app quitting) it has nothing to set and does
-    /// nothing. A window that went while `set` ran does nothing either.
+    /// nothing. A window that went while `set` ran does nothing either; an error of a window that is
+    /// still there (one only in the middle of its own update) is the caller's.
     fn unless_closed(&self, set: impl FnOnce() -> Result<()>) -> Result<()> {
         if self.is_window_closed() {
             return Ok(());
