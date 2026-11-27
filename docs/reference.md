@@ -1245,7 +1245,8 @@ media types `all` and `screen` match, `print` and `speech` do not.
 
 A query item that does not parse is `not all`: it never matches and `media`
 reports `not all`. The other items of a comma list still count. A parenthesized
-block that names a feature or value Ghia does not know is `<general-enclosed>`,
+block that names a feature or value Ghia does not know, or whose nested condition has a
+syntax error (`((min-width: 1px) and) or (hover)`), is `<general-enclosed>`,
 whose result is unknown: false on its own and in an `and`, still unknown under
 `not`, and it does not void a true sibling of an `or` (`(unknown) or (min-width:
 100px)` matches in a wide window). An item that no window can make true that way

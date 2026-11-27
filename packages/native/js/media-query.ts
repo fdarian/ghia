@@ -303,20 +303,18 @@ class Parser {
     const open = this.next()
     if (open?.type !== "(") throw new Unsupported()
     const first = this.peek()
-    if (first?.type === "(" || (first?.type === "ident" && first.value === "not" && this.peekAt(1)?.type === "(")) {
-      const result = this.parseCondition(true)
-      if (this.next()?.type !== ")") throw new Unsupported()
-      return result
-    }
+    const nested = first?.type === "(" || (first?.type === "ident" && first.value === "not" && this.peekAt(1)?.type === "(")
     try {
-      const feature = this.parseFeature()
+      const inner = nested ? this.parseCondition(true) : this.parseFeature()
       if (this.peek()?.type === ")") {
         this.index += 1
-        return feature
+        return inner
       }
     } catch (error) {
       if (!(error instanceof Unsupported)) throw error
     }
+    // Not a condition or a feature known with a value it takes (a syntax error inside a nested condition included): the
+    // block is <general-enclosed>, as long as it is closed, so a sibling of an `or` still decides the query.
     const close = this.closeOf(openAt)
     if (close === undefined) throw new Unsupported()
     this.index = close + 1

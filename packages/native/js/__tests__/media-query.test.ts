@@ -116,6 +116,17 @@ describe("media query evaluation", () => {
     expect(matches("(bogus) or (bogus2), screen")).toBe(true)
   })
 
+  it("treats a syntax error inside a nested condition as general-enclosed: it does not void a true or sibling", () => {
+    expect(matches("((min-width: 800px) and) or (min-width: 800px)")).toBe(true)
+    expect(matches("(min-width: 800px) or ((min-width: 900px) and (color) or (hover))")).toBe(true)
+    expect(matches("screen and (((min-width: 800px) and) or (min-width: 800px))")).toBe(true)
+    expect(matches("((min-width: 800px) and)")).toBe(false)
+    expect(matches("((min-width: 800px) and) or (min-width: 900px)")).toBe(false)
+    expect(matches("not ((min-width: 800px) and)")).toBe(false)
+    expect(matches("((min-width: 800px) and) and (min-width: 800px)")).toBe(false)
+    expect(matches("((min-width: 800px) and")).toBe(false)
+  })
+
   it("matches media types", () => {
     expect(matches("all")).toBe(true)
     expect(matches("screen")).toBe(true)

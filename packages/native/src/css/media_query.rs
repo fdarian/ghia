@@ -627,22 +627,20 @@ impl Parser<'_> {
         if !matches!(self.next(), Some(Token { tok: Tok::Open, .. })) {
             return Err(Unsupported);
         }
-        if self.at_condition() {
-            let result = self.parse_condition(true)?;
-            if !matches!(self.next(), Some(Token { tok: Tok::Close, .. })) {
-                return Err(Unsupported);
-            }
-            return Ok(result);
-        }
-        let feature = self.parse_feature();
-        if let Ok(result) = feature {
+        let inner = if self.at_condition() {
+            self.parse_condition(true)
+        } else {
+            self.parse_feature()
+        };
+        if let Ok(result) = inner {
             if matches!(self.peek(), Some(Token { tok: Tok::Close, .. })) {
                 self.index += 1;
                 return Ok(result);
             }
         }
-        // Not a feature this engine knows with a value it takes: the block is `<general-enclosed>`,
-        // as long as it is closed.
+        // Not a condition or a feature this engine knows with a value it takes (a syntax error inside a
+        // nested condition included): the block is `<general-enclosed>`, as long as it is closed, so a
+        // sibling of an `or` still decides the query.
         self.index = self.close_of(open).ok_or(Unsupported)? + 1;
         Ok(Condition::Unknown)
     }
@@ -984,6 +982,19 @@ mod tests {
         assert!(matches("not ((bogus) and (min-width: 900px))", &size), "false and unknown is false");
         assert!(!matches("not screen and (bogus)", &size));
         assert!(matches("(bogus) or (bogus2), screen", &size));
+    }
+
+    #[test]
+    fn a_syntax_error_inside_a_nested_condition_is_general_enclosed_and_does_not_void_its_or_siblings() {
+        let size = environment(800.0, 600.0);
+        assert!(matches("((min-width: 800px) and) or (min-width: 800px)", &size));
+        assert!(matches("(min-width: 800px) or ((min-width: 900px) and (color) or (hover))", &size));
+        assert!(matches("screen and (((min-width: 800px) and) or (min-width: 800px))", &size));
+        assert!(!matches("((min-width: 800px) and)", &size));
+        assert!(!matches("((min-width: 800px) and) or (min-width: 900px)", &size));
+        assert!(!matches("not ((min-width: 800px) and)", &size));
+        assert!(!matches("((min-width: 800px) and) and (min-width: 800px)", &size));
+        assert!(!matches("((min-width: 800px) and", &size), "an unclosed block is still an error");
     }
 
     #[test]
