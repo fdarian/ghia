@@ -707,12 +707,36 @@ const liveRenderers = new Set<TestRenderer>()
  * renderer made since that is still open, without the retention report `dispose()` makes. A
  * test's renderer is often not disposed (the root of a test that did not unmount, a suite that
  * makes one window per test), and with several windows open at once nothing else closes it.
- * `testing-setup.ts` makes a scope of each vitest test; a script that makes many windows in a
+ * `bindTestRendererScope` makes a scope of each vitest test; a script that makes many windows in a
  * loop calls it itself. Windows made before the scope (a `beforeAll` one) are not touched.
  */
 export function startTestRendererScope(): () => void {
   const before = new Set(liveRenderers)
   return () => TestRenderer.releaseAll([...liveRenderers].filter((renderer) => !before.has(renderer)))
+}
+
+/**
+ * Makes a scope of each test of a vitest suite, from its setup file (`setupFiles`): pass
+ * `beforeEach` and `afterEach` of the `vitest` the suite runs on, which this module cannot import
+ * itself (a package that is not the suite's own has its own copy of vitest, and a hook of that one
+ * finds no runner).
+ *
+ *     import { bindTestRendererScope } from "@ghia/native/testing"
+ *     import { afterEach, beforeEach } from "vitest"
+ *     bindTestRendererScope({ beforeEach, afterEach })
+ */
+export function bindTestRendererScope(hooks: {
+  beforeEach: (hook: () => void) => void
+  afterEach: (hook: () => void) => void
+}): void {
+  let end: (() => void) | undefined
+  hooks.beforeEach(() => {
+    end = startTestRendererScope()
+  })
+  hooks.afterEach(() => {
+    end?.()
+    end = undefined
+  })
 }
 
 /** Throws if a replayed frame of this window differed from a build of it, or if gpuix's own
@@ -828,12 +852,12 @@ export class TestRenderer implements NativeRenderer {
     if (process.env.GPUIX_RETAIN_VERIFY !== undefined && liveRenderers.has(this)) {
       reportRetentionMismatches(this.native)
     }
-    this.release()
+    this.#release()
   }
 
   /** Everything `dispose()` does but the retention report: what is left of a window nobody
    *  disposed does not fail the test that made it. */
-  private release(): void {
+  #release(): void {
     if (!liveRenderers.delete(this)) return
     forgetElementSource(this)
     unregisterKeyframesHost(this.native)
@@ -848,7 +872,7 @@ export class TestRenderer implements NativeRenderer {
 
   /** @internal `startTestRendererScope` closes the windows a test left open. */
   static releaseAll(renderers: readonly TestRenderer[]): void {
-    for (const renderer of renderers) renderer.release()
+    for (const renderer of renderers) renderer.#release()
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────

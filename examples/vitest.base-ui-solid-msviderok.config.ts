@@ -9,5 +9,5 @@ export default defineConfig({
   resolve: {
     alias: [{ find: /^@photon-ai\/base-ui-solid(\/|$)/, replacement: '@msviderok/base-ui-solid$1' }],
   },
-  test: { environment: 'node', setupFiles: ['@ghia/native/testing-setup'], include: ['base-ui-solid/**/*.test.tsx'] },
+  test: { environment: 'node', setupFiles: ['./vitest.setup.ts'], include: ['base-ui-solid/**/*.test.tsx'] },
 })

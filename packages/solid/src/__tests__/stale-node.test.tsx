@@ -67,7 +67,9 @@ describe.skipIf(!hasNativeTestRenderer)("an element used after its root unmounte
     first.render(() => <button ref={(value: HTMLElement) => (stale = value)} style={{ width: 80, height: 24 }} />)
 
     // Ids start from the same number in every renderer, so `stale.focus()` names the second
-    // window's button if it reaches it.
+    // window's button if it reaches it. A window that is still open is the element's own and
+    // answers it: it is the unmounted one that has to answer as for a node out of a document.
+    first.unmount()
     const second = createTestRoot({ width: 200, height: 100 })
     second.render(() => <button testId="other" style={{ width: 80, height: 24 }} />)
     expect(second.renderer.getFocusedElementId()).toBeNull()

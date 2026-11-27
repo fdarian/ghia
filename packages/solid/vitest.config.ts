@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [ghia(), solid()],
   test: {
     environment: "node",
-    setupFiles: ["@ghia/native/testing-setup"],
+    setupFiles: ["./vitest.setup.ts"],
     include: ["src/__tests__/**/*.test.{ts,tsx}"],
   },
 })
