@@ -4480,9 +4480,10 @@ corner of its clip cuts it, or something drawn after it overlaps it. Whatever is
 drawn after it counts by its reach: a box, a native view, and an effect group (an
 `opacity` below 1 or a `filter` that makes one) by its clip grown by what its
 filters spread, so an unrelated group elsewhere on the page keeps it on the layer and
-one whose blur reaches it does not. A border drawn around the caret does not count (a bordered input
-paints its border after its text, over the whole box of the input): a box with no background
-is taken by its border band, its width and the corner a radius leaves, not by its box. Off the layer, the window draws a caret under a
+one whose blur reaches it does not. A box with no background (a bordered input draws
+its border after its text, over its whole box) is taken by its border alone, not by its box:
+the border takes the caret off the layer only where the caret crosses its inner edge or reaches into
+the square a rounded inner corner leaves; a caret that rests against the inner edge stays on it. Off the layer, the window draws a caret under a
 transform beyond a translation or something that overlaps it lit or dark with a present of its
 own that draws nothing else. Only a caret in an effect group, a text clip or a window
 with a native view is repainted by the page at each phase (a tick that repaints only
