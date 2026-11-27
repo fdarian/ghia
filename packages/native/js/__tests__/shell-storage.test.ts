@@ -371,4 +371,38 @@ ready()`,
     expect(ended.output).toContain("2")
     expect(written()).toEqual({ queued: "1" })
   })
+
+  it("leaves a signal to a once listener added after the storage, which is removed before it runs", async () => {
+    const ended = await runChild(
+      `${NO_TASK}
+createFileStorage(path).setItem("queued", "1")
+process.once("SIGTERM", () => {
+  console.log("handled")
+  clearInterval(keepAlive)
+})
+ready()`,
+      "SIGTERM",
+    )
+    expect(ended.signal, ended.output).toBeNull()
+    expect(ended.code, ended.output).toBe(0)
+    expect(ended.output).toContain("handled")
+    expect(written()).toEqual({ queued: "1" })
+  })
+
+  it("leaves a signal to a once listener that was there before the storage", async () => {
+    const ended = await runChild(
+      `${NO_TASK}
+process.once("SIGINT", () => {
+  console.log("handled")
+  clearInterval(keepAlive)
+})
+createFileStorage(path).setItem("queued", "1")
+ready()`,
+      "SIGINT",
+    )
+    expect(ended.signal, ended.output).toBeNull()
+    expect(ended.code, ended.output).toBe(0)
+    expect(ended.output).toContain("handled")
+    expect(written()).toEqual({ queued: "1" })
+  })
 })

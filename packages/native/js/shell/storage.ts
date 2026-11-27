@@ -249,6 +249,10 @@ function onExit(): void {
  * only when it is the last listener. Another listener (the one `ghia dev`'s `runMain` installs before the entry is imported,
  * or one added later) decides what the signal does, and the process then ends through `exit`, where the flush runs again;
  * raising it would kill the process under that listener. The handler stays installed while another listener handles the signal.
+ *
+ * It is the first listener (`prependListener`) so that the count it reads is the count when the signal was emitted: a `once`
+ * listener takes itself off before it runs, so a handler that ran after one would find itself alone and kill the process
+ * in the middle of that listener's shutdown.
  */
 function installSignalFlush(signal: (typeof EXIT_SIGNALS)[number]): void {
   const handler = () => {
@@ -258,7 +262,7 @@ function installSignalFlush(signal: (typeof EXIT_SIGNALS)[number]): void {
     if (!(process.pid > 0)) throw new Error(`Cannot raise ${signal} again: process.pid is ${process.pid}`)
     process.kill(process.pid, signal)
   }
-  process.on(signal, handler)
+  process.prependListener(signal, handler)
 }
 
 function writeAtomically(fs: NodeFs, path: string, items: ReadonlyMap<string, string>): void {
