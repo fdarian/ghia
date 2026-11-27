@@ -1318,6 +1318,10 @@ pub(crate) struct Retain {
     /// What a build that records nothing (`suspend`: the units of a patch) found running on each element it
     /// built, for [`Self::land_patch`] when the patch is drawn. None outside such a build.
     unrecorded_dynamic: Option<FxHashMap<u64, u8>>,
+    /// The elements whose `Transition` bit in `dynamic` a patch added, in a unit that a frame had found nothing running on
+    /// ([`Self::land_patch`]): a later patch that builds them says when it ends. A frame that builds the element writes
+    /// `dynamic` again, and the element leaves.
+    patch_started: FxHashSet<u64>,
     /// The elements the frames left out of `changed` because they are dormant (`Sources::dormant`),
     /// with the kinds that were running on them when they fell asleep. Their records stay as they
     /// are: the roots above them are replayed. An element is asked once, and sleeps until
@@ -1547,6 +1551,7 @@ impl Retain {
             records: FxHashMap::default(),
             dynamic: FxHashMap::default(),
             unrecorded_dynamic: None,
+            patch_started: FxHashSet::default(),
             dormant: FxHashMap::default(),
             skipping: FxHashSet::default(),
             woken: FxHashSet::default(),
@@ -1621,6 +1626,7 @@ impl Retain {
         self.seen = Seen { scrolls, ..Seen::default() };
         self.records.clear();
         self.dynamic.clear();
+        self.patch_started.clear();
         self.rows_before.clear();
         self.release_dormant(false);
         self.plan.recorded = false;
@@ -1786,6 +1792,7 @@ impl Retain {
         self.records.retain(|id, _| tree.elements.contains_key(id));
         self.box_candidates.retain(|id| tree.elements.contains_key(id));
         self.dynamic.retain(|id, _| tree.elements.contains_key(id));
+        self.patch_started.retain(|id| tree.elements.contains_key(id));
         self.unbuilt.retain(|id| tree.elements.contains_key(id));
         let moves = &mut self.moves;
         self.dormant.retain(|id, _| {
@@ -2268,9 +2275,10 @@ impl Retain {
     /// were found by the frame and are not changed by a repaint.
     ///
     /// `found` is what the patch roots among the units built, which have no frame behind them that found a run: it
-    /// replaces the bits, so a run that ended is cleared. `started` is what every other unit built (a unit, an anchor, a
-    /// box root): it only adds. Their frame found what runs in them, and clears what ended after the run; a patch that
-    /// cleared one would drop what the frame's own records still follow. A tick looks for the root that holds the element
+    /// replaces the bits, so a run that ended is cleared. `started` is what every other unit built (an anchor or a box
+    /// root that finds a run is declined before this, `RunInRelaidRoot`): the frame found what runs in it and clears what
+    /// ended after the run, so a patch only adds a transition, and keeps the element (`patch_started`) to say when that
+    /// run ends in the patches that follow, as a patch root does. A tick looks for the root that holds the element
     /// ([`Self::preview`]).
     pub(crate) fn land_patch(&mut self, found: &[(u64, u8)], started: &[(u64, u8)]) {
         const LANDED: u8 = Dynamic::Transition as u8 | Dynamic::Spliced as u8;
@@ -2280,7 +2288,13 @@ impl Retain {
         }
         for &(id, bits) in started {
             let before = self.dynamic.get(&id).copied().unwrap_or(0);
-            self.land(id, before | (bits & LANDED));
+            let now = if self.patch_started.contains(&id) { (before & !LANDED) | (bits & LANDED) } else { before | (bits & LANDED) };
+            if bits & Dynamic::Transition as u8 != 0 && before & Dynamic::Transition as u8 == 0 {
+                self.patch_started.insert(id);
+            } else if now & Dynamic::Transition as u8 == 0 {
+                self.patch_started.remove(&id);
+            }
+            self.land(id, now);
         }
     }
 
@@ -2608,6 +2622,16 @@ impl Retain {
         }
         self.plan.anchor_ids.insert(unit.id);
         self.plan.anchors.push(unit);
+    }
+
+    /// Whether the last frame built whole has the element `id` as a unit (not a patch root, an anchor or a box root).
+    pub(crate) fn is_unit(&self, id: u64) -> bool {
+        self.plan.ids.contains(&id)
+    }
+
+    /// Whether the last build that wrote `dynamic` for the element `id`, or a patch since, found a transition running on it.
+    pub(crate) fn runs_a_transition(&self, id: u64) -> bool {
+        self.dynamic.get(&id).is_some_and(|bits| bits & Dynamic::Transition as u8 != 0)
     }
 
     /// Whether the last frame built whole has the element `id` as an anchor.
@@ -3985,6 +4009,7 @@ impl Retain {
             if !self.dormant.is_empty() && self.dormant.contains_key(&node.id) {
                 self.woken.insert(node.id);
             }
+            self.patch_started.remove(&node.id);
             if node.vol.dynamic != 0 {
                 self.dynamic.insert(node.id, node.vol.dynamic);
                 built_dynamic.insert(node.id);
@@ -6980,6 +7005,24 @@ mod tests {
         assert_eq!(retain.dynamic.get(&2), Some(&(Dynamic::Animation as u8 | TRANSITION)), "a transition that started, and no other kind of what was built");
         assert_eq!(retain.dynamic.get(&3), Some(&(TRANSITION | SPLICED)));
         assert_eq!(retain.dynamic.get(&4), None);
+    }
+
+    #[test]
+    fn a_transition_a_patch_started_in_a_unit_is_cleared_by_the_patch_that_sees_it_end() {
+        const TRANSITION: u8 = Dynamic::Transition as u8;
+        let mut retain = Retain::new();
+        retain.dynamic.insert(1, TRANSITION | Dynamic::Blink as u8);
+        retain.land_patch(&[], &[(1, TRANSITION), (2, TRANSITION)]);
+        assert!(retain.runs_a_transition(2) && !retain.patch_started.contains(&1) && retain.patch_started.contains(&2));
+        retain.land_patch(&[], &[(1, 0), (2, TRANSITION)]);
+        assert!(retain.runs_a_transition(2), "a run that goes on is kept");
+        retain.land_patch(&[], &[(1, 0), (2, 0)]);
+        assert!(!retain.runs_a_transition(2), "a run the patch started and that ended is not left for the frame that follows");
+        assert!(!retain.patch_started.contains(&2));
+        assert_eq!(retain.dynamic.get(&1), Some(&(TRANSITION | Dynamic::Blink as u8)), "a run a frame found is cleared by a frame");
+        retain.land_patch(&[], &[(3, TRANSITION)]);
+        retain.forget();
+        assert!(retain.patch_started.is_empty() && retain.dynamic.is_empty());
     }
 
     #[test]

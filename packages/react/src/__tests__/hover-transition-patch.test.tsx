@@ -335,7 +335,7 @@ describeNative("a hover whose element transitions colours", { timeout: TIMEOUT }
 })
 
 /** What the pages below do with a colour transition that runs in a root a frame built whole records, or does not. */
-type Layout = "column" | "unit" | "list"
+type Layout = "column" | "unit" | "list" | "unit-scroller" | "box" | "anchor"
 
 let tintRows!: (tinted: boolean) => void
 let editPage!: (edit: number) => void
@@ -343,7 +343,9 @@ let editPage!: (edit: number) => void
 /**
  * `column`: the rows of `Page`. `unit`: each row is the child of an element with a bound motion value, which is a unit of its own
  * (`Dynamic::MotionValues`, here on a colour, which only paints), so the hover is in a unit and not in a patch root. `list`: the rows are those of a `<virtual-list>`, a scroller.
- * `tintRows(true)` is a commit that changes the colour of row 1 (`Dirty::PaintPatchable`), and `editPage` one that edits the page, which
+ * `unit-scroller`: the rows of `unit` in a scroll container. `box`: the rows are in a box of a definite size with a caption above them whose text `editPage`
+ * changes, so the edit is a relayout of a box root. `anchor`: the same in a scroll container, whose caption is no box root, so the scroll container is
+ * the anchor of the edit. `tintRows(true)` is a commit that changes the colour of row 1 (`Dirty::PaintPatchable`), and `editPage` one that edits the page, which
  * is a frame built whole.
  */
 function Layouts({ layout }: { layout: Layout }) {
@@ -354,7 +356,7 @@ function Layouts({ layout }: { layout: Layout }) {
   const bound = useMotionValue("#ffffff")
   const rows = Array.from({ length: COUNT }, (_, index) => {
     const row = <Row key={index} index={index} variant="background" seen={[]} tint={tinted && index === 1} />
-    return layout === "unit" ? (
+    return layout === "unit" || layout === "unit-scroller" ? (
       <div key={index} testId={`unit-${index}`} style={{ width: 150, height: ROW, flexShrink: 0, color: bound }}>
         {row}
       </div>
@@ -362,6 +364,38 @@ function Layouts({ layout }: { layout: Layout }) {
       row
     )
   })
+  if (layout === "unit-scroller") {
+    return (
+      <>
+        <div testId="scroller" style={{ width: 200, height: ROW * 3, flexDirection: "column", overflow: "scroll", scrollbarWidth: "none" }}>
+          {rows}
+        </div>
+        <div testId="edit" style={{ height: 0 }}>
+          {edit}
+        </div>
+      </>
+    )
+  }
+  if (layout === "box" || layout === "anchor") {
+    // Rows with no hover style: a root that holds a row that has one is no box root.
+    const plain = Array.from({ length: COUNT }, (_, index) => (
+      <div
+        key={index}
+        testId={`row-${index}`}
+        style={{ width: 150, height: ROW, flexShrink: 0, backgroundColor: tinted && index === 1 ? TINT : REST, transition: TRANSITIONS.background }}
+      >{`row-${index}`}</div>
+    ))
+    const style =
+      layout === "box"
+        ? { width: 200, height: ROW * (COUNT + 1), flexDirection: "column" }
+        : { width: 200, height: ROW * (COUNT + 2), flexDirection: "column", overflow: "scroll", scrollbarWidth: "none" }
+    return (
+      <div testId={layout} style={style}>
+        <div testId="caption" style={layout === "box" ? { width: 200, height: ROW, flexShrink: 0 } : { flexShrink: 0 }}>{`caption ${edit}`}</div>
+        {plain}
+      </div>
+    )
+  }
   return (
     <>
       {layout === "list" ? (
@@ -585,5 +619,86 @@ describeNative("a colour transition that runs in a root that a patch builds", { 
       snap("end")
     })
     sameAsOff(shown)
+  })
+
+  // A unit in a scroll container whose run was found by a frame built whole keeps its ticks as patches of it (`RunningInScroller` is for a patch
+  // root, whose run no frame found): the frame that found the run recorded it as a unit.
+  unverified("draws the ticks of a run in a unit of a scroll container as patches, after a frame built whole found it", async () => {
+    const root = await openPage(<Layouts layout="unit-scroller" />, true)
+    const renderer = root.renderer
+    try {
+      hover(renderer)
+      elapse(renderer, FRAME * 2)
+      editPage(1)
+      expect(frames(renderer, () => renderer.drawFrame()).painted, "the edit is a frame built whole").toBeGreaterThanOrEqual(1)
+      const run = frames(renderer, () => elapse(renderer, FRAME * 8))
+      expect(run.patched, "the ticks of the run").toBe(8)
+      expect(run.painted).toBe(0)
+      expect(run.refused).toBe(0)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("shows what patching off shows for the ticks of a run in a unit of a scroll container that a frame built whole found", async () => {
+    sameAsOff(
+      await played("unit-scroller", (renderer, snap) => {
+        hover(renderer)
+        elapse(renderer, FRAME * 2)
+        editPage(1)
+        renderer.drawFrame()
+        snap("whole")
+        for (const ticks of [3, 3, 3, 6]) {
+          elapse(renderer, FRAME * ticks)
+          snap(`after-${ticks}`)
+        }
+      }),
+    )
+  })
+
+  // A box root and an anchor are not among the roots that a run's ticks select, and a frame built whole does not record one while a run is in it, so
+  // a patch that starts a run in one (`RunInRelaidRoot`) would leave ticks with no root: the frame is built whole.
+  for (const layout of ["box", "anchor"] as const) {
+    it(`builds whole the commit that edits text and recolours a row in a ${layout} that is laid out again, and shows what patching off shows`, async () => {
+      const shown = await played(layout, (renderer, snap) => {
+        editPage(1)
+        renderer.drawFrame()
+        snap("edited")
+        flushSync(() => {
+          tintRows(true)
+          editPage(2)
+        })
+        renderer.drawFrame()
+        snap("tinted")
+        for (const ticks of [3, 3, 3, 6]) {
+          elapse(renderer, FRAME * ticks)
+          snap(`after-${ticks}`)
+        }
+      })
+      sameAsOff(shown)
+      // The verifier records no box root gpui knows (`Box:UnknownUnit`), so the commit is declined before it is built.
+      if (layout === "anchor" || !verifying) expect(shown.on.unpatchable.RunInRelaidRoot, "the commit").toBeGreaterThanOrEqual(1)
+      expect(shown.off.unpatchable.RunInRelaidRoot).toBeUndefined()
+    })
+  }
+
+  // A run that a patch started in a unit is cleared when a patch sees it end, and not left for the frame built whole after it: the next patch
+  // (a hover on another row) builds the unit of the row that hovers and no other.
+  unverified("builds no unit for a run that a patch started in it and that is over", async () => {
+    const root = await openPage(<Layouts layout="unit" />, true)
+    const renderer = root.renderer
+    try {
+      hover(renderer)
+      elapse(renderer, DURATION + FRAME * 2)
+      move(renderer, ...OFF)
+      elapse(renderer, DURATION + FRAME * 2)
+      const before = renderer.getPatchCounters()
+      move(renderer, 20, ROW * 3 + 20)
+      const after = renderer.getPatchCounters()
+      expect(after.patchedFrames - before.patchedFrames, "the hover and the first tick of its run are patches").toBe(2)
+      expect(after.patchedUnits - before.patchedUnits, "one unit for each, the row that is hovered").toBe(2)
+    } finally {
+      root.unmount()
+    }
   })
 })
