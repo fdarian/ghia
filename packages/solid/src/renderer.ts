@@ -96,40 +96,46 @@ function renderWindow(code: () => JSX.Element, options: RenderOptions): Root {
   const host = renderSlotFor<RenderSlot>(injected)
   host.onUncaughtError = onUncaughtError
   const renderer = host.renderer ?? createWindowRenderer(host, windowOptions)
-  host.root?.unmount()
-  host.root = createRoot(renderer, {
-    onEvent,
-    onKeyDown,
-    onKeyUp,
-    onSelectionChange,
-    onAppearanceChange,
-    tabNavigation,
-    keyboardFocusDim,
-    onUncaughtError,
-  })
-  if (!injected && renderer instanceof GpuixRenderer && !host.loop) {
-    host.loop = startFrameLoop(renderer, {
-      ...frameLoop,
-      onTerminated: () => {
-        if (typeof process !== "undefined") process.exit(0)
-      },
-      onError: (error) => console.error("[gpuix-solid] frame error", error),
+  // After the mount, not before: the loop's first tick draws the window, and
+  // started earlier it presents an empty frame (~50 ms) before the content. In a
+  // `finally` so a mount that throws still leaves the opened window ticking.
+  try {
+    host.root?.unmount()
+    host.root = createRoot(renderer, {
+      onEvent,
+      onKeyDown,
+      onKeyUp,
+      onSelectionChange,
+      onAppearanceChange,
+      tabNavigation,
+      keyboardFocusDim,
+      onUncaughtError,
     })
+    if (
+      isWebBuild &&
+      renderer instanceof GpuixRenderer &&
+      !Reflect.has(globalThis, "gpuix")
+    ) {
+      installBrowserAutomation(renderer).then(
+        (automation) => {
+          if (!Reflect.has(globalThis, "gpuix")) Reflect.set(globalThis, "gpuix", automation)
+        },
+        (error) => console.error("[gpuix-solid] automation failed", error)
+      )
+    }
+    if (debugFrameOverlay) renderer.setDebugFrameOverlay?.(debugFrameOverlay)
+    host.root.render(code)
+  } finally {
+    if (!injected && renderer instanceof GpuixRenderer && !host.loop) {
+      host.loop = startFrameLoop(renderer, {
+        ...frameLoop,
+        onTerminated: () => {
+          if (typeof process !== "undefined") process.exit(0)
+        },
+        onError: (error) => console.error("[gpuix-solid] frame error", error),
+      })
+    }
   }
-  if (
-    isWebBuild &&
-    renderer instanceof GpuixRenderer &&
-    !Reflect.has(globalThis, "gpuix")
-  ) {
-    installBrowserAutomation(renderer).then(
-      (automation) => {
-        if (!Reflect.has(globalThis, "gpuix")) Reflect.set(globalThis, "gpuix", automation)
-      },
-      (error) => console.error("[gpuix-solid] automation failed", error)
-    )
-  }
-  if (debugFrameOverlay) renderer.setDebugFrameOverlay?.(debugFrameOverlay)
-  host.root.render(code)
   return host.root
 }
 

@@ -17,13 +17,15 @@ const wakeableRenderer = (tick: () => boolean) => {
 }
 
 describe("startFrameLoop on a platform with display-link wakes", () => {
-  it("ticks once at start and then on every wake", async () => {
+  it("ticks once at start, from a task of its own, and then on every wake", async () => {
     let ticks = 0
     const renderer = wakeableRenderer(() => {
       ticks += 1
       return true
     })
     const loop = startFrameLoop(renderer)
+    expect(ticks).toBe(0)
+    await nextImmediate()
     expect(ticks).toBe(1)
     renderer.wake?.()
     expect(ticks).toBe(1)
@@ -43,6 +45,7 @@ describe("startFrameLoop on a platform with display-link wakes", () => {
       return true
     })
     const loop = startFrameLoop(renderer)
+    await nextImmediate()
     renderer.wake?.()
     renderer.wake?.()
     renderer.wake?.()
@@ -61,7 +64,7 @@ describe("startFrameLoop on a platform with display-link wakes", () => {
     renderer.wake?.()
     loop.stop()
     await nextImmediate()
-    expect(ticks).toBe(1)
+    expect(ticks).toBe(0)
   })
 
   it("arms no timer while idle: no wake, no tick", async () => {
@@ -95,7 +98,7 @@ describe("startFrameLoop on a platform with display-link wakes", () => {
     expect(ticks).toBeLessThanOrEqual(Math.floor(250 / 10) + 2)
   })
 
-  it("stops, clears the wake and reports termination when tick returns false", () => {
+  it("stops, clears the wake and reports termination when tick returns false", async () => {
     let ticks = 0
     let terminated = 0
     const renderer = wakeableRenderer(() => {
@@ -103,18 +106,20 @@ describe("startFrameLoop on a platform with display-link wakes", () => {
       return false
     })
     startFrameLoop(renderer, { onTerminated: () => (terminated += 1) })
+    await nextImmediate()
     expect(ticks).toBe(1)
     expect(terminated).toBe(1)
     expect(renderer.wake).toBeNull()
   })
 
-  it("releases the sync event handler when the window closes", () => {
+  it("releases the sync event handler when the window closes", async () => {
     const cleared: unknown[] = []
     const renderer = {
       ...wakeableRenderer(() => false),
       setSyncEventHandler: (handler: unknown) => cleared.push(handler),
     }
     startFrameLoop(renderer)
+    await nextImmediate()
     expect(cleared).toEqual([null])
   })
 
@@ -134,6 +139,7 @@ describe("startFrameLoop on a platform with display-link wakes", () => {
       throw new Error("boom")
     })
     const loop = startFrameLoop(renderer, { onError: (error) => errors.push(error) })
+    await nextImmediate()
     renderer.wake?.()
     await nextImmediate()
     loop.stop()
@@ -205,7 +211,7 @@ describe("startFrameLoop without display-link wakes", () => {
       },
       { frameMs: 10_000 },
     )
-    expect(ticks).toBe(1)
+    expect(ticks).toBe(0)
     for (let immediates = 0; immediates < 5; immediates++) await nextImmediate()
     loop.stop()
     expect(ticks).toBe(4)
@@ -228,6 +234,7 @@ describe("startFrameLoop without display-link wakes", () => {
       },
     }
     const loop = startFrameLoop(renderer)
+    await nextImmediate()
     // The wake's tick runs after the frame call's immediate (it is scheduled behind it) and does not queue a second one.
     renderer.wake?.()
     await nextImmediate()
@@ -303,6 +310,7 @@ describe("startFrameLoop without display-link wakes", () => {
       },
       { frameMs: 10_000 },
     )
+    await nextImmediate()
     loop.stop()
     await nextImmediate()
     expect(calls).toBe(0)
@@ -347,6 +355,7 @@ describe("startFrameLoop without display-link wakes", () => {
       { onError: (error) => errors.push(error) },
     )
     await nextImmediate()
+    await nextImmediate()
     loop.stop()
     expect(errors).toHaveLength(1)
   })
@@ -378,7 +387,8 @@ describe("startFrameLoop with several windows on one App", () => {
     secondLoop.stop()
     firstLoop.stop()
     expect(ticks.second).toBe(0)
-    expect(ticks.first).toBeGreaterThanOrEqual(3)
+    // The joining window shares the first tick's queued iteration: one tick for both starts, one for the wake.
+    expect(ticks.first).toBe(2)
   })
 
   it("keeps the first renderer's wake: a second renderer does not take the hook over", async () => {
@@ -397,6 +407,7 @@ describe("startFrameLoop with several windows on one App", () => {
     let ticks = 0
     const first = window(() => (ticks += 1) > 0)
     const firstLoop = startFrameLoop(first.renderer)
+    await nextImmediate()
     expect(ticks).toBe(1)
     const secondLoop = startFrameLoop(window().renderer)
     await nextImmediate()
@@ -450,12 +461,13 @@ describe("startFrameLoop with several windows on one App", () => {
     expect(second.state.handlerCleared).toBe(true)
   })
 
-  it("ends once for the whole app, running onTerminated once, and releases every window", () => {
+  it("ends once for the whole app, running onTerminated once, and releases every window", async () => {
     let terminated = 0
     const onTerminated = () => (terminated += 1)
     const first = window(() => false)
     const second = window()
     startFrameLoop(first.renderer, { onTerminated })
+    await nextImmediate()
     expect(terminated).toBe(1)
     expect(first.state.handlerCleared).toBe(true)
     expect(first.renderer.wake).toBeNull()
@@ -495,5 +507,38 @@ describe("startFrameLoop with several windows on one App", () => {
     await nextImmediate()
     secondLoop.stop()
     expect(second.renderer.wake).toBeNull()
+  })
+})
+
+describe("the first tick of startFrameLoop", () => {
+  it("draws after the code that follows the call and the microtasks the mount queued", async () => {
+    const events: string[] = []
+    const renderer = wakeableRenderer(() => {
+      events.push("tick")
+      return true
+    })
+    // What render() does: the mount queues a microtask, then the frame loop starts, then the caller goes on.
+    queueMicrotask(() => events.push("mount microtask"))
+    const loop = startFrameLoop(renderer)
+    events.push("code after render()")
+    queueMicrotask(() => events.push("later microtask"))
+    await nextImmediate()
+    loop.stop()
+    expect(events).toEqual(["code after render()", "mount microtask", "later microtask", "tick"])
+  })
+
+  it("presents a mutation made right after the call and one a mount microtask makes in the same frame", async () => {
+    let mounted = ""
+    const presented: string[] = []
+    const renderer = wakeableRenderer(() => {
+      presented.push(mounted)
+      return true
+    })
+    queueMicrotask(() => (mounted += "microtask "))
+    const loop = startFrameLoop(renderer)
+    mounted += "after-render "
+    await nextImmediate()
+    loop.stop()
+    expect(presented).toEqual(["after-render microtask "])
   })
 })

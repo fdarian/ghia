@@ -267,8 +267,10 @@ hook is the platform's, one per process. Both are shared:
   `packages/native/js/runtime.ts`) and starts it when it is the first. An iteration flushes the writes every renderer has
   queued (`flushPendingMutations`), then ticks the platform once, through the first renderer that is still in the loop, so a
   second window never doubles the pump. The input frame and `keyEventPending` belong to the platform too, and are asked of that
-  renderer. A renderer that joins a running loop gets one iteration of its own at once, since nothing wakes an idle platform for
-  it; `frameMs` is the first renderer's, and the loop is the wake loop or the timer loop for all.
+  renderer. The loop's first iteration and the one a joining renderer gets are each a task of their own
+  ([Startup order](#startup-order)), behind the same `scheduledFrame` guard as a wake, so a window that joins while another
+  one's iteration is already queued shares it instead of ticking twice, and one that joins an idle loop is ticked although
+  nothing wakes an idle platform for it; `frameMs` is the first renderer's, and the loop is the wake loop or the timer loop for all.
 - **One wake.** `setFrameWakeCallback` is installed on one renderer at a time, and the loop moves it to the next renderer when
   that one leaves, so an idle app still gets no timer and no wakes. In Rust the hook is the entry list of `shared_wake.rs`:
   `FrameWake::install` adds the renderer's callback and never replaces another's, `clear` removes its own, the watch stops with
@@ -729,6 +731,14 @@ drew.
   AppKit's hit test still reaches its hitboxes and the stack order does not change. Not measured on the three apps.
 - Fluid has no overlay, so none of this moves it (180 / 166 MB on main, 168 / 182 with the round, at rest).
 
+## Startup order
+
+`render()` (`@ghia/solid`, `@ghia/react`) mounts the tree and then starts the frame loop, so the first presented frame has content. The loop's first `tick()` draws the window; started before the mount it presented an empty window and the content a frame later (about 50 ms on the scratch app, measured with the window-visible marks of `ghia-startup-2026-11-27`). The mount does not need the loop: it is synchronous. The loop is started in a `finally` around the mount, so a mount that throws still leaves the opened window ticking.
+
+`startFrameLoop` does not tick inline: the first tick of the shared loop is its own task (a `setImmediate` behind the `scheduledFrame` guard, the one a wake uses), and so is the first tick of a window that joins a loop already running. It runs after the mount, after the code that follows `render()`, and after the microtasks the mount queued (an async `onMount`, a promise-based floating-ui position, Lexical's microtask commit), so all of them, and a mutation made right after `render()` returns, land in the first presented frame. A browser paints after the task that built the page and its microtask checkpoint; `scheduleInputFrame` follows the same rule.
+
+Nothing slow goes before the window on the main thread. The `<img>` HTTP client (`custom_elements::img::init`) is a `LazyHttpClient` that builds its `ReqwestClient` inside the first http(s) fetch, on GPUI's background executor: `reqwest` loads the macOS trust store when it builds a client (about 150 `SecTrustSettings` calls, ~76 ms), which used to run in the did-finish-launching callback before the window existed. An app with no http(s) image never builds it. Its user agent (`gpuix`) and proxy handling are those of `ReqwestClient::user_agent`.
+
 ## API
 
 - `FrameLoopOptions` is exported from `@ghia/native/runtime`.
@@ -738,11 +748,13 @@ drew.
 
 ## Tests
 
-- gpuix `packages/native/js/__tests__/frame-loop.test.ts` (10) runs the loop against a fake renderer: the tick at start
-  and on every wake, teardown, termination, tick errors, and timer polling. An idle wake loop ticks once at start and then
-  never, and ticks once per wake and not in between. `frame-loop-yields.test.ts` (2) runs the real loop against a hidden
-  window with synthetic wakes from a Rust thread (`simulateFrameWakes`, `setTickDelay`, test-support builds only) and
-  checks that timers and file reads keep running when every frame outlasts a vsync.
+- gpuix `packages/native/js/__tests__/frame-loop.test.ts` runs the loop against a fake renderer: the first tick as its own
+  task (after the code that follows `startFrameLoop` and the microtasks queued before it, in the same frame as a mutation
+  made right after the call) and a tick on every wake, teardown, termination, tick errors, and timer polling. An idle wake
+  loop ticks once at start and then never, and ticks once per wake and not in between. `frame-loop-yields.test.ts` (2)
+  runs the real loop against a hidden window with synthetic wakes from a Rust thread (`simulateFrameWakes`,
+  `setTickDelay`, test-support builds only) and checks that timers and file reads keep running when every frame outlasts
+  a vsync.
 - `packages/native/examples/quit-e2e` ([testing.md](testing.md#the-quit-e2e)) asks a real idle app to quit four ways and checks
   that `onTerminated` ran and the process ended; the zed side is `gpui_macos` `tests/main_run_loop_wakeups.rs`.
 - `frame-loop.test.ts` "several windows on one App" (7) runs the shared loop against fake renderers: one pump per iteration,

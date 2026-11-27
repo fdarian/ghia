@@ -204,7 +204,10 @@ class SharedFrameLoop {
     this.members.add(first)
     if (first.options.onTerminated) this.terminated.add(first.options.onTerminated)
     this.frameWake = this.installWake(first)
-    this.loop()
+    // The first tick is a task of its own, after the code that follows startFrameLoop() and the
+    // microtasks the mount queued (a promise-based positioner, an editor's commit), as a browser
+    // paints after the task that built the page and its microtask checkpoint.
+    this.scheduleLoop()
   }
 
   get isStopped(): boolean {
