@@ -734,12 +734,17 @@ patch builds the root, which starts it, and the ticks of the run build the root 
 
 **The ticks of the run.** The build of a patch's unit records nothing (`Retain::suspend`), so what it found running on each element
 it built is collected by `Retain::dynamic_bits(id, bits)` and handed to `Retain::land_patch` when the patch is drawn
-(`continue_after_patch`): the transition bit of each built element is written into `Retain::dynamic`, or cleared where the build
-found none (a run that ended), as a frame built whole writes it at its end. A tick then finds the element among the dynamic ones and
+(`continue_after_patch`): for a patch root, the transition bit of each built element is written into `Retain::dynamic`, or cleared
+where the build found none (a run that ended), as a frame built whole writes it at its end. The units of a run that a frame found
+are left to the frame that follows their end, as before. A tick then finds the element among the dynamic ones and
 builds the root that holds it: `Retain::preview` looks for the innermost unit or patch root (`root_holding`), which is a patch root
 for what a hover started. A frame built whole that finds such a run does not give up the root: a patch root may hold running
-transitions that only paint (`Node::runs_a_paint_transition`, `Below::busy`) and is still recorded as one while they run
-(`recording_as`), where any other motion in a root is a reason to build it again and record nothing. Without that a whole frame
+transitions that only paint (`Node::runs_a_paint_transition`, `Below::busy`; not a run of an opacity or a transform) and is still
+recorded as one while they run (`recording_as`), where any other motion in a root is a reason to build it again and record nothing.
+Not in a scroller (`Node::holds_only_a_run_a_patch_follows`): a scroll moves what a scroller holds without a build, so a row of a list or
+a scroll container that is built by a frame while it runs stays a unit or a frame built whole, as before; a patch root a scroll
+moved since it was built, with a run in it, is declined (`RunningMoved`): the patch paints what the clip culls and the frame built
+whole does not. Without that a whole frame
 inside a run would build the root as one that holds nothing it can patch and leave the run's ticks without a unit.
 
 - **`hasHover`.** An ancestor whose `:has(:hover)` state changed is named when its `hasHover` refinement paints only.
