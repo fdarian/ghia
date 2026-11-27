@@ -5,10 +5,9 @@
 import { renameSync, writeFileSync } from "node:fs"
 import { dlopen, FFIType } from "bun:ffi"
 import React from "react"
-import { createRoot } from "@ghia/react"
+import { createRoot, type PublicInstance } from "@ghia/react"
 import { createNativeRenderer, startFrameLoop } from "@ghia/native/runtime"
 import type { EventPayload, GpuixRenderer } from "@ghia/native"
-import { registerWindowFactory } from "@ghia/native/host"
 import { CASES, HELPER_PATH, READY_FILE, REPORT_FILE, TERMINATED_FILE, type CaseName, type Report, type WindowOpenReport } from "./paths"
 
 const folder = process.env.MULTI_WINDOW_E2E_DIR
@@ -84,13 +83,13 @@ function Page({ id, width, height }: { id: string; width: number; height: number
 }
 createRoot(alpha).render(<Page id="alpha" width={250} height={120} />)
 createRoot(beta).render(<Page id="beta" width={350} height={180} />)
-// The factory the React adapter has not registered yet (it is the next slice): what window.open asks of
-// the opener's adapter, a root for the new window's empty document, made with the adapter's createRoot.
-registerWindowFactory(alpha, (opened) => {
-  const root = createRoot(opened)
-  root.render(<Page id="gamma" width={300} height={100} />)
-  return () => root.unmount()
-})
+// `window.open` finds the factory createRoot(alpha) registered: an empty root in the new window, rendered into the web way.
+function openGamma(): Window & typeof globalThis {
+  const opened = window.open("", "gamma", "width=360,height=240,left=620,top=140") as (Window & typeof globalThis) | null
+  if (opened === null) throw new Error("window.open returned null")
+  createRoot(opened.document.body as unknown as PublicInstance).render(<Page id="gamma" width={300} height={100} />)
+  return opened
+}
 
 // A machine that gives the app no windows (screen locked or asleep) reports it and waits to be killed.
 if (!(await until(() => visibleWindows() >= 2, 10000))) {
@@ -134,8 +133,7 @@ const survivor = closedId === "alpha" ? beta : alpha
 const survivorId = closedId === "alpha" ? "beta" : "alpha"
 // "window-open": the first window opens a third with window.open and the app looks at it and closes it.
 async function exerciseWindowOpen(): Promise<WindowOpenReport> {
-  const opened = window.open("", "gamma", "width=360,height=240,left=620,top=140") as (Window & typeof globalThis) | null
-  if (opened === null) throw new Error("window.open returned null")
+  const opened = openGamma()
   const openedRenderer = (opened as unknown as { renderer: GpuixRenderer }).renderer
   await until(() => visibleWindows() >= 3, 5000)
   const windowsWhileOpen = visibleWindows()
