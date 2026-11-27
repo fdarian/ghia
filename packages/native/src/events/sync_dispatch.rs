@@ -375,6 +375,9 @@ pub(crate) fn invalidate_root_view(dirty: crate::retained_tree::Dirty) -> Result
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) use backend::{native_call, outermost_native_call, register, unbind_window, SyncDispatchResult, SyncHandlerOwner};
 
+#[cfg(all(test, not(all(target_arch = "wasm32", target_os = "unknown"))))]
+pub(crate) use backend::is_window_bound;
+
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod backend {
     use super::*;
@@ -437,6 +440,11 @@ mod backend {
     pub(crate) fn unbind_window(window: gpui::WindowId) {
         // `try_with`: a window can close while the thread's locals are being torn down.
         let _ = WINDOWS.try_with(|windows| windows.borrow_mut().remove(&window));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_window_bound(window: gpui::WindowId) -> bool {
+        WINDOWS.with(|windows| windows.borrow().contains_key(&window))
     }
 
     impl Drop for SyncHandlerOwner {

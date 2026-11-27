@@ -217,7 +217,15 @@ pub(crate) fn open_another(
 
 /// Makes `app` tell this module when a window closes. Once per App.
 pub(crate) fn observe_closes(cx: &mut gpui::App) {
-    cx.on_window_closed(|_cx, window| closed(window)).detach();
+    cx.on_window_closed(|cx, window| {
+        closed(window);
+        // GPUI runs this observer before it drops the window, and the drop of the window's views
+        // tells JS (`detach`) through the sync handler this binding routes to. The deferred effect
+        // runs after the drop, so the views end synchronously: a queued event could be lost to
+        // a process that exits right after the close.
+        cx.defer(move |_| crate::events::sync_dispatch::unbind_window(window));
+    })
+    .detach();
 }
 
 /// A window closed: it is no longer open, and nothing is kept for it.
@@ -235,7 +243,6 @@ pub(crate) fn closed(window: WindowId) {
     crate::text::inline_focus::forget_window(window);
     crate::editing::caret::forget_window(window);
     crate::automation::drop_window(window);
-    crate::events::sync_dispatch::unbind_window(window);
 }
 
 #[cfg(test)]
@@ -325,5 +332,46 @@ mod tests {
         assert!(crate::editing::caret::holds_caret_state(kept));
         assert!(crate::text::inline_focus::holds_press_focus(kept));
         closed(kept);
+    }
+
+    /// A view that drops with its window tells JS through the sync handler bound to that window, so the
+    /// binding has to outlive GPUI's drop of the window and then go, with the window, once that is done.
+    #[gpui::test]
+    fn a_window_stays_bound_while_its_views_drop_and_is_unbound_after(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        struct Probe {
+            window: WindowId,
+            bound_on_drop: Rc<Cell<Option<bool>>>,
+        }
+        impl gpui::Render for Probe {
+            fn render(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl gpui::IntoElement {
+                gpui::Empty
+            }
+        }
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.bound_on_drop.set(Some(crate::events::sync_dispatch::is_window_bound(self.window)));
+            }
+        }
+
+        let owner = crate::events::sync_dispatch::SyncHandlerOwner::new();
+        let bound_on_drop = Rc::new(Cell::new(None));
+        let probe = bound_on_drop.clone();
+        let window = cx.add_window(move |window, _| Probe { window: window.window_handle().window_id(), bound_on_drop: probe });
+        let id = window.window_id();
+        owner.bind_window(id);
+        opened(id);
+        cx.update(observe_closes);
+        assert!(crate::events::sync_dispatch::is_window_bound(id));
+
+        cx.update_window(window.into(), |_, window, _| window.remove_window()).unwrap();
+        cx.run_until_parked();
+
+        assert_eq!(bound_on_drop.get(), Some(true), "the view dropped while its window was still bound");
+        assert!(!crate::events::sync_dispatch::is_window_bound(id), "a closed window is not left bound");
+        assert!(!is_open(id));
     }
 }
