@@ -5667,7 +5667,8 @@ drives the app's window.
 
 A window a factory opened has the same factory, so its own `window.open` works. The test renderer opens test windows: a
 `TestRenderer`'s `window.open` makes another `TestRenderer` (size and title from the features and the opener) and a test
-registers the factory for its root.
+registers the factory for its root. `dispose()` of a test window closes it as the user's close does: the window hears `pagehide` and `unload`, the roots its adapter
+mounted in it unmount while the window is whole, and `closed` is `true`.
 
 **The Window object** is the `GpuixWindow` of the new window's renderer (`windowOf(renderer)`); the first window's is the
 global object. `window instanceof Window` holds for both. A window has:
