@@ -16136,12 +16136,18 @@ mod batch_tests {
         assert_eq!(tree.pending_structure(), [3]);
         // A background that appears where the element keeps no quad adds an operation: paint, not patchable.
         assert_eq!(dirty_after(&mut tree, &row(r##"{"height":10,"backgroundColor":"#112233"}"##)), Dirty::Paint);
-        // So does an opacity that crosses 1, a transition, and a group.
+        // A colour that a transition of colours runs on is a change a patch follows: it starts the run and builds it again.
+        dirty_after(&mut tree, &row(r##"{"height":10,"backgroundColor":"#112233","transition":"background-color 1s"}"##));
+        assert_eq!(
+            dirty_after(&mut tree, &row(r##"{"height":10,"backgroundColor":"#223344","transition":"background-color 1s"}"##)),
+            Dirty::PaintPatchable
+        );
+        // So does an opacity that crosses 1, a transition that can run on more than a colour, and a group.
         for (before, after) in [
             (r##"{"height":10,"backgroundColor":"#112233"}"##, r##"{"height":10,"backgroundColor":"#112233","opacity":0.5}"##),
             (
-                r##"{"height":10,"backgroundColor":"#112233","transition":"background-color 1s"}"##,
-                r##"{"height":10,"backgroundColor":"#223344","transition":"background-color 1s"}"##,
+                r##"{"height":10,"backgroundColor":"#112233","transition":"all 1s"}"##,
+                r##"{"height":10,"backgroundColor":"#223344","transition":"all 1s"}"##,
             ),
             (
                 r##"{"height":10,"backgroundColor":"#112233","group":true}"##,
