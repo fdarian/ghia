@@ -294,6 +294,7 @@ interface NativeTestRendererApi
   getFocusedElementId(): number | null
   setWindowActive(active: boolean): void
   isWindowKey(): boolean
+  isWindowClosed(): boolean
   getScaleFactor(): number
   focusNextWithin(elementId: number): void
   focusPreviousWithin(elementId: number): void
