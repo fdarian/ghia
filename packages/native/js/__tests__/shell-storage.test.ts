@@ -33,6 +33,25 @@ describe("Storage", () => {
     expect(() => storage.setItem(Symbol("s") as unknown as string, "x")).toThrow(TypeError)
   })
 
+  it("key() converts its argument like a WebIDL unsigned long", () => {
+    const storage = createMemoryStorage()
+    storage.setItem("a", "1")
+    storage.setItem("b", "2")
+    expect([storage.key(Infinity), storage.key(NaN), storage.key(1.9), storage.key("1" as unknown as number)]).toEqual(["a", "a", "b", "b"])
+    expect([storage.key(-1), storage.key(2 ** 32 + 1), storage.key(-Infinity)]).toEqual([null, "b", "a"])
+  })
+
+  it("delete on the name of a method is an ordinary delete and leaves an item of that name", () => {
+    const storage = createMemoryStorage() as Storage & Record<string, unknown>
+    storage.setItem("getItem", "x")
+    storage.setItem("other", "y")
+    expect(delete storage.getItem).toBe(true)
+    expect(storage.length).toBe(2)
+    expect(typeof storage.getItem).toBe("function")
+    expect(delete storage.other).toBe(true)
+    expect(storage.length).toBe(1)
+  })
+
   it("reads and writes items as properties", () => {
     const storage = createMemoryStorage() as Storage & Record<string, unknown>
     storage.foo = 12
@@ -109,6 +128,32 @@ describe("a file-backed Storage", () => {
     expect(() => createFileStorage(path)).toThrow(/not a string/)
     writeFileSync(path, "[]")
     expect(() => createFileStorage(path)).toThrow(/object of strings/)
+  })
+
+  it("flushes the temporary file to disk before it renames it over the file", () => {
+    const fs = process.getBuiltinModule("node:fs") as typeof import("node:fs")
+    const order: string[] = []
+    const fsync = vi.spyOn(fs, "fsyncSync").mockImplementation(() => void order.push("fsync"))
+    const rename = vi.spyOn(fs, "renameSync").mockImplementation(() => void order.push("rename"))
+    try {
+      createFileStorage(join(directory, "f", "localStorage.json")).setItem("k", "v")
+    } finally {
+      fsync.mockRestore()
+      rename.mockRestore()
+    }
+    expect(order).toEqual(["fsync", "rename"])
+  })
+
+  it("removes the temporary file when the write fails", () => {
+    const path = join(directory, "dir", "localStorage.json")
+    const storage = createFileStorage(path)
+    storage.setItem("kept", "1")
+    // A directory where the file was: the rename of the temporary file over it fails.
+    rmSync(path)
+    mkdirSync(path)
+    expect(() => storage.setItem("lost", "2")).toThrow()
+    expect(readdirSync(join(directory, "dir"))).toEqual(["localStorage.json"])
+    expect(storage.getItem("lost")).toBeNull()
   })
 
   it("undoes a change that could not be written", () => {

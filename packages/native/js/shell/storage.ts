@@ -64,8 +64,8 @@ export class Storage {
 
   key(index: number): string | null {
     requireArguments("key", arguments.length, 1)
-    const position = Number(index)
-    if (!Number.isInteger(position) || position < 0) return null
+    // WebIDL `unsigned long`: NaN and Infinity become 0, a negative number wraps to a position past any item.
+    const position = Number(index) >>> 0
     let at = 0
     for (const key of stateOf(this).items.keys()) {
       if (at === position) return key
@@ -169,8 +169,9 @@ const storageHandler: ProxyHandler<Storage> = {
     target.setItem(name, descriptor.value)
     return true
   },
+  // A name on the prototype shadows an item of that name, so deleting it is an ordinary delete and keeps the item.
   deleteProperty(target, name) {
-    if (typeof name === "string") {
+    if (isItemProperty(target, name)) {
       target.removeItem(name)
       return true
     }
@@ -202,7 +203,11 @@ export function localStoragePath(home: string, appId: string): string {
 
 interface NodeFs {
   readFileSync(path: string, encoding: "utf8"): string
-  writeFileSync(path: string, data: string): void
+  openSync(path: string, flags: "w"): number
+  writeFileSync(fd: number, data: string): void
+  fsyncSync(fd: number): void
+  closeSync(fd: number): void
+  rmSync(path: string, options: { force: true }): void
   renameSync(from: string, to: string): void
   mkdirSync(path: string, options: { recursive: true }): void
 }
@@ -253,8 +258,20 @@ export function createFileStorage(path: string): Storage {
   return new Storage(CONSTRUCT, items, (current) => {
     fs.mkdirSync(dirname(path), { recursive: true })
     const temporary = `${path}.${process.pid}.tmp`
-    fs.writeFileSync(temporary, JSON.stringify(Object.fromEntries(current)))
-    fs.renameSync(temporary, path)
+    try {
+      const descriptor = fs.openSync(temporary, "w")
+      try {
+        fs.writeFileSync(descriptor, JSON.stringify(Object.fromEntries(current)))
+        // Without it a power loss after the rename can leave the new name on a file with no content.
+        fs.fsyncSync(descriptor)
+      } finally {
+        fs.closeSync(descriptor)
+      }
+      fs.renameSync(temporary, path)
+    } catch (error) {
+      fs.rmSync(temporary, { force: true })
+      throw error
+    }
   })
 }
 
