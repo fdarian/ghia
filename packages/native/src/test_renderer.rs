@@ -1520,13 +1520,13 @@ impl TestGpuixRenderer {
         if unflushed != Dirty::Clean {
             self.flush_for(unflushed)?;
         }
-        let window = window_call(|window, cx| {
+        let (window, now) = window_call(|window, cx| {
             crate::renderer::settle_pending_layout(window, cx);
             window.paint_if_dirty(cx);
-            window.window_handle().window_id()
+            (window.window_handle().window_id(), cx.background_executor().now())
         })?;
         let tree = self.tree.lock().unwrap();
-        read(&crate::editing::Reads { tree: &tree, window }).map_err(Error::from_reason)
+        read(&crate::editing::Reads { tree: &tree, window, now }).map_err(Error::from_reason)
     }
 
     /// [`Self::flush`] for the changes of a bounds read that was waiting on mutations.

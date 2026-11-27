@@ -27,6 +27,8 @@ use positions::DomPoint;
 pub(crate) struct Reads<'a> {
     pub tree: &'a RetainedTree,
     pub window: WindowId,
+    /// The clock the window blinks its carets by, which the phase of a caret is read from.
+    pub now: web_time::Instant,
 }
 
 fn offset(value: f64) -> Result<usize, String> {
@@ -51,7 +53,7 @@ impl Reads<'_> {
 
     /// What the last frame washed and put the caret at for the node selection. Test renderer only.
     pub(crate) fn painted_node_selection(&self) -> node_selection::PaintedNodeSelection {
-        node_selection::painted(self.window)
+        node_selection::painted(self.window, self.now)
     }
 
     /// Where the platform's input method would be told the characters `start..end` of the text input of `host` are.

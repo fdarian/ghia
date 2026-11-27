@@ -1918,7 +1918,7 @@ impl GpuixRenderer {
     fn read_painted_dom<R>(&self, read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<Option<R>> {
         let Some(window) = self.paint_pending_changes()? else { return Ok(None) };
         let tree = self.tree.lock().unwrap();
-        read(&crate::editing::Reads { tree: &tree, window }).map(Some).map_err(Error::from_reason)
+        read(&crate::editing::Reads { tree: &tree, window, now: web_time::Instant::now() }).map(Some).map_err(Error::from_reason)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -13553,7 +13553,7 @@ fn build_plan(
                 let line = matches!(child, crate::text::inline::Child::BlankLine).then(crate::editing::caret::blank_line);
                 content_elements.push(match caret {
                     Some(caret) => {
-                        caret.follow_clock(&mut ctx.retain, window, cx);
+                        caret.follow_clock(&mut ctx.retain, cx);
                         crate::editing::caret::empty_line(caret, line)
                     }
                     None => line.unwrap_or_else(|| gpui::div().into_any_element()),
@@ -13717,9 +13717,9 @@ fn paragraph_content(
     let node_wash: Vec<std::ops::Range<usize>> = ctx.tree.node_selection.wash_range(paragraph).into_iter().collect();
     let caret = crate::editing::caret::held_by(&ctx.editing_caret, ctx.tree, ctx.focus_handles, paragraph, window);
     if let Some(caret) = &caret {
-        caret.follow_clock(&mut ctx.retain, window, cx);
+        caret.follow_clock(&mut ctx.retain, cx);
     }
-    ctx.retain.digest(|| format!("{} {:?} {node_wash:?} {:?}", paragraph.text, styles.runs, caret.as_ref().map(|caret| (caret.byte, caret.shown))));
+    ctx.retain.digest(|| format!("{} {:?} {node_wash:?} {:?}", paragraph.text, styles.runs, caret.as_ref().map(|caret| (caret.byte, caret.shown, caret.state.anchor()))));
     // A box in the paragraph, or the paragraph being inline content of a box, puts the texts around
     // and inside the boxes on one line for copy.
     let line = ctx

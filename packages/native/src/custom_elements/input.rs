@@ -35,7 +35,7 @@ use super::text_selection::{
     describe, resolve, utf16_len, SelectionRequest, TextSelection,
 };
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
-use crate::caret::{caret_rect, caret_visible, until_phase_change};
+use crate::caret::caret_rect;
 use crate::element_tree::EventPayload;
 use crate::events::clipboard::{Copy, Cut, Paste, SelectAll};
 use crate::events::keyboard::InputRouting;
@@ -982,7 +982,7 @@ struct TextEditorState {
     content_width: f32,
     display_is_placeholder: bool,
     caret_color: gpui::Hsla,
-    /// Counts the changes of everything the editor paints but the blink, see `retain_state`.
+    /// Counts the changes of everything the editor paints, the blink's start included, see `retain_state`.
     paint_epoch: Rc<Cell<u64>>,
     /// The caret changed phase after it was painted last: only a paint of the editor clears it.
     caret_due: Rc<Cell<bool>>,
@@ -1011,6 +1011,9 @@ impl TextEditorState {
     /// dropped: the next render aims another at the new one.
     fn reset_blink(&mut self, cx: &Context<Self>) {
         self.blink_anchor = cx.background_executor().now();
+        // The anchor is what the caret is painted with, so a paint that was kept would show the blink
+        // from the old one.
+        self.paint_epoch.set(self.paint_epoch.get() + 1);
         self.blink_armed = false;
         self.blink_task = None;
     }
@@ -1035,15 +1038,12 @@ impl TextEditorState {
             && window.is_window_active()
     }
 
-    fn ms_since_activity(&self, cx: &App) -> u64 {
-        cx.background_executor()
-            .now()
-            .saturating_duration_since(self.blink_anchor)
-            .as_millis() as u64
-    }
-
     fn until_phase_change(&self, cx: &App) -> Duration {
-        until_phase_change(self.ms_since_activity(cx))
+        gpui::until_phase_change(
+            cx.background_executor()
+                .now()
+                .saturating_duration_since(self.blink_anchor),
+        )
     }
 
     /// The caret starts solid when focus comes to it.
@@ -1055,18 +1055,15 @@ impl TextEditorState {
         }
     }
 
-    /// Keeps a task waiting for the caret to change phase while it can be seen, and none while it
-    /// cannot (scrolled out of its scroller, outside the window or a clip): a caret nobody sees
-    /// asks for no frame. The change is a tick of the window and not a notification of the
-    /// editor: nothing about the editor changed, and the frame that follows paints again only the
-    /// element of the caret, see `CustomElement::follows_clock`. Called by the prepaint of the
-    /// editor, so a frame that brings the caret back into view arms it.
-    fn keep_blinking(&mut self, visible: bool, window: &Window, cx: &mut Context<Self>) {
-        if !visible {
-            self.blink_armed = false;
-            self.blink_task = None;
-            return;
-        }
+    /// Keeps a task waiting for the caret to change phase, for a caret the window cannot blink
+    /// (`Window::paint_caret` said so): a composed window, a platform without hidden quads, an
+    /// effect group or text clip around it. The window blinks every other caret, on a layer of the
+    /// compositor or by drawing it lit and transparent itself, so the editor has no task and asks
+    /// for no frame. The change is a tick of the window and not a notification of the editor:
+    /// nothing about the editor changed, and the frame that follows paints again only the element
+    /// of the caret, see `CustomElement::follows_clock`. Called by the paint of the editor, which
+    /// decides it again at each paint.
+    fn keep_blinking(&mut self, window: &Window, cx: &mut Context<Self>) {
         if self.blink_armed {
             return;
         }
@@ -1083,6 +1080,12 @@ impl TextEditorState {
                 return;
             }
         }));
+    }
+
+    /// The caret needs no tick: it cannot be seen, or the window blinks it.
+    fn stop_blinking(&mut self) {
+        self.blink_armed = false;
+        self.blink_task = None;
     }
 
     fn blink_due(&mut self, window: &mut Window) -> bool {
@@ -2402,7 +2405,9 @@ struct EditorTextElement {
 }
 
 struct EditorPrepaint {
-    caret: Option<PaintQuad>,
+    caret: Option<Bounds<Pixels>>,
+    /// Whether the caret is where a person can see it, which is what makes it worth a tick.
+    caret_seen: bool,
     selection: Vec<PaintQuad>,
 }
 
@@ -2482,12 +2487,9 @@ impl gpui::Element for EditorTextElement {
             let caret_point = input
                 .point_for_index(input.cursor_offset())
                 .unwrap_or(point(px(0.0), px(0.0)));
-            caret = Some(fill(
-                caret_rect(
-                    point(origin.x + caret_point.x, origin.y + caret_point.y),
-                    input.line_height,
-                ),
-                input.caret_color,
+            caret = Some(caret_rect(
+                point(origin.x + caret_point.x, origin.y + caret_point.y),
+                input.line_height,
             ));
         } else if let (Some(start), Some(end)) = (
             input.point_for_index(input.selected_range.start),
@@ -2531,13 +2533,16 @@ impl gpui::Element for EditorTextElement {
         // The caret is cut by the box of the editor (its paint's own mask) and by every clip around
         // it, which the window has where the transform around the editor put them.
         let visible = caret.as_ref().is_some_and(|caret| {
-            caret.bounds.intersects(&bounds)
-                && window.reaches_content_mask(caret.bounds.intersect(&bounds))
+            caret.intersects(&bounds) && window.reaches_content_mask(caret.intersect(&bounds))
         });
-        self.input.update(cx, |input, cx| {
-            input.keep_blinking(visible && input.shows_caret(window), window, cx)
+        let caret_seen = self.input.update(cx, |input, _| {
+            let seen = visible && input.shows_caret(window);
+            if !seen {
+                input.stop_blinking();
+            }
+            seen
         });
-        EditorPrepaint { caret, selection }
+        EditorPrepaint { caret, caret_seen, selection }
     }
 
     fn paint(
@@ -2598,21 +2603,22 @@ impl gpui::Element for EditorTextElement {
                 y += height;
             }
             self.input.update(cx, |input, _| input.last_lines = lines);
-            // A caret in the phase it is not shown in is still painted, in no colour: the
-            // operations of the editor are the same in both, which a tick that paints only the
-            // editor again (`CustomElement::follows_clock`) is checked against.
+            // The window blinks the caret. When it cannot it paints it in the phase it is in and
+            // says so, and the editor ticks until it is painted again (`keep_blinking`): the
+            // operations of the editor are the same in both phases, which a tick that paints only
+            // the editor again (`CustomElement::follows_clock`) is checked against.
             if let Some(caret) = prepaint.caret.take() {
-                let shown = self.input.read(cx).shows_caret(window);
+                let (shown, color, anchor) = {
+                    let input = self.input.read(cx);
+                    (input.shows_caret(window), input.caret_color, input.blink_anchor)
+                };
                 if shown {
-                    let lit = self
-                        .input
-                        .update(cx, |input, cx| caret_visible(input.ms_since_activity(cx)));
-                    window.paint_quad(if lit {
-                        caret
-                    } else {
-                        PaintQuad {
-                            background: gpui::transparent_black().into(),
-                            ..caret
+                    let ticks = window.paint_caret(caret, color, anchor) && prepaint.caret_seen;
+                    self.input.update(cx, |input, cx| {
+                        if ticks {
+                            input.keep_blinking(window, cx);
+                        } else {
+                            input.stop_blinking();
                         }
                     });
                 }
