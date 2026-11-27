@@ -12,7 +12,7 @@ import {
   syncWindowSelectionChange,
   unregisterEventHandlers,
 } from "@ghia/native/host"
-import { registerRoot, registerWindowFactory, toAppearance } from "@ghia/native/host"
+import { registerRoot, registerWindowDisposer, registerWindowFactory, toAppearance } from "@ghia/native/host"
 import type {
   Appearance,
   MutationRenderer,
@@ -26,8 +26,10 @@ import {
   createHostText,
   HostFragment,
   HostRoot,
+  isHostElement,
   removeHostNode,
   type HostElement,
+  type HostNode,
 } from "./host.js"
 import { universalRender } from "./universal.js"
 import { reportUncaughtError } from "./uncaught-error.js"
@@ -68,13 +70,13 @@ const elementMounters = new WeakMap<HostRoot, (element: HostElement, code: () =>
  * `render(code, element)` does, with the window's `useGpuix()` around it. The returned function
  * disposes it and removes what it rendered; the window's root disposes it too when it unmounts.
  */
-export function renderIntoElement(code: () => JSX.Element, element: HostElement): () => void {
-  const root = element.mounted ? element.root : null
-  const mount = root === null ? undefined : elementMounters.get(root)
-  if (mount === undefined) {
-    throw new TypeError("render() mounts into an element of a window that has a mounted root; this element is in none")
+export function renderIntoElement(code: () => JSX.Element, element: Element): () => void {
+  // A stand-in element (the body of a closed window) or another adapter's element is no host element: it has no window to mount in.
+  if (isHostElement(element) && element.mounted && element.root !== null) {
+    const mount = elementMounters.get(element.root)
+    if (mount !== undefined) return mount(element, code)
   }
-  return mount(element, code)
+  throw new TypeError("render() mounts into an element of a window that has a mounted root; this element is in none")
 }
 
 export function createRoot(
@@ -206,14 +208,16 @@ export function createRoot(
   attach()
   const unregister = registerRoot(() => root.unmount())
   // What `window.open` gives an app: the window gets a root of its own, and the app renders into its `document.body`.
+  // `createRoot` registers the window disposer of the popup's root itself, so the factory returns none.
   const unregisterWindowFactory = registerWindowFactory(renderer, (opened) => {
-    const popup = createRoot(opened, { onUncaughtError: rootHandlers.onUncaughtError })
-    return () => popup.unmount()
+    createRoot(opened, { onUncaughtError: rootHandlers.onUncaughtError })
   })
+  // The window going away (the user closed it, `close()`, the app ending) unmounts the root, the first window's included.
+  const unregisterWindowDisposer = registerWindowDisposer(renderer, () => root.unmount())
   const elementRenders = new Set<() => void>()
   elementMounters.set(container, (element, code) => {
-    // A render owns what appeared in the element while it was mounted, which `solid-js/web` takes as the whole element.
-    const before = new Set(element.childList)
+    // Only what this render put in the element goes when it is disposed: another render's nodes, a portal's and the app's own stay.
+    const owned = new Set<HostNode>()
     const disposeTree = universalRender(
       () => createComponent(GpuixContext.Provider, {
         value: context(),
@@ -222,13 +226,13 @@ export function createRoot(
         },
       }),
       element,
-      { marker: null }
+      { marker: null, owned }
     )
     const stop = () => {
       if (!elementRenders.delete(stop)) return
       runSteps([
         disposeTree,
-        () => runAll(element.childList.filter((node) => !before.has(node)), (node) => removeHostNode(element, node), "Removing nodes failed"),
+        () => runAll([...owned].filter((node) => element.childList.includes(node)), (node) => removeHostNode(element, node), "Removing nodes failed"),
         flush,
       ], "Disposing the render failed")
     }
@@ -309,6 +313,7 @@ export function createRoot(
     unmount() {
       unregister()
       unregisterWindowFactory()
+      unregisterWindowDisposer()
       runSteps([clear, detach], "Unmounting failed")
     },
   }

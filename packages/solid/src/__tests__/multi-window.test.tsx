@@ -5,6 +5,7 @@
 import { createSignal, onCleanup, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { renderSlots } from "@ghia/native/host"
 import { render, resetRender } from "../index.js"
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
 
@@ -109,10 +110,112 @@ describe.skipIf(!hasNativeTestRenderer)("Solid in another window", () => {
     }, popup.document.body as unknown as Element)
     await settle(renderer)
     popup.close()
-    expect(log).toEqual(["cleanup"])
     expect(popup.closed).toBe(true)
+    // Closing tears down in a later task, as a browser queues it.
+    expect(log).toEqual([])
     await settle(app.renderer)
+    expect(log).toEqual(["cleanup"])
     expect(app.renderer.getAllText()).toEqual(["main"])
+  })
+
+  it("throws a TypeError for the body of a closed window, and does not mount the app again", async () => {
+    app.render(() => <div>main</div>)
+    const { popup } = openSide()
+    const body = popup.document.body as unknown as Element
+    render(() => <p>popup</p>, body)
+    popup.close()
+    await settle(app.renderer)
+    const slots = renderSlots().length
+    expect(() => render(() => <p>again</p>, popup.document.body as unknown as Element)).toThrow(TypeError)
+    expect(() => render(() => <p>again</p>, body)).toThrow(TypeError)
+    expect(renderSlots()).toHaveLength(slots)
+    expect(app.renderer.getAllText()).toEqual(["main"])
+  })
+
+  it("disposes only the nodes its own render put in the element, not another render's, a portal's or the app's", async () => {
+    app.render(() => <div>main</div>)
+    const { popup, renderer } = openSide()
+    const body = popup.document.body as unknown as Element
+    const [shownA, setShownA] = createSignal(false)
+    const [shownB, setShownB] = createSignal(false)
+    const disposeA = render(
+      () => (
+        <>
+          <p>a</p>
+          <Show when={shownA()}>
+            <p>a later</p>
+          </Show>
+        </>
+      ),
+      body
+    )
+    const disposeB = render(
+      () => (
+        <>
+          <p>b</p>
+          <Show when={shownB()}>
+            <p>b later</p>
+          </Show>
+        </>
+      ),
+      body
+    )
+    const appNode = popup.document.createElement("p")
+    appNode.textContent = "app"
+    popup.document.body.appendChild(appNode)
+    const [portalShown, setPortalShown] = createSignal(true)
+    app.render(() => (
+      <div>
+        <span>owner</span>
+        <Show when={portalShown()}>
+          <Portal mount={body as unknown as Node}>
+            <p>portal</p>
+          </Portal>
+        </Show>
+      </div>
+    ))
+    await settle(renderer, app.renderer)
+    setShownA(true)
+    setShownB(true)
+    await settle(renderer)
+    expect(renderer.getAllText().sort()).toEqual(["a", "a later", "app", "b", "b later", "portal"])
+    disposeA()
+    await settle(renderer)
+    expect(renderer.getAllText().sort()).toEqual(["app", "b", "b later", "portal"])
+    setShownB(false)
+    await settle(renderer)
+    expect(renderer.getAllText().sort()).toEqual(["app", "b", "portal"])
+    disposeB()
+    await settle(renderer)
+    expect(renderer.getAllText().sort()).toEqual(["app", "portal"])
+    setPortalShown(false)
+    await settle(renderer, app.renderer)
+    expect(renderer.getAllText()).toEqual(["app"])
+  })
+
+  it("unmounts the first window's root when that window goes, while a popup stays open", async () => {
+    const log: string[] = []
+    const heard: string[] = []
+    app.render(() => {
+      onCleanup(() => log.push("main cleanup"))
+      return <div>main</div>
+    })
+    const { popup, renderer } = openSide()
+    render(() => {
+      onCleanup(() => log.push("popup cleanup"))
+      return <div>popup</div>
+    }, popup.document.body as unknown as Element)
+    await settle(renderer, app.renderer)
+    for (const type of ["pagehide", "unload"]) window.addEventListener(type, () => heard.push(type), { once: true })
+    // What the frame loop does when the user closes the first window and the others stay open.
+    app.renderer.dispose()
+    expect(heard).toEqual(["pagehide", "unload"])
+    expect(log).toEqual(["main cleanup"])
+    expect(popup.closed).toBe(false)
+    await settle(renderer)
+    expect(renderer.getAllText()).toEqual(["popup"])
+    // `afterEach` unmounts what the test leaves in `app`.
+    app = createTestRoot({ width: 400, height: 300 })
   })
 
   it("mounts a Portal from the main tree into the popup, following the owner's state", async () => {

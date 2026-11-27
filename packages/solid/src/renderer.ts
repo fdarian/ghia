@@ -1,6 +1,15 @@
 import type { JSX } from "solid-js"
 import { GpuixRenderer, type WindowOptions } from "@ghia/native"
-import { isWebBuild, type NativeRenderer, type RootEventHandlers } from "@ghia/native/host"
+import {
+  bindRenderSlot,
+  Element as RuntimeElement,
+  isWebBuild,
+  renderSlotFor,
+  resetRenderSlots,
+  type NativeRenderer,
+  type RenderSlot as BaseRenderSlot,
+  type RootEventHandlers,
+} from "@ghia/native/host"
 import {
   createNativeRenderer,
   installBrowserAutomation,
@@ -9,14 +18,10 @@ import {
   type FrameLoopOptions,
   type WindowFontsOption,
 } from "@ghia/native/runtime"
-import { isHostElement } from "./host.js"
 import { createRoot, renderIntoElement, type Root } from "./root.js"
 import { reportUncaughtError } from "./uncaught-error.js"
 
-const RENDER_HOSTS = Symbol.for("@ghia/solid/render-hosts")
-
-interface RenderSlot {
-  renderer?: NativeRenderer
+interface RenderSlot extends BaseRenderSlot {
   root?: Root
   loop?: FrameLoop
   /** The latest render's handler: the renderer outlives the render that created it. */
@@ -45,31 +50,6 @@ export function createRenderer(
   })
 }
 
-/** One slot for each renderer a call to `render` mounts on: the window it opens itself, and each renderer it is given. */
-interface RenderHosts {
-  /** The slot of `render` calls that name no renderer, which own the window and its frame loop. */
-  own?: RenderSlot
-  readonly slots: Set<RenderSlot>
-}
-
-function hosts(): RenderHosts {
-  const global = globalThis as typeof globalThis & { [RENDER_HOSTS]?: RenderHosts }
-  return global[RENDER_HOSTS] ??= { slots: new Set() }
-}
-
-function slotFor(injected: NativeRenderer | undefined): RenderSlot {
-  const all = hosts()
-  if (injected === undefined) {
-    all.own ??= {}
-    all.slots.add(all.own)
-    return all.own
-  }
-  for (const known of all.slots) if (known.renderer === injected) return known
-  const created: RenderSlot = { renderer: injected }
-  all.slots.add(created)
-  return created
-}
-
 /**
  * Mount Solid on a window of its own, as the first call does: later calls under `bun --hot` remount on the same window.
  *
@@ -80,8 +60,22 @@ function slotFor(injected: NativeRenderer | undefined): RenderSlot {
 export function render(code: () => JSX.Element, options?: RenderOptions): Root
 export function render(code: () => JSX.Element, container: Element): () => void
 export function render(code: () => JSX.Element, optionsOrContainer: RenderOptions | Element = {}): Root | (() => void) {
-  if (isHostElement(optionsOrContainer)) return renderIntoElement(code, optionsOrContainer)
+  // Any element goes to `renderIntoElement`, which throws for one that is in no mounted window: the body of a closed window must not mount the app again.
+  if (optionsOrContainer instanceof RuntimeElement) return renderIntoElement(code, optionsOrContainer as Element)
   return renderWindow(code, optionsOrContainer as RenderOptions)
+}
+
+function createWindowRenderer(host: RenderSlot, windowOptions: WindowOptions & WindowFontsOption): NativeRenderer {
+  const created = createNativeRenderer({
+    onError(error) {
+      reportUncaughtError(host, error)
+    },
+  })
+  bindRenderSlot(host, created)
+  if (created instanceof GpuixRenderer) {
+    created.init(windowOptions)
+  }
+  return created
 }
 
 function renderWindow(code: () => JSX.Element, options: RenderOptions): Root {
@@ -99,20 +93,11 @@ function renderWindow(code: () => JSX.Element, options: RenderOptions): Root {
     onUncaughtError,
     ...windowOptions
   } = options
-  const host = slotFor(injected)
+  const host = renderSlotFor<RenderSlot>(injected)
   host.onUncaughtError = onUncaughtError
-  if (!host.renderer) {
-    host.renderer = createNativeRenderer({
-      onError(error) {
-        reportUncaughtError(host, error)
-      },
-    })
-    if (host.renderer instanceof GpuixRenderer) {
-      host.renderer.init(windowOptions)
-    }
-  }
+  const renderer = host.renderer ?? createWindowRenderer(host, windowOptions)
   host.root?.unmount()
-  host.root = createRoot(host.renderer, {
+  host.root = createRoot(renderer, {
     onEvent,
     onKeyDown,
     onKeyUp,
@@ -122,8 +107,8 @@ function renderWindow(code: () => JSX.Element, options: RenderOptions): Root {
     keyboardFocusDim,
     onUncaughtError,
   })
-  if (!injected && host.renderer instanceof GpuixRenderer && !host.loop) {
-    host.loop = startFrameLoop(host.renderer, {
+  if (!injected && renderer instanceof GpuixRenderer && !host.loop) {
+    host.loop = startFrameLoop(renderer, {
       ...frameLoop,
       onTerminated: () => {
         if (typeof process !== "undefined") process.exit(0)
@@ -133,28 +118,21 @@ function renderWindow(code: () => JSX.Element, options: RenderOptions): Root {
   }
   if (
     isWebBuild &&
-    host.renderer instanceof GpuixRenderer &&
+    renderer instanceof GpuixRenderer &&
     !Reflect.has(globalThis, "gpuix")
   ) {
-    installBrowserAutomation(host.renderer).then(
+    installBrowserAutomation(renderer).then(
       (automation) => {
         if (!Reflect.has(globalThis, "gpuix")) Reflect.set(globalThis, "gpuix", automation)
       },
       (error) => console.error("[gpuix-solid] automation failed", error)
     )
   }
-  if (debugFrameOverlay) host.renderer.setDebugFrameOverlay?.(debugFrameOverlay)
+  if (debugFrameOverlay) renderer.setDebugFrameOverlay?.(debugFrameOverlay)
   host.root.render(code)
   return host.root
 }
 
 export function resetRender(): void {
-  const global = globalThis as typeof globalThis & { [RENDER_HOSTS]?: RenderHosts }
-  const all = global[RENDER_HOSTS]
-  if (all === undefined) return
-  delete global[RENDER_HOSTS]
-  for (const host of all.slots) {
-    host.loop?.stop()
-    host.root?.unmount()
-  }
+  resetRenderSlots()
 }
