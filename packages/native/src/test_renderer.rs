@@ -922,6 +922,10 @@ impl TestGpuixRenderer {
                             // The OS's preferences are the machine's; the test window starts with none.
                             view.set_media_features(crate::media::MediaFeatures::default());
                             view.observe_appearance(window, cx);
+                            // Emulation first: turning it on notifies activation observers at once, and ours
+                            // would update the view that is still being built here. Registered after, it only
+                            // sees later activation changes.
+                            crate::focus_emulation::apply(window, cx);
                             view.observe_window_activity(window, cx);
                             view.observe_viewport(window, cx);
                             view.force_scroller_style(crate::scrollbar::ScrollerStyle::Overlay);
@@ -930,7 +934,6 @@ impl TestGpuixRenderer {
                             view.set_resync_hover_by_frame(true);
                             view.set_frameless(frameless);
                             crate::events::enable_dom_hit_testing(window);
-                            crate::focus_emulation::apply(window, cx);
                             crate::layout::container::allow_redraw_passes(window);
                             view.install_key_interception(window, cx);
                             view

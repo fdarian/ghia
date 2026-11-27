@@ -473,13 +473,16 @@ fn open_gpuix_window(
                     request.pointer_requests.clone(),
                 );
                 view.observe_appearance(window, cx);
+                // Emulation first: turning it on notifies activation observers at once, and ours
+                // would update the view that is still being built here. Registered after, it only
+                // sees later activation changes.
+                crate::focus_emulation::apply(window, cx);
                 view.observe_window_activity(window, cx);
                 view.observe_viewport(window, cx);
                 view.observe_scroller_style(cx);
                 view.observe_media_features(window, cx);
                 view.set_frameless(request.window_options.frameless());
                 crate::events::enable_dom_hit_testing(window);
-                crate::focus_emulation::apply(window, cx);
                 crate::layout::container::allow_redraw_passes(window);
                 view.install_key_interception(window, cx);
                 view
@@ -2557,13 +2560,16 @@ impl GpuixRenderer {
                                             pointer_requests,
                                         );
                                         view.observe_appearance(window, cx);
+                                        // Emulation first: turning it on notifies activation observers at once, and ours
+                                        // would update the view that is still being built here. Registered after, it only
+                                        // sees later activation changes.
+                                        crate::focus_emulation::apply(window, cx);
                                         view.observe_window_activity(window, cx);
                                         view.observe_viewport(window, cx);
                                         view.observe_scroller_style(cx);
                                         view.observe_media_features(window, cx);
                                         view.set_frameless(window_options.frameless());
                                         crate::events::enable_dom_hit_testing(window);
-                                        crate::focus_emulation::apply(window, cx);
                                         crate::layout::container::allow_redraw_passes(window);
                                         view.install_key_interception(window, cx);
                                         view
