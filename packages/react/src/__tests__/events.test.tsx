@@ -950,7 +950,8 @@ describe("frame loop", () => {
       })
       expect(result.status, result.stderr || result.error?.message).toBe(0)
       expect(JSON.parse(result.stdout.trim())).toEqual({
-        ticksAtStart: 1,
+        // The first tick is its own task, so none has run when startFrameLoop returns.
+        ticksAtStart: 0,
         ticksIdle: 0,
         clearsBeforeWake: 1,
         ticksAfterWake: 1,
@@ -1014,6 +1015,9 @@ describe("frame loop", () => {
       },
       { frameMs: 20 },
     )
+    // The first tick is a task of its own; the long tick then leaves the next one due at once.
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(ticks).toBe(1)
     await new Promise((resolve) => setTimeout(resolve, 8))
     loop.stop()
     expect(ticks).toBeGreaterThanOrEqual(2)
