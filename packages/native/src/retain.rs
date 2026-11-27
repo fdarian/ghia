@@ -791,6 +791,14 @@ impl Node {
         self.lifts_watched(below) || (self.hands_lifts_out(below) && below.lifted_roots)
     }
 
+    /// Whether what runs on the element is a transition that only paints and nothing else (a colour: the hover or the commit
+    /// of a patch starts it), which a root that a patch repaints may hold. The root is built again by each tick of the run, which
+    /// is how a patch frame draws it.
+    fn runs_a_paint_transition(&self) -> bool {
+        // A run of an opacity or a transform is a frame that re-layers at its start and end (`lift_run`): a unit of its own.
+        self.vol.dynamic & !(Dynamic::Transition as u8) == 0 && self.paints_only && !self.lift_run
+    }
+
     /// Whether something below is handed to a stacking context around the element, which a patch of the element
     /// as one piece does not repeat (gpui declines it, `PatchDecline::Lifts`). The element's own lift is not this:
     /// gpui patches a lifted root in the place its context orders it, and what is lifted below a root that forms a
@@ -862,6 +870,9 @@ struct Below {
     escapes: bool,
     /// Something below was built with a motion running on it.
     dynamic: bool,
+    /// Something below has more than a transition that only paints running on it ([`runs_a_paint_transition`]): a root that a
+    /// patch repaints holds the transitions a hover or a commit starts in it, and nothing else that runs.
+    busy: bool,
     digest: u64,
     size: u32,
 }
@@ -3332,7 +3343,16 @@ impl Retain {
         let moved = node.moved
             && !moves_with_scroller
             && !(box_root && (candidate || self.relocates(node, self.records.get(&node.id))));
-        if !(node.records || candidate) || node.absent || moved || own.dynamic || node.vol.dynamic != 0 {
+        // What runs in the element is a reason to build it again, and so to record nothing, but for the transitions that only
+        // paint in a root that a patch repaints: the ticks of the run are patches of it (`Record::patch_root`).
+        let running = own.dynamic || node.vol.dynamic != 0;
+        let holds_only_paint_transitions = !own.busy && (node.vol.dynamic == 0 || node.runs_a_paint_transition());
+        let patch_root_runs = running
+            && node.patch_root
+            && holds_only_paint_transitions
+            && !node.hands_lifts_out(own)
+            && own.size <= PATCH_ROOT_MAX_ELEMENTS;
+        if !(node.records || candidate) || node.absent || moved || (running && !patch_root_runs) {
             return None;
         }
         if crate::background_images::still_loading() != node.loading {
@@ -3360,7 +3380,7 @@ impl Retain {
             subtree: node.subtree,
             overscan,
             patch_root: node.patch_root && !node.hands_lifts_out(own) && own.size <= PATCH_ROOT_MAX_ELEMENTS,
-            box_root: box_root && !lifts && own.size <= UNIT_MAX_ELEMENTS,
+            box_root: box_root && !lifts && !running && own.size <= UNIT_MAX_ELEMENTS,
         })
     }
 
@@ -3455,6 +3475,7 @@ impl Retain {
         parent.escapes |= escaped;
         parent.size += size;
         parent.dynamic |= own.dynamic || (node.skipped.is_none() && node.vol.dynamic != 0);
+        parent.busy |= own.busy || (node.skipped.is_none() && node.vol.dynamic != 0 && !node.runs_a_paint_transition());
         if parent.excluded.is_none() {
             parent.excluded = node.exclusion.or(own.excluded);
         }
@@ -3982,7 +4003,12 @@ impl Retain {
                     watches: node.watches_relevance || own.watched,
                     holes,
                     size: own.size,
-                    patch_root: node.patch_root && eligible && !node.hands_lifts_out(&own) && own.size <= PATCH_ROOT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
+                    patch_root: node.patch_root
+                        && eligible
+                        && !node.hands_lifts_out(&own)
+                        && own.size <= PATCH_ROOT_MAX_ELEMENTS
+                        && (node.vol.dynamic == 0 || node.runs_a_paint_transition())
+                        && !own.busy,
                     box_root: node.box_root && eligible && !lifts && own.size <= UNIT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
                     reads_colors: node.reads_colors,
                     reads_custom: node.reads_custom,

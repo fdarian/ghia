@@ -6,7 +6,7 @@
 //! as the one before did, registers what it registered and paints the same operations with other
 //! values, and a patch frame can write it over the frame shown (`docs/fork/patch-frames.md`,
 //! "Hover patches"). Anything else, a size, a font, a transform, a cursor, a transition that
-//! would start, is for a frame built whole.
+//! can run on more than a colour, is for a frame built whole.
 //!
 //! The comparison is made on the styles the refinement resolves to, not on the refinement: it
 //! copies the paint properties of the style with the state onto the one without, and the two must
@@ -35,14 +35,15 @@ pub(crate) const PATCH_ROOT_MAX_ELEMENTS: u32 = 64;
 const WALK_LIMIT: usize = PATCH_ROOT_MAX_ELEMENTS as usize;
 
 /// What the styles alone say of whether a change only paints. A colour is inherited, and a transition below the
-/// element would start from the old one, so what the styles do not settle is left to the tree below the element:
+/// element that can run on more than a colour would start from the old one, so what the styles do not settle is left to
+/// the tree below the element:
 /// that is the one part of the answer that is not a function of the styles, and so not kept with them
 /// (`StyleMemo`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Paints {
     No,
     Yes,
-    /// Paints if no element below declares a transition.
+    /// Paints if no element below declares a transition that can run on more than a colour.
     UnlessTransitionBelow,
 }
 
@@ -115,10 +116,13 @@ pub(crate) fn may_lift(style: &StyleDesc) -> bool {
 }
 
 /// Whether the style the build lays out for an element may be other than the one it declares by anything but a
-/// hover that paints only: an animation, a transition, Motion (`motion`, `motionValues`, `layout`), a `var()`
+/// hover that paints only: an animation, a transition that can run on more than a colour (one of colours only is run
+/// by a patch, as a hover that paints starts it), Motion (`motion`, `motionValues`, `layout`), a `var()`
 /// (one in a state block too: `holds_var_declarations`, as the paint check of a hover does not see a `var()` a state
 /// holds), an `@container` block, a state variant other than `hover` and `hasHover`, or a `hover` or `hasHover` that is
-/// more than paint (`hover` is its `paint_hover_of`: an opacity that crosses 1, a transform, a size). It is taken from the caller's memo, not computed here: folding the states clones the style. Only a paint-only hover is ignored, since it never changes what an element lifts. A fold like the others can give the element an opacity, a
+/// more than paint (`hover` is its `paint_hover_of`: an opacity that crosses 1, a transform, a size). It is taken from the
+/// caller's memo, not computed here: folding the states clones the style. Only a paint-only hover is ignored, since it
+/// never changes what an element lifts. A fold like the others can give the element an opacity, a
 /// transform or a context that it does not declare, or take one away.
 fn restyles_beyond_hover(element: &RetainedElement, style: Option<&StyleDesc>, hover: Option<Paints>) -> bool {
     let props = element.custom_props();
@@ -282,7 +286,7 @@ fn paints_only(style: &StyleDesc, states: PointerStates) -> Paints {
 /// Whether the transitions of the two styles can only run on colours. A hover that paints only changes what
 /// `differs_by_paint_only` lets it, so a transition that runs on a colour is the one such a hover may start, and
 /// a patch frame draws it: the patch builds the root, which starts the transition, and the ticks that follow
-/// build it again while it runs ([`Retain::land_patch`](crate::retain)). A transition that can run on anything
+/// build it again while it runs (`Retain::land_patch`). A transition that can run on anything
 /// else (`all`, an opacity, a transform, a size) is a frame built whole: a run of an opacity or a transform
 /// starts as a frame that re-layers, and a size or a position is no paint.
 fn transitions_stay_colours(off: &StyleDesc, on: &StyleDesc) -> bool {

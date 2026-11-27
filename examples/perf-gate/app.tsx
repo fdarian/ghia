@@ -3,7 +3,8 @@ import type { HostElement, StyleDesc } from '@ghia/solid'
 
 // The perf gate's fixture: a copy of examples/solid/mailbox-navigate/App.tsx without its profiling hooks. Editing it moves
 // the counts in expected-counts.json (an element more per row is thousands of elements built), so change it only together
-// with `PERF_GATE_UPDATE=1`. `styling="sheet"` is the same rows styled by the stylesheet below instead of inline style objects.
+// with `PERF_GATE_UPDATE=1`. `styling="sheet"` is the same rows styled by the stylesheet below instead of inline style objects, and
+// `styling="transition"` the inline rows with a transition of their hover's background colour.
 
 export type Message = {
   id: number
@@ -193,10 +194,24 @@ const selectedRowStyle: StyleDesc = {
   backgroundColor: '#DBEAFE',
   hover: { backgroundColor: '#DBEAFE' },
 }
+// `styling="transition"`: the same rows with a transition of the colour their hover changes.
+const transitionRowStyle: StyleDesc = { ...rowStyle, transition: 'background-color 150ms linear' }
+const selectedTransitionRowStyle: StyleDesc = { ...selectedRowStyle, transition: 'background-color 150ms linear' }
 
-function Row(props: { message: Message; selected: boolean; onSelect: () => void }) {
+function Row(props: { message: Message; selected: boolean; onSelect: () => void; transition?: boolean }) {
   return (
-    <div style={props.selected ? selectedRowStyle : rowStyle} onClick={props.onSelect}>
+    <div
+      style={
+        props.transition
+          ? props.selected
+            ? selectedTransitionRowStyle
+            : transitionRowStyle
+          : props.selected
+            ? selectedRowStyle
+            : rowStyle
+      }
+      onClick={props.onSelect}
+    >
       <Show when={props.message.unread}>
         <div
           style={{ position: 'absolute', left: 4, top: 17, width: 8, height: 8, borderRadius: 4, backgroundColor: '#2563EB' }}
@@ -259,6 +274,10 @@ export const ROW_SHEET = `
   .row-subject { ${ONE_LINE_RULES} height: 18px; line-height: 18px; font-size: 13px; color: #27272A }
   .row-snippet { ${ONE_LINE_RULES} height: 16px; line-height: 16px; font-size: 12px; color: #71717A }
 `
+
+function TransitionRow(props: { message: Message; selected: boolean; onSelect: () => void }) {
+  return <Row message={props.message} selected={props.selected} onSelect={props.onSelect} transition />
+}
 
 function SheetRow(props: { message: Message; selected: boolean; onSelect: () => void }) {
   return (
@@ -344,7 +363,7 @@ function required<T>(value: T | undefined, what: string): T {
   return value
 }
 
-export function App(props: { messages: Message[]; styling: 'inline' | 'sheet' }) {
+export function App(props: { messages: Message[]; styling: 'inline' | 'sheet' | 'transition' }) {
   const haystacks = props.messages.map((message) =>
     `${message.fromName} ${message.subject} ${message.snippet}`.toLowerCase(),
   )
@@ -354,7 +373,7 @@ export function App(props: { messages: Message[]; styling: 'inline' | 'sheet' })
   const [selectedIndex, setSelectedIndex] = createSignal(0)
   const [windowStart, setWindowStart] = createSignal(0)
 
-  const RowComponent = props.styling === 'sheet' ? SheetRow : Row
+  const RowComponent = props.styling === 'sheet' ? SheetRow : props.styling === 'transition' ? TransitionRow : Row
   let list: HostElement | undefined
   let detail: HostElement | undefined
 
