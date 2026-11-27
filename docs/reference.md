@@ -963,6 +963,26 @@ id, and one event map, so `createRoot()` throws if that renderer already has a
 mounted root. Call `unmount()` on the first root before you create another;
 `render()` already does that for you.
 
+**`createRoot(container)`** is React DOM's: `container` is an element of a mounted window, and the root renders into it beside
+what it holds, as a portal root. It is how an app renders into a window `window.open('')` gave it ([below](#windowopen-and-the-window-object)):
+
+```tsx
+const win = window.open('', 'inspector', 'width=480,height=320')
+const root = createRoot(win.document.body as PublicInstance)
+root.render(<Inspector />)
+```
+
+The root belongs to that element's window: `useGpuix()` answers with its renderer, and the window's own root unmounting (the
+window closing) unmounts it first, running the effects' cleanups. `root.unmount()` unmounts it alone. The second argument takes
+only `onUncaughtError`; the window-level handlers (`onKeyDown`, `onSelectionChange`, ...) belong to the window's own root. The
+element must be in a window with a mounted root, or `createRoot` throws a `TypeError`. A call with a renderer, as before, is that
+renderer's window root.
+
+Every `createRoot(renderer)` and `render()` registers, for the window, the factory `window.open` asks for an empty root, so
+`window.open('')` works from any React app ([window.open](#windowopen-and-the-window-object)). `render()` keeps one slot for each
+renderer it is given (`render(node, { renderer })`), and one for the window it opens itself; the runtime-error overlay and
+`resetRender()` work on each.
+
 **An element outlives its window.** A library keeps elements past the unmount of
 their root and reaches them from a timer or a microtask: Base UI returns focus,
 floating-ui measures. Once the window is gone (the test renderer after
@@ -1064,8 +1084,8 @@ startFrameLoop(b, { onTerminated: () => process.exit(0), onWindowClosed: () => c
 Each window has its own `document` and window target: `documentOf(renderer)` and `windowOf(renderer)` from
 `@ghia/native/host` (and `@ghia/native/testing`) give them, see [A document per window](#a-document-per-window). The global
 `document` and `window` are the first window's. `window.open()` opens one from script ([below](#windowopen-and-the-window-object));
-the adapters' `render()` keeps one renderer, so until they register a window factory a second window is made with
-`createRoot(renderer)` on its own renderer, see [window.md](./fork/window.md#several-windows).
+the adapters render into the windows it opens (`render(code, container)` in Solid, `createRoot(container)` in React), and a window
+that an app makes itself with its own renderer gets its root with `createRoot(renderer)`, see [window.md](./fork/window.md#several-windows).
 
 ### Window drag regions
 
@@ -5573,8 +5593,9 @@ it is in one, the document whose `createElement`, `createTextNode` or `createDoc
 belongs to the global `document`). A node no window has mounted that is inserted into another window's tree, or into an
 unmounted node of another document, is adopted by that tree, as a browser adopts; `document.adoptNode()` and
 `document.importNode()` do it explicitly. A node a window mounted is that window's for good: inserting it under another
-window's tree throws `HierarchyRequestError`. A React node is bound to its root when it is created, so React rendering into a
-second window's document is the adapters' work (`render(code, container)` and `createRoot(container)`), not this layer's.
+window's tree throws `HierarchyRequestError`. A React node is bound to its root when it is created: React renders into a
+second window's document with `createRoot(container)` or `createPortal(children, container)`, which create the nodes for the
+container's window (the adapters' `render(code, container)` and `createRoot(container)`, [below](#windowopen-and-the-window-object)).
 
 `MutationObserver` works on any node of any window. The `location`, `history` and storage below, and the shell, are the app's,
 and `popstate` and `hashchange` go to the global window.
@@ -5587,7 +5608,8 @@ renders into:
 
 ```tsx
 const win = window.open('', 'inspector', 'width=480,height=320,left=900,top=120')
-render(() => <Inspector />, win.document.body) // Solid's render(code, container): the adapters' next slice
+render(() => <Inspector />, win.document.body) // Solid: render(code, container), as solid-js/web's
+createRoot(win.document.body).render(<Inspector />) // React: createRoot(container), as react-dom/client's
 ```
 
 | Call | Result |
@@ -5605,8 +5627,11 @@ when both are given. `popup` is accepted and changes nothing. `noopener` and `no
 and give it no `opener`. Any other feature is ignored.
 
 **The adapter makes the root.** A new window needs `<html>`, `<head>` and `<body>` and the node makers of the adapter that
-renders into it, and those are the adapter's. An adapter registers, for the renderer of its root, a factory that mounts an empty
-root on the renderer `window.open` made, and `window.open` of a window with no factory throws an `Error` that says so:
+renders into it, and those are the adapter's. `@ghia/solid` and `@ghia/react` register, for every renderer they own a root on
+(`render()` and `createRoot(renderer)`), a factory that mounts an empty root on the renderer `window.open` made: an app calls
+`window.open('')` and renders into `win.document.body`, with nothing registered. The factory's disposer unmounts that root, and
+what the app rendered into the window with it, when the window closes. `window.open` of a window with no factory (a root made by
+other means) throws an `Error` that says so, and a custom host registers one itself:
 
 ```ts
 import { registerWindowFactory } from '@ghia/native/host'
@@ -6233,8 +6258,10 @@ function Screen() {
 ```
 
 The portal's children are appended after whatever the target already holds, and
-React keeps them in key order among themselves. `target` must belong to the same
-root as the component that calls `createPortal`.
+React keeps them in key order among themselves. `target` may be an element of
+another window: `createPortal(<Palette />, win.document.body)` renders the component's content in the window `window.open('')`
+gave, follows the calling component's state and context, and is removed with it. The nodes are created for the target's window,
+and that window's batch is sent when the commit ends, in a microtask rather than inside the commit.
 
 For floating menus that must paint above a `<virtual-list>`, use
 [`<anchored>`](#overlay-menus) rather than a portal: a portal changes where
@@ -11430,7 +11457,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Runtime errors keep the macOS window alive and show a stack overlay
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element
-- [ ] Multiple windows
+- [x] Multiple windows (several windows on one app, a document per window, `window.open`, rendering into a window with Solid `render(code, container)` and React `createRoot(container)`)
 - [x] JS remount on a full reload under `ghia dev` (`render()` keeps the native window)
 - [x] Solid component hot updates under `ghia dev` (solid-refresh; local signal state resets)
 - [x] React Fast Refresh under `ghia dev` (`@ghia/react/vite`)

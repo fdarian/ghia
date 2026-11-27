@@ -342,11 +342,31 @@ height)` (`resizeTo`, `Window::resize`, which `setContentSize`s the window) are 
 `getScaleFactor` and `isWindowKey` and its own `setWindowSize`. GPUI has no call to move a window after it opens, so `moveTo`
 and `moveBy` do nothing.
 
-What several windows do not have yet is the adapters' side: `render(code, container)` (Solid) and `createRoot(container)`
-(React) into a second window's `document.body`, and the factory each registers. Until then a second window is a second renderer
-with its own `createRoot(renderer)` (React) or `createRoot` (Solid), and an app that opens windows with `window.open`
-registers the factory itself (`examples/multi-window-e2e` does, with React's `createRoot`). The test renderer opens several
-windows at once: [testing.md](testing.md#several-test-windows).
+**The adapters render into windows.** Each registers a window factory in its `createRoot(renderer)` (so `render()` has it too):
+the factory makes a root of its own kind on the renderer `window.open` made (`createRoot(opened)`, which attaches an empty
+`<html>`, `<head>` and `<body>` and the node makers) and returns its `unmount`. The rest is per adapter:
+
+- **Solid** (`packages/solid/src/root.ts`, `renderer.ts`). `render(code, container)` is `renderIntoElement(code, element)`: the
+  element's `root` (a `HostRoot`) is the window's; `elementMounters` maps it to the function its `createRoot` closure made, which
+  runs `universalRender` into the element with `marker: null` and the window's `GpuixContext` around it, and tracks the dispose
+  in `elementRenders`. The root's `clear` runs those first, so a closing window disposes what was rendered into it (cleanups
+  run, nodes are removed). A dispose removes the children that appeared in the element while it was mounted. Solid binds a node to
+  a root when it is mounted, so a `Portal` whose `mount` is another window's body needs nothing more. `render(code, options)`
+  keeps one `RenderSlot` for each renderer (`slotFor` in `renderer.ts`; the window it opens itself is `own`), where it kept one
+  global.
+- **React** (`packages/react/src/reconciler/reconciler.ts`, `renderer.ts`). `createRoot(container)` is `createElementRoot`: a
+  reconciler root whose container is a derived `Container` with `portalTarget` set to the element, the mechanism a portal uses,
+  so it takes the window's ids, mutation queue and event map from the element's own container; its unmount is in the window
+  container's `elementRoots`, which the window root's cleanup runs first. A portal gets the same: `portalContainerFor(target)`
+  derives from the container that `target`'s state names, and React hands that container to `createInstance` as the root
+  container inside the portal, so the nodes of `createPortal(children, w.document.body)` take the other window's ids and queue
+  with no reconciler change. `resetAfterCommit` flushes the committing root's queue only, so a portal into another window is sent
+  by the queue's scheduled microtask. `render()` keeps a `RenderSlot` for each renderer in `renderHosts` (the `own` slot has the
+  frame loop and the process-level error handlers' overlay).
+
+The frame loop is the app's: `window.open` joins the new renderer to the opener's loop (above), and neither adapter starts one
+or an `onTerminated` for a window it did not open itself. The test renderer opens several windows at once:
+[testing.md](testing.md#several-test-windows).
 The
 `appearance` option of a window after the first is the App's (`set_window_appearance` is the App's), and the menu bar is the
 App's; both are the platform's single-App model, not a choice here.

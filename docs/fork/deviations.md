@@ -455,8 +455,19 @@ How sheets work is in [stylesheets.md](stylesheets.md); the behaviour is in [ref
 - **One frame loop serves every window, and the first renderer decides how it polls.** `frameMs` of a later `startFrameLoop` is
   ignored; the platform is pumped once per iteration whichever renderer asks. `onTerminated` of each renderer that was in the loop
   runs once when the app ends.
-- **The adapters' `render()` keeps one renderer yet.** A second window is made with `createRoot(renderer)` on its own renderer
-  until the adapters register a window factory ([window.md](window.md#several-windows)); `window.open` needs that factory.
+- **`render(code, container)` and `createRoot(container)` take the window's own options only in part.** The window-level handlers
+  (`onKeyDown`, `onKeyUp`, `onSelectionChange`, `onAppearanceChange`, `onEvent`, `tabNavigation`) belong to a window's own root:
+  the root the factory makes for a window `window.open` gave has none of the opener's, and `createRoot(container)` takes only
+  `onUncaughtError` (Solid's `render(code, container)` takes none). Use `window` listeners on `windowOf(renderer)` instead.
+- **An error in a window `window.open` made does not show the overlay.** The runtime-error overlay replaces the app of the
+  window `render()` opened; an uncaught error in a window's root goes to `onUncaughtError` (Solid: the opener's; React: the
+  option of `createRoot(container)`, else `console.error`) and that window's tree stays as React or Solid left it.
+- **Solid's dispose of `render(code, container)` removes what appeared in the element while it was mounted.** `solid-js/web`
+  empties the element; Ghia leaves the children that were there before the call, and a second render into the same element
+  while the first is mounted is removed by the first's dispose.
+- **A React portal into another window is sent in a microtask.** `createPortal(children, w.document.body)` creates the nodes
+  for that window and queues them on its mutation queue; the commit flushes the queue of the root that committed, so the other
+  window's batch goes at the queue's scheduled microtask, not inside the commit.
 - **`window.open` does not load a document.** A browser's popup navigates to a URL; Ghia has one document and no loading, so
   `window.open("")` (or `about:blank`) opens an empty window the app renders into, a link to another origin goes to the system
   (`null` is returned), and any other URL throws `NotSupportedError` rather than opening an empty window the URL never filled.
