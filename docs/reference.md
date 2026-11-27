@@ -1031,6 +1031,41 @@ function WindowControls() {
 Windows, Linux, and FreeBSD. `zoomWindow()` uses the platform's native zoom or
 maximize operation. These methods are not available in the browser renderer.
 
+`closeWindow()` closes this renderer's window and no other (macOS). The app
+ends with its last window, as it does when the user closes it, and a window that
+is already gone is a no-op. `isWindowClosed()` says whether the window is gone,
+whether the user closed it (the close button, `⌘W`), `closeWindow()` did, or the
+app quit; it is `false` before `init()`. `startFrameLoop` calls the
+`onWindowClosed` option of the renderer whose window closed while the app goes on
+for the others, and `onTerminated` once when the app ends.
+
+### Several windows on one app
+
+Every `GpuixRenderer` that calls `init()` on a thread gets a window of its own
+on the one app of that thread (macOS). The first creates the app and the menu
+bar; the next ones open another window with the same options (`title`, `width`,
+`height`, `x`, `y`, `kind`, `focus`, and the rest). Each renderer acts on its own
+window only: its tree, scroll offsets, focus and events are its own, and the
+element ids of two renderers may coincide. An `appearance` option on a window
+after the first sets the app's override; a window that names none leaves it. One
+frame loop serves all of them: `startFrameLoop(renderer)` for each renderer joins
+it, the platform is pumped once per iteration, and `frameMs`, when given, is the
+first renderer's.
+
+```ts
+const a = createNativeRenderer()
+const b = createNativeRenderer()
+a.init({ title: "A", width: 300, height: 200, x: 80, y: 120 })
+b.init({ title: "B", width: 400, height: 260, x: 460, y: 120 })
+startFrameLoop(a, { onTerminated: () => process.exit(0) })
+startFrameLoop(b, { onTerminated: () => process.exit(0), onWindowClosed: () => console.log("B closed") })
+```
+
+What is not here yet: `window.open()`, a `document` per window (the global
+`document` and `window` are those of the window that mounted last), and the
+adapters' `render()`, which keeps one renderer: a second window is made with
+`createRoot(renderer)` on its own renderer, see [window.md](./fork/window.md#several-windows).
+
 ### Window drag regions
 
 With `titlebarTransparent` there is no titlebar to grab, so the page says which

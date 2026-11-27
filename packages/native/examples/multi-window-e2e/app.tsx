@@ -7,7 +7,7 @@ import { dlopen, FFIType } from "bun:ffi"
 import React from "react"
 import { createRoot } from "@ghia/react"
 import { createNativeRenderer, startFrameLoop } from "@ghia/native/runtime"
-import type { GpuixRenderer } from "@ghia/native"
+import type { EventPayload, GpuixRenderer } from "@ghia/native"
 import { CASES, HELPER_PATH, READY_FILE, REPORT_FILE, TERMINATED_FILE, type CaseName, type Report } from "./paths"
 
 const folder = process.env.MULTI_WINDOW_E2E_DIR
@@ -98,6 +98,23 @@ const windowsAtStart = visibleWindows()
 const alphaHasOwnTree = alphaNode?.bounds?.width === 250 && find(treeOf(alpha), "beta") === undefined
 const betaHasOwnTree = betaNode?.bounds?.width === 350 && find(treeOf(beta), "alpha") === undefined
 const boundsDiffer = alphaNode?.bounds?.height !== betaNode?.bounds?.height
+// A key handler of one window that calls the renderer of the other: native runs it inside the dispatch of
+// the first window, which the second window is not part of.
+let crossWindowCall = "the handler did not run"
+beta.setSyncEventHandler((event: EventPayload) => {
+  if (event.eventType !== "keydown") return { defaultPrevented: false, propagationStopped: false }
+  try {
+    const size = alpha.getWindowSize()
+    const tree = JSON.parse(alpha.getAutomationTree()) as TreeNode
+    crossWindowCall = size.width === 300 && find(tree, "alpha") ? "ok" : `read ${size.width} wide and ${find(tree, "alpha") ? "alpha's" : "no"} tree`
+  } catch (error) {
+    crossWindowCall = String(error)
+  }
+  return { defaultPrevented: false, propagationStopped: false }
+})
+beta.simulateKeystrokes("a")
+beta.setSyncEventHandler(() => ({ defaultPrevented: false, propagationStopped: false }))
+
 // "close-button" has AppKit close a window the way the close button does, and sees which one it was.
 if (name === "close-button") {
   if (helper.symbols.qe_close_window_later() !== 1) throw new Error("the app has no visible window to close")
@@ -109,6 +126,7 @@ const survivor = closedId === "alpha" ? beta : alpha
 const survivorId = closedId === "alpha" ? "beta" : "alpha"
 const report: Report = {
   windowsAtStart,
+  crossWindowCall,
   alphaHasOwnTree,
   betaHasOwnTree,
   boundsDiffer,

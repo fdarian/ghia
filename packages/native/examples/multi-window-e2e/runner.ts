@@ -68,6 +68,7 @@ async function runCase(name: CaseName): Promise<Result> {
     const terminated = read<{ calls: number }>(folder, TERMINATED_FILE)
     const problems: string[] = []
     if (report.windowsAtStart !== 2) problems.push(`${report.windowsAtStart} windows at the start, not 2`)
+    if (report.crossWindowCall !== "ok") problems.push(`a handler of one window calling the other renderer: ${report.crossWindowCall}`)
     if (!report.alphaHasOwnTree) problems.push("the first window does not hold its own tree")
     if (!report.betaHasOwnTree) problems.push("the second window does not hold its own tree")
     if (!report.boundsDiffer) problems.push("the two windows report the same bounds")

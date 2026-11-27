@@ -447,6 +447,18 @@ How sheets work is in [stylesheets.md](stylesheets.md); the behaviour is in [ref
 - **`kind: 'panel'` is Electron's `type: 'panel'`, not a DOM or CSS thing.** The exception to the DOM/CSS principle is taken because a capture needs a key window without the app being activated and nothing in the DOM says that. Unlike Electron's, it is at the normal window level and does not stay above other apps' windows.
 - **The test renderer validates `kind` and builds its window with it, but nothing observable differs.** Its window is a real one at an offscreen position, opened with `focus` false, so it is never key either way.
 
+### Several windows
+
+- **The appearance override and the menu bar belong to the App, not a window.** `appearance` on a window after the first sets the
+  App's override (one for all windows), and a window that names none leaves it; the app menu is built once, with the first window's
+  `appName`.
+- **One frame loop serves every window, and the first renderer decides how it polls.** `frameMs` of a later `startFrameLoop` is
+  ignored; the platform is pumped once per iteration whichever renderer asks. `onTerminated` of each renderer that was in the loop
+  runs once when the app ends.
+- **The JS globals are not per window yet.** `document`, `window`, `matchMedia` and the adapters' `render()` slot follow one
+  renderer ([window.md](window.md#several-windows)); a second window is made with `createRoot(renderer)` on its own renderer.
+  `window.open` is not there.
+
 ### Window placement and displays, from Electron
 
 - **The test renderer ignores `x` / `y`.** Its window stays offscreen (origin -10000), so the options are forced to `None`.
@@ -537,6 +549,8 @@ The fork is macOS-only, so these are recorded, not open. Each entry says what th
 - **Linux has no drag threshold:** the window menu or the move starts on the press, with no wait for movement.
 - **No `system-context-menu` event.** Electron lets a page cancel the system menu on Windows and Linux; here the OS owns it on Windows, and on Linux a right press opens the window menu with no hook.
 - **The `screen` displays are macOS only.** `screen.getAllDisplays()` and `getPrimaryDisplay()` throw "only implemented on macOS" elsewhere (and in the browser build). Windows and Linux place the window at (x, y) in whatever space their platform uses.
+
+- **Several windows on one App are macOS only.** `init` of a second renderer on Windows and Linux starts its own App and UI thread, `closeWindow()` throws "only implemented on macOS", and `isWindowClosed()` reports that thread's end.
 
 ### `<webview>`
 

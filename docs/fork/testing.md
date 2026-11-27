@@ -166,6 +166,24 @@ cd packages/native/examples/quit-e2e && bun run e2e    # sh run.sh; exit 0 passe
 E2E_ONLY=apple-event,last-window-close bun run e2e     # some cases
 ```
 
+### The multi-window e2e
+
+`packages/native/examples/multi-window-e2e/` checks several real windows on one App ([window.md](window.md#several-windows)).
+Each case starts a fresh app process with two `createNativeRenderer()` renderers (so two windows, `focus: false`), a React
+`createRoot(renderer)` in each with different content, and the shared frame loop on the wake path. The app asserts through the
+automation tree that each window holds only its own tree with its own bounds (AppKit's window count, from the quit e2e's
+`quit_helper.m`, says there are two), then, as the case says: `close-second` and `close-first` call `closeWindow()` on one
+renderer (the first is the one the wake hangs on), `close-button` has AppKit close a window with `performClose:`, `close-all` then
+closes the survivor, and `quit` presses `Meta+q` with both open. The closed renderer must report `isWindowClosed()` and have its
+`onWindowClosed` run once, the other window must stay open, change after the close and show the change (and draw a frame for it
+where the system shows the window: a window nobody can see gets no display-link frames), and the app must end with `onTerminated`
+run exactly once and exit status 0. It writes the same files as the quit e2e, which the runner reads.
+
+```bash
+cd packages/native/examples/multi-window-e2e && bun run e2e    # sh run.sh; exit 0 passed, 1 a case failed, 2 could not run, 3 not checkable (no windows)
+E2E_ONLY=close-first,quit bun run e2e                          # some cases
+```
+
 ## Chrome oracles
 
 An oracle is a DOM/CSS question put to headless Chrome once, with the answer committed. Tests compare gpuix against the committed answer and never start Chrome, so the suites stay offline and the expected value is Chrome's, not a number someone typed in.

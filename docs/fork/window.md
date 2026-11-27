@@ -168,7 +168,7 @@ be created as the right class: `kind: 'panel'` is `WindowKind::Panel` in zed.
   offscreen and opened with `focus` false, so it is never key and nothing observable differs.
 
 `active_window()` and `ordered_windows()` in `gpui_macos` still test `isKindOfClass: GPUIWindow`, so a panel is not in them,
-as before for `PopUp`, `Floating` and `Dialog`. gpuix has one window and does not read either.
+as before for `PopUp`, `Floating` and `Dialog`. gpuix does not read either.
 
 ### Proving it
 
@@ -248,6 +248,62 @@ within the same call, handling no queued event, source or display-link step. The
 A quit from another thread (the Apple Event) wakes an idle host through the run-loop watch:
 [frames-and-wakes.md](frames-and-wakes.md#off-thread-wakes-an-apple-event-quit). The paths are checked by
 [the quit e2e](testing.md#the-quit-e2e). The blocking `run()` mode is unchanged.
+
+## Several windows
+
+An app makes a window the way the first one is made: a `GpuixRenderer` and its `init()`. The thread has one GPUI App, which
+the first renderer's `init` creates (`MAC_PLATFORM`, `GPUI_APP`, the quit mode, the menu bar); a renderer whose `init` finds it
+opens another window on it with `cx.open_window` and the same `to_gpui_window_options` mapping (`open_gpuix_window`,
+`renderer.rs`), and never throws "a GPUI application already exists". `app_menu::init` and `window_set::observe_closes` run
+once, with the App.
+
+**A window handle per renderer.** `GpuixRenderer::window` holds the `WindowHandle<GpuixView>` that `init` opened, and every
+native call goes through it (`update_window`, `update_window_or_defer`, `update_window_without_view` and `invalidate_window`
+are methods on the renderer): the `GPUI_WINDOW` thread-local is gone. The same call made while a sync handler is running has
+two cases (`events/sync_dispatch.rs`): for the window being dispatched it uses the stashed window as before, and for another
+window (a handler of one window that reads or writes another renderer) it updates that window through the app the dispatch
+holds, which the window being dispatched is out of and every other is in (`update_view_of`, `update_window_of`). The sync
+handler of each renderer is bound to its own `WindowId` (`bind_window`), so input on a window reaches that renderer's JS.
+
+**State keyed by host element id is per window.** Host ids are allocated by each renderer, so the second window's `div` can
+have the first window's id. What outlives a frame under an element id is kept in `WindowMap` (`window_map.rs`, per `WindowId`,
+dropped when the window closes): the scroll handles, list states and `visibleRange` reporters that napi reads without an App,
+their kept copies for a forced read, the virtual-list scrolls queued for the next render, the pixel writes pending a layout
+(`scroll_write`), the smooth scrolls and `scrollBehavior` (`scroll`), the scrollbar states and their frame counter
+(`scrollbar`: another window's frames in between do not age a bar) and the `anchor-size()` records (`layout/anchor_size`).
+The a11y links are kept per `RetainedTree::id` (`accessibility/links`), and a `display` transition's hold is a flag on the
+elements of the tree (`RetainedElement::display_held`), since `is_display_none(element)` has no window to ask. Bounds,
+host nodes, the hit registry, painted text, carets and search ordinals were keyed by window before. Still ambient, and fine
+because the draws of two windows never interleave: the scrollbar's per-frame clock, scroller style and draw counter, and
+the per-frame scratch of `tape` and `text`. `LAYOUT_PENDING` is keyed by the view's `EntityId`, which GPUI makes unique.
+
+**Closing.** A window closes when the user closes it, when `closeWindow()` does, or when the App quits. In each case GPUI
+removes the window and calls `App::on_window_closed`, which `window_set` listens to: the window is no longer open
+(`isWindowClosed()` says so), what is kept under its id is dropped and its sync handler route is unbound. The root view drops
+with the window. The App goes on for the windows that are left, and the last window closing ends it as before
+(`QuitMode::LastWindowClosed`, the quit path in [frames-and-wakes.md](frames-and-wakes.md#a-quit-ends-the-frame-loop): the Dock's
+Quit, `⌘Q` and a logout still end the whole app through `onTerminated`, once). `tick()` keeps its meaning, false once the
+platform quit, and pumps the whole platform whichever renderer calls it; a renderer is told its own window is gone by
+`isWindowClosed()`, which the shared frame loop asks of every renderer and answers with the `onWindowClosed` option of
+`startFrameLoop`.
+
+**Thread-local order.** `init` decides whether an App exists from `MAC_PLATFORM` and touches `GPUI_APP` only once the first
+window is open. Thread-locals are destroyed in the order they were first used, and the App in `GPUI_APP` drops its windows,
+which write to GPUI's profiler journal (its own thread-local): a `GPUI_APP` registered before the journal makes
+`process.exit()` abort with "thread local panicked on drop".
+
+**One pump.** The platform is pumped once per iteration and the run-loop wake hook is shared:
+[frames-and-wakes.md](frames-and-wakes.md#several-windows-one-loop).
+
+What several windows do not have yet: a JS `document` and `window` per window, `window.open`, the adapters' `render()` into a
+second window and the test renderer with several windows are the later slices of this work. Until then a second window is a
+second renderer with its own `createRoot(renderer)` (React) or `createRoot` (Solid), and the JS globals (`document`,
+`window`, `matchMedia`) follow the renderer that mounted last. The `appearance` option of a window after the first is the
+App's (`set_window_appearance` is the App's), and the menu bar is the App's; both are the platform's single-App model, not a
+choice here.
+
+Checked by `window_map`, `window_set` and `shared_wake` unit tests, `frame-loop.test.ts`, and
+[the multi-window e2e](testing.md#the-multi-window-e2e).
 
 ## Window placement and displays
 

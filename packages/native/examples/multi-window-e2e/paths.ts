@@ -16,6 +16,8 @@ export const END_LIMIT_MS = 1500
 export interface Report {
   /** Visible windows once both were up. */
   windowsAtStart: number
+  /** What a key handler of the second window found calling the first renderer: "ok", or what went wrong. */
+  crossWindowCall: string
   alphaHasOwnTree: boolean
   betaHasOwnTree: boolean
   boundsDiffer: boolean
