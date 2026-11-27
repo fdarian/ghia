@@ -5,8 +5,10 @@ import type { OpaqueRoot } from "react-reconciler"
 import { ConcurrentRoot } from "react-reconciler/constants.js"
 import {
   createMutationQueue,
+  Element as RuntimeElement,
   installElementSource,
   registerRoot,
+  registerWindowDisposer,
   registerWindowFactory,
   runAll,
   runSteps,
@@ -91,7 +93,8 @@ export function createRoot(
   target: NativeRenderer | PublicInstance,
   rootEventHandlers: RootEventHandlers = {}
 ): Root {
-  if (isHostInstance(target)) return createElementRoot(target, rootEventHandlers)
+  // Any element goes to `createElementRoot`, which throws for one that is in no mounted window: a closed window's body must not become a window root.
+  if (target instanceof RuntimeElement) return createElementRoot(target as unknown as Instance, rootEventHandlers)
   return createWindowRoot(target as NativeRenderer, rootEventHandlers)
 }
 
@@ -99,7 +102,8 @@ function createElementRoot(
   element: Instance,
   options: Pick<RootEventHandlers, "onUncaughtError">
 ): Root {
-  if (!stateFor(element).mounted) {
+  // A stand-in element (the body of a closed window) or another adapter's element is no host instance: it has no window to mount in.
+  if (!isHostInstance(element) || !stateFor(element).mounted || !element.isConnected) {
     throw new TypeError("createRoot(container) needs an element in the tree of a window with a mounted root")
   }
   const windowContainer = containerFor(element)
@@ -263,15 +267,18 @@ function createWindowRoot(
 
   const unregister = registerRoot(() => cleanup())
   // What `window.open` gives an app: the window gets a root of its own, and the app renders into its `document.body`.
+  // `createWindowRoot` registers the window disposer of the popup's root itself, so the factory returns none.
   const unregisterWindowFactory = registerWindowFactory(renderer, (opened) => {
-    const popup = createWindowRoot(opened, { onUncaughtError: rootEventHandlers.onUncaughtError })
-    return () => popup.unmount()
+    createWindowRoot(opened, { onUncaughtError: rootEventHandlers.onUncaughtError })
   })
+  // The window going away (the user closed it, `close()`, the app ending) unmounts the root, the first window's included.
+  const unregisterWindowDisposer = registerWindowDisposer(renderer, () => cleanup())
 
   // Every step runs even when one throws: a failed unmount must still release `<html>`, the root and the listeners.
   const cleanup = (): void => {
     unregister()
     unregisterWindowFactory()
+    unregisterWindowDisposer()
     runSteps([
       () => runAll([...gpuixContainer.elementRoots], (unmountElementRoot) => unmountElementRoot(), "Unmounting the roots in elements failed"),
       () => {

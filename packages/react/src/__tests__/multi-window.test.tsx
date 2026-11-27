@@ -4,6 +4,7 @@
  */
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { renderSlots } from "@ghia/native/host"
 import { createRoot, flushSync, render, resetRender } from "../reconciler/renderer.js"
 import { createPortal } from "../reconciler/portal.js"
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from "../testing.js"
@@ -126,11 +127,54 @@ describeNative("React in another window", () => {
     flushSync(() => root.render(<Content />))
     await settle(renderer)
     popup.close()
-    expect(log).toEqual(["cleanup"])
     expect(popup.closed).toBe(true)
-    expect(() => root.unmount()).not.toThrow()
+    // Closing tears down in a later task, as a browser queues it.
+    expect(log).toEqual([])
     await settle(app.renderer)
+    expect(log).toEqual(["cleanup"])
+    expect(() => root.unmount()).not.toThrow()
     expect(app.renderer.getAllText()).toEqual(["main"])
+  })
+
+  it("throws a TypeError for createRoot of the body of a closed window, and makes no window root of it", async () => {
+    app.render(<div>main</div>)
+    const { popup, renderer, body } = openSide()
+    flushSync(() => createRoot(body).render(<p>popup</p>))
+    await settle(renderer)
+    popup.close()
+    await settle(app.renderer)
+    const slots = renderSlots().length
+    expect(() => createRoot(body)).toThrow(TypeError)
+    expect(() => createRoot(popup.document.body as unknown as PublicInstance)).toThrow(TypeError)
+    expect(renderSlots()).toHaveLength(slots)
+    expect(app.renderer.getAllText()).toEqual(["main"])
+  })
+
+  it("unmounts the first window's root when that window goes, while a popup stays open", async () => {
+    const log: string[] = []
+    const heard: string[] = []
+    function Main() {
+      useEffect(() => () => void log.push("main cleanup"), [])
+      return <div>main</div>
+    }
+    app.render(<Main />)
+    const { popup, renderer, body } = openSide()
+    function Popup() {
+      useEffect(() => () => void log.push("popup cleanup"), [])
+      return <div>popup</div>
+    }
+    flushSync(() => createRoot(body).render(<Popup />))
+    await settle(renderer, app.renderer)
+    for (const type of ["pagehide", "unload"]) window.addEventListener(type, () => heard.push(type), { once: true })
+    // What the frame loop does when the user closes the first window and the others stay open.
+    app.renderer.dispose()
+    expect(heard).toEqual(["pagehide", "unload"])
+    expect(log).toEqual(["main cleanup"])
+    expect(popup.closed).toBe(false)
+    await settle(renderer)
+    expect(renderer.getAllText()).toEqual(["popup"])
+    // `afterEach` unmounts what the test leaves in `app`.
+    app = createTestRoot({ width: 400, height: 300 })
   })
 
   it("mounts a portal from the main tree into the popup, following the owner's state", async () => {

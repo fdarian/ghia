@@ -1,7 +1,15 @@
 import React, { type ReactNode } from "react"
 import { GpuixRenderer } from "@ghia/native"
 import type { EventPayload, WindowOptions } from "@ghia/native"
-import { isWebBuild } from "@ghia/native/host"
+import {
+  bindRenderSlot,
+  isWebBuild,
+  ownRenderSlot,
+  renderSlotFor,
+  renderSlots,
+  resetRenderSlots,
+  type RenderSlot as BaseRenderSlot,
+} from "@ghia/native/host"
 import {
   createNativeRenderer,
   enableAutomation as enableNativeAutomation,
@@ -91,7 +99,6 @@ export function startFrameLoop(
   })
 }
 
-const RENDER_HOSTS_KEY = "__gpuixRenderHosts"
 const BROWSER_AUTOMATION_KEY = "gpuix"
 
 declare global {
@@ -111,15 +118,7 @@ export async function installBrowserAutomation(
   return created
 }
 
-/** One slot for each renderer a call to `render` mounts on: the window it opens itself, and each renderer it is given. */
-type RenderHosts = {
-  /** The slot of `render` calls that name no renderer, which own the window and its frame loop. */
-  own?: RenderSlot
-  readonly slots: Set<RenderSlot>
-}
-
-type RenderSlot = {
-  renderer?: NativeRenderer
+type RenderSlot = BaseRenderSlot & {
   root?: Root
   loop?: FrameLoop
   lastNode?: ReactNode
@@ -344,8 +343,7 @@ function showRuntimeError(slot: RenderSlot, error: Error | string, componentStac
 
 /** Process-level errors (a throw nobody caught, the frame loop's) go to the app's own window, or to the one window there is. */
 function scheduleRuntimeError(error: Error | string, componentStack?: string): void {
-  const all = Reflect.get(globalThis, RENDER_HOSTS_KEY) as RenderHosts | undefined
-  const target = all?.own ?? (all === undefined ? undefined : [...all.slots][0])
+  const target = ownRenderSlot<RenderSlot>() ?? renderSlots<RenderSlot>()[0]
   target?.scheduleError?.(error, componentStack)
 }
 
@@ -360,27 +358,6 @@ function scheduleOwnRuntimeError(slot: RenderSlot): (error: Error | string, comp
   }
 }
 
-function renderHosts(): RenderHosts {
-  const existing = Reflect.get(globalThis, RENDER_HOSTS_KEY)
-  if (existing) return existing
-  const created: RenderHosts = { slots: new Set() }
-  Reflect.set(globalThis, RENDER_HOSTS_KEY, created)
-  return created
-}
-
-function slotFor(injected: NativeRenderer | undefined): RenderSlot {
-  const all = renderHosts()
-  if (injected === undefined) {
-    all.own ??= {}
-    all.slots.add(all.own)
-    return all.own
-  }
-  for (const known of all.slots) if (known.renderer === injected) return known
-  const created: RenderSlot = { renderer: injected }
-  all.slots.add(created)
-  return created
-}
-
 export interface RenderOptions
   extends WindowOptions,
     WindowFontsOption,
@@ -392,15 +369,10 @@ export interface RenderOptions
 }
 
 export function resetRender(): void {
-  const all = Reflect.get(globalThis, RENDER_HOSTS_KEY) as RenderHosts | undefined
-  for (const slot of all?.slots ?? []) {
-    slot.loop?.stop()
-    slot.root?.unmount()
-  }
+  resetRenderSlots()
   const automation = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
   void automation?.close()
   Reflect.deleteProperty(globalThis, BROWSER_AUTOMATION_KEY)
-  Reflect.deleteProperty(globalThis, RENDER_HOSTS_KEY)
   uninstallRuntimeErrorHandlers()
 }
 
@@ -418,13 +390,13 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     debugFrameOverlay,
     ...windowOptions
   } = options
-  const slot = slotFor(injected)
+  const slot = renderSlotFor<RenderSlot>(injected)
   slot.scheduleError = scheduleOwnRuntimeError(slot)
   const remount = slot.root != null
   if (!slot.renderer) {
     const renderer = createRenderer()
     renderer.init(windowOptions)
-    slot.renderer = renderer
+    bindRenderSlot(slot, renderer)
     console.log("[gpuix] created native window")
   }
   const host = slot.renderer
