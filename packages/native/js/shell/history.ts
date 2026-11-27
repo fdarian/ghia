@@ -55,8 +55,8 @@ export class History {
   }
 
   go(delta?: number): void {
-    const steps = Math.trunc(Number(delta))
-    session.go(Number.isNaN(steps) ? 0 : steps)
+    // WebIDL `long`: NaN and Infinity become 0, and the rest wraps to 32 bits, which `| 0` does.
+    session.go(Number(delta) | 0)
   }
 
   back(): void {

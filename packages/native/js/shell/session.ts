@@ -4,9 +4,23 @@ import { dispatchWindowEvent } from "./window-events.js"
 /** An http origin, so that `new URL(link.href).origin === location.origin` holds for a link a router builds. */
 export const INITIAL_HREF = "http://localhost/"
 
+/**
+ * `stored` is the structured clone `pushState` made and is never handed out; `live` is the copy `history.state` and the
+ * popstate event show, made on first read and again whenever a traversal arrives at the entry, as a browser deserializes it.
+ */
 interface Entry {
   readonly url: URL
-  readonly state: unknown
+  readonly stored: unknown
+  live: { readonly value: unknown } | undefined
+}
+
+function entryOf(url: URL, stored: unknown): Entry {
+  return { url, stored, live: undefined }
+}
+
+function liveState(entry: Entry): unknown {
+  entry.live ??= { value: structuredClone(entry.stored) }
+  return entry.live.value
 }
 
 function fragmentOf(url: URL): string | null {
@@ -28,7 +42,7 @@ function queueTask(task: () => void): void {
  * Nothing leaves the process, so it lives as long as the app does.
  */
 class SessionHistory {
-  private entries: Entry[] = [{ url: new URL(INITIAL_HREF), state: null }]
+  private entries: Entry[] = [entryOf(new URL(INITIAL_HREF), null)]
   private index = 0
   scrollRestoration: "auto" | "manual" = "auto"
 
@@ -37,7 +51,7 @@ class SessionHistory {
   }
 
   get state(): unknown {
-    return this.current.state
+    return liveState(this.current)
   }
 
   /** Read-only: a caller that changes a URL copies it first. */
@@ -49,14 +63,14 @@ class SessionHistory {
     return this.entries[this.index]
   }
 
-  /** `url` is resolved against the current URL; `state` is cloned. */
+  /** `state` is already a structured clone that nothing else holds. */
   pushState(state: unknown, url: URL): void {
-    this.entries.splice(this.index + 1, this.entries.length, { url, state })
+    this.entries.splice(this.index + 1, this.entries.length, entryOf(url, state))
     this.index += 1
   }
 
   replaceState(state: unknown, url: URL): void {
-    this.entries[this.index] = { url, state }
+    this.entries[this.index] = entryOf(url, state)
   }
 
   /**
@@ -72,11 +86,10 @@ class SessionHistory {
     const from = this.current.url
     if (replace || target.href === from.href) this.replaceState(null, target)
     else this.pushState(null, target)
+    // popstate is synchronous, even to the current URL; only hashchange is a task, and only when the fragment changed.
+    dispatchWindowEvent("popstate", { state: this.state })
     if (fragmentOf(from) === fragmentOf(target)) return
-    queueTask(() => {
-      dispatchWindowEvent("popstate", { state: null })
-      dispatchWindowEvent("hashchange", { oldURL: from.href, newURL: target.href })
-    })
+    queueTask(() => dispatchWindowEvent("hashchange", { oldURL: from.href, newURL: target.href }))
   }
 
   /** `delta` is read when the task runs, as a browser reads it when the traversal's turn comes, so `back()` twice goes back two entries. */
@@ -91,7 +104,8 @@ class SessionHistory {
     const from = this.current.url
     this.index = target
     const to = this.current
-    dispatchWindowEvent("popstate", { state: to.state })
+    to.live = undefined
+    dispatchWindowEvent("popstate", { state: liveState(to) })
     if (fragmentOf(from) !== fragmentOf(to.url)) {
       dispatchWindowEvent("hashchange", { oldURL: from.href, newURL: to.url.href })
     }
