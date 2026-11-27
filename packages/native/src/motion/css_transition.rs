@@ -559,17 +559,30 @@ pub(crate) fn leaves_box_size(style: &StyleDesc) -> bool {
 }
 
 /// Whether every transition that `style` declares can only run on a colour property: a list that names
-/// no property other than colours, which is also every list that declares none. `all`, a property that
-/// is not a colour, an SVG attribute and a `var()` in a `transition*` declaration (which says what it is
-/// once the custom properties are known) are not.
+/// no property other than colours, which is also every list that declares none. A colour is a style
+/// colour or the paint of an SVG shape (`fill`, `stroke`): a hover restyles a style and never an
+/// attribute, so it starts no transition of a paint, and a transition of a paint changes no box.
+/// A name that no property of Ghia answers to (a custom property, `--tw-gradient-from`) matches
+/// nothing, as it does in `css_props`: Ghia transitions no custom property, registered or not.
+/// `all`, a property that is not a colour and a `var()` in `transition` or `transition-property` (which
+/// say what the list is once the custom properties are known) are not. A `var()` in the duration,
+/// the timing function, the delay or the behavior (Tailwind's `var(--tw-duration, ...)`) says when and
+/// how a transition runs and not on what, so it counts, unless it is all there is: with no property
+/// list written, the properties are `all`.
 fn declares_colour_transitions_only(style: &StyleDesc) -> bool {
-    !crate::css::var_substitution::holds_family(style, "transition")
-        && TransitionList::parse(style).is_ok_and(|list| {
-            list.0.iter().all(|entry| match &entry.matcher {
-                Matcher::All => false,
-                Matcher::Props(keys) => keys.iter().all(|key| matches!(key, PropKey::Style(prop) if prop.is_colour())),
-            })
+    use crate::css::var_substitution::{holds_family, holds_key};
+    if holds_key(style, &["transition", "transitionProperty"]) {
+        return false;
+    }
+    if holds_family(style, "transition") && style.transition.is_none() && style.transition_property.is_none() {
+        return false;
+    }
+    TransitionList::parse(style).is_ok_and(|list| {
+        list.0.iter().all(|entry| match &entry.matcher {
+            Matcher::All => false,
+            Matcher::Props(keys) => keys.iter().all(|key| key.is_colour()),
         })
+    })
 }
 
 /// [`declares_colour_transitions_only`] for `style` as it is, with the state styles it holds. What a hover
@@ -2289,6 +2302,11 @@ mod tests {
         serde_json::from_str(json).unwrap()
     }
 
+    /// A style as the host hands it over: a declaration with a `var()` is held, not parsed.
+    fn held_style(json: &str) -> StyleDesc {
+        crate::css::var_substitution::parse(json.as_bytes()).unwrap()
+    }
+
     fn list(json: &str) -> TransitionList {
         TransitionList::parse(&style(json)).unwrap()
     }
@@ -2313,8 +2331,15 @@ mod tests {
             r#"{ "transitionProperty": "background-color", "transitionDuration": "1s" }"#,
             r#"{ "transition": "cursor 1s" }"#,
             r#"{ "hover": { "transition": "color 1s" } }"#,
+            r#"{ "transition": "fill 1s, stroke 1s" }"#,
+            r#"{ "transition": "stroke 1s, stop-color 1s, flood-color 1s" }"#,
+            r#"{ "transition": "--tw-gradient-from 1s, --tw-gradient-via 1s, --tw-gradient-to 1s" }"#,
+            r#"{ "transitionProperty": "color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to", "transitionTimingFunction": "var(--tw-ease, var(--default-transition-timing-function))", "transitionDuration": "var(--tw-duration, var(--default-transition-duration))" }"#,
+            r#"{ "transitionProperty": "color", "transitionDelay": "var(--d)", "transitionBehavior": "var(--b)" }"#,
+            r#"{ "transition": "none", "transitionDuration": "var(--d)" }"#,
+            r#"{ "hover": { "transitionProperty": "fill", "transitionDuration": "var(--d)" } }"#,
         ] {
-            assert!(transitions_only_colours(&style(only)), "{only}");
+            assert!(transitions_only_colours(&held_style(only)), "{only}");
         }
     }
 
@@ -2327,13 +2352,20 @@ mod tests {
             r#"{ "transition": "width 1s" }"#,
             r#"{ "transition": "background-color 1s, opacity 1s" }"#,
             r#"{ "transition": "box-shadow 1s" }"#,
-            r#"{ "transition": "fill 1s" }"#,
+            r#"{ "transition": "fill 1s, d 1s" }"#,
+            r#"{ "transition": "fill 1s, r 1s" }"#,
+            r#"{ "transition": "fill 1s, stroke-width 1s" }"#,
             r#"{ "transitionDuration": "1s" }"#,
+            r#"{ "transitionDuration": "var(--d)" }"#,
+            r#"{ "transitionTimingFunction": "var(--e)", "transitionBehavior": "allow-discrete" }"#,
+            r#"{ "transitionProperty": "var(--p)", "transitionDuration": "1s" }"#,
+            r#"{ "transitionProperty": "color", "transition": "var(--t)" }"#,
+            r#"{ "transitionProperty": "color", "hover": { "transition": "var(--t)" } }"#,
             r#"{ "transition": "background-color 1s", "transitionProperty": "background-color, width" }"#,
             r#"{ "hover": { "transition": "all 1s" } }"#,
             r#"{ "transition": "var(--t)" }"#,
         ] {
-            assert!(!transitions_only_colours(&style(other)), "{other}");
+            assert!(!transitions_only_colours(&held_style(other)), "{other}");
         }
     }
 

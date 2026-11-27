@@ -374,6 +374,11 @@ pub(crate) fn holds_family(style: &StyleDesc, family: &str) -> bool {
     style.var_declarations.as_deref().is_some_and(|held| held.iter().any(|declaration| declaration.key.starts_with(family)))
 }
 
+/// Whether `style` holds a declaration of one of `keys` (camel case, as a style object writes them).
+pub(crate) fn holds_key(style: &StyleDesc, keys: &[&str]) -> bool {
+    style.var_declarations.as_deref().is_some_and(|held| held.iter().any(|declaration| keys.contains(&declaration.key.as_str())))
+}
+
 /// What element `id` computes to for its `var()`: the custom properties it computes to below
 /// `parent` (the focus variants that apply to it included) and `style` with them substituted,
 /// `None` when it holds no `var()`.
