@@ -1,6 +1,6 @@
 export interface WindowFontsOption {
   /**
-   * Font files (`.ttf`, `.otf`) registered with `registerFont` as soon as the
+   * Font files (`.ttf`, `.otf`, `.woff`, `.woff2`) registered with `registerFont` as soon as the
    * renderer exists, so `fontFamily` resolves to them without a system-wide
    * install. Relative paths resolve against the process's current working
    * directory. An unreadable path throws before any window opens.

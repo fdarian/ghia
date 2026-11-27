@@ -36,6 +36,8 @@ function project(): { root: string; publicDir: string } {
   mkdirSync(publicDir)
   writeFileSync(join(root, "src", "a.ttf"), FONT)
   writeFileSync(join(publicDir, "b.otf"), FONT)
+  writeFileSync(join(root, "src", "c.woff2"), FONT)
+  writeFileSync(join(publicDir, "d.woff"), FONT)
   return { root, publicDir }
 }
 
@@ -60,9 +62,20 @@ test("a font of the public directory is inlined, an image and a module are left 
   expect(transform('const font = "url(/src/a.ttf)"', "/x/app.ts")).toBeUndefined()
 })
 
+test("a WOFF and a WOFF2 url() is inlined under its own media type", () => {
+  const { root, publicDir } = project()
+  const { transform } = fontPlugin(root, publicDir)
+  const css = JSON.stringify('@font-face { font-family: A; src: url(/src/c.woff2) format("woff2"), url("/d.woff") format("woff") }')
+  const result = transform(`export default ${css}`, "/x/app.css?inline") as { code: string }
+  expect(result.code).toContain(`url(data:font/woff2;base64,${FONT.toString("base64")}) format(`)
+  expect(result.code).toContain(`url(\\"data:font/woff;base64,${FONT.toString("base64")}\\")`)
+})
+
 test("a build inlines a font of any size and leaves the size limit to Vite for the rest", () => {
   const { build } = fontPlugin("/", "/public")
   expect(build("/src/a.ttf")).toBe(true)
   expect(build("/src/B.OTF")).toBe(true)
+  expect(build("/src/a.woff2")).toBe(true)
+  expect(build("/src/a.WOFF")).toBe(true)
   expect(build("/src/a.png")).toBeUndefined()
 })

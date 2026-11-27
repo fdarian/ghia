@@ -16,7 +16,17 @@ use super::keyframes::split_declarations;
 use super::tokenizer::{trim, Kind, Token};
 
 /// The `format()` hints of a source this engine can load, and what `@supports font-format()` answers for.
-pub(crate) const SUPPORTED_FORMATS: [&str; 5] = ["truetype", "opentype", "collection", "truetype-variations", "opentype-variations"];
+pub(crate) const SUPPORTED_FORMATS: [&str; 9] = [
+    "truetype",
+    "opentype",
+    "collection",
+    "truetype-variations",
+    "opentype-variations",
+    "woff",
+    "woff2",
+    "woff-variations",
+    "woff2-variations",
+];
 
 /// The `tech()` keywords of a source this engine can use, and what `@supports font-tech()` answers for: the
 /// text system applies OpenType features and variation axes, and has no colour glyph formats.

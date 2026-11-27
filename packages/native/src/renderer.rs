@@ -7992,8 +7992,7 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> std::result::Result<(), String> {
-        crate::text::font_check::check_font(&bytes)?;
-        crate::text::font_family::Fonts::of(cx).add(bytes).map_err(|error| error.to_string())?;
+        crate::text::font_family::Fonts::of(cx).register(bytes)?;
         cx.notify();
         window.refresh();
         Ok(())

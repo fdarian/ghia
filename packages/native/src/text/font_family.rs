@@ -75,8 +75,15 @@ impl Fonts {
         Fonts(Rc::new(Shared { text_system, registered: RefCell::new(Vec::new()), faces: RefCell::default(), stamp: Cell::new(None), state: RefCell::new(None) }))
     }
 
+    /// Checks that GPUI can load `bytes` and adds them to the text system; the family the font is filed under.
+    pub(crate) fn register(&self, bytes: Vec<u8>) -> Result<String, String> {
+        let family = crate::text::font_check::check_font(&bytes, &self.0.text_system)?;
+        self.add(bytes).map_err(|error| error.to_string())?;
+        Ok(family)
+    }
+
     /// Adds the fonts in `bytes` to the text system and remembers them for the [`Stamp`].
-    pub(crate) fn add(&self, bytes: Vec<u8>) -> anyhow::Result<()> {
+    fn add(&self, bytes: Vec<u8>) -> anyhow::Result<()> {
         let mut hasher = rustc_hash::FxHasher::default();
         bytes.hash(&mut hasher);
         self.0.text_system.add_fonts(vec![std::borrow::Cow::Owned(bytes)])?;
@@ -160,8 +167,8 @@ impl Fonts {
 struct Registering<'a>(&'a Fonts);
 
 impl Host for Registering<'_> {
-    fn add(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
-        self.0.add(bytes)
+    fn register(&mut self, bytes: Vec<u8>) -> Result<String, String> {
+        self.0.register(bytes)
     }
 
     fn is_installed(&mut self, name: &str) -> bool {
