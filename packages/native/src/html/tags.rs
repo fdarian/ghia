@@ -2,7 +2,8 @@
 //! with the path every `setStyle` goes through.
 //!
 //! What a per-tag layer cannot say stays out: a rule that needs the element's attributes
-//! (`a:any-link`, `details[open]`) and the quotes of `q`. The generic family `monospace` of `pre`,
+//! (`details[open]`; `a:any-link` and the `input` types are entries named by the attribute, which
+//! `html::ua_style_of` picks) and the quotes of `q`. The generic family `monospace` of `pre`,
 //! `code`, `kbd`, `samp` and `tt` is here, and its 13px size is Chrome's scaling of a font size when the
 //! family becomes `monospace` (`LengthContext::descend_style`). The rules that need an element's place
 //! are the lists inside lists, which [`NESTED_LISTS`] has.
@@ -52,6 +53,20 @@ pub(super) const TAGS: &[(&str, &str)] = &[
     // Closed, which is all a tag can say: `open` is an attribute.
     ("dialog", r#"{"display":"none"}"#),
     ("a", r#"{"display":"inline"}"#),
+    // Chrome's `a:-webkit-any-link` and `:-webkit-any-link:active`: `-webkit-link` and `-webkit-activelink` are
+    // `#0000ee` and `#ff0000`, and `#9e9eff` and `#ff9e9e` where the element's `color-scheme` is dark. Nothing is
+    // visited here. `html::ua_style_of` picks it for an `<a>` with an `href`.
+    (
+        "a[href]",
+        r##"{"display":"inline","color":"light-dark(#0000ee, #9e9eff)","textDecorationLine":"underline","cursor":"pointer","active":{"color":"light-dark(#ff0000, #ff9e9e)"}}"##,
+    ),
+    // The same without the pressed colour, for a link that has a `color` of its own: a state block of a lower layer
+    // outlasts an own value of its property (`universal_style::layer_under`), and a user agent rule never wins over
+    // the author's `color`, pressed or not.
+    (
+        "a[href] with a color",
+        r##"{"display":"inline","color":"light-dark(#0000ee, #9e9eff)","textDecorationLine":"underline","cursor":"pointer"}"##,
+    ),
     ("strong", r#"{"display":"inline","fontWeight":700}"#),
     ("em", r#"{"display":"inline","fontStyle":"italic"}"#),
     ("b", r#"{"display":"inline","fontWeight":700}"#),

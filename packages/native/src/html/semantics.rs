@@ -130,6 +130,15 @@ pub(crate) fn activation_target(tree: &RetainedTree, path: &[u64]) -> Option<u64
     })
 }
 
+/// Whether a click on `path` follows a link: its activation target is an `<a href>`. The click has to be
+/// delivered for it even with no listener, since following it (`js/events/link-activation.ts`) is decided after
+/// the event ran.
+pub(crate) fn is_followed_by(tree: &RetainedTree, path: &[u64]) -> bool {
+    activation_target(tree, path)
+        .and_then(|target| tree.elements.get(&target))
+        .is_some_and(|target| target.element_type == "a" && has_href(target))
+}
+
 /// What a `button` does when clicked inside a `form`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ButtonType {

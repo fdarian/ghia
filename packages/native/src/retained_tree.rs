@@ -1951,7 +1951,7 @@ impl RetainedTree {
         };
         let universal = self.universal.as_ref().filter(|_| element.takes_universal_style());
         let above = if crate::html::is_list(&element.element_type) { self.lists_above(id) } else { Default::default() };
-        let tag_style = crate::html::ua_style_of(element, above);
+        let tag_style = crate::html::user_agent_under(crate::html::ua_style_of(element, above), declared.as_deref());
         let user_agent = crate::html::popover::user_agent(element, tag_style.as_ref()).or(tag_style);
         let effective = match (self.styles.layered.base(universal, user_agent.as_ref()), declared) {
             (Some(base), Some(declared)) => Some(self.styles.layered.effective(&base, &declared)),
@@ -2158,6 +2158,7 @@ impl RetainedTree {
         let mut changed = false;
         let is_input_type = is_input && key == "type";
         let is_hidden_attribute = key == "hidden";
+        let is_link_href = key == "href" && self.elements.get(&id).is_some_and(|element| element.element_type == "a");
         let is_list_value = key == "value";
         let is_list_counting = key == "start" || key == "reversed";
         let is_input_group = is_input && matches!(key.as_str(), "type" | "name");
@@ -2250,8 +2251,8 @@ impl RetainedTree {
             self.editable_count = self.editable_count + usize::from(now_editable) - usize::from(was_editable);
             self.track_focusable_subtree(id);
         }
-        if is_hidden_attribute {
-            // The user agent style of any element is `display: none` while it is `hidden`.
+        if is_hidden_attribute || is_link_href {
+            // The user agent style of any element is `display: none` while it is `hidden`, and of an `<a>` its link style while it has an `href`.
             let change = self.refresh_effective_style(id, false);
             self.settle_style_change(id, change);
         }
