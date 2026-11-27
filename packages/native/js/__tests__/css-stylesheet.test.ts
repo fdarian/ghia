@@ -134,6 +134,15 @@ describe("CSSStyleSheet", () => {
     expect(list[1]).toBeUndefined()
   })
 
+  it("splits a media list at the top-level commas only", () => {
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync("@media (min-resolution: calc(1, 2)), print { .a { top: 0 } }")
+    const media = (sheet.cssRules[0] as CSSMediaRule).media
+    expect(media.length).toBe(2)
+    expect(media.item(0)).toBe("(min-resolution: calc(1, 2))")
+    expect(media.item(1)).toBe("print")
+  })
+
   it("lists @media and @supports as grouping rules with their condition and their rules", () => {
     const sheet = new CSSStyleSheet()
     sheet.replaceSync(

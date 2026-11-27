@@ -140,8 +140,26 @@ export class MediaList {
   }
 
   private queries(): string[] {
-    return this.mediaText === "" ? [] : this.mediaText.split(",").map((query) => query.trim())
+    return this.mediaText === "" ? [] : splitTopLevelCommas(this.mediaText).map((query) => query.trim())
   }
+}
+
+/** The pieces of a comma list, where a comma inside parentheses (`(min-resolution: calc(1, 2))`) does not split. */
+function splitTopLevelCommas(text: string): string[] {
+  const pieces: string[] = []
+  let depth = 0
+  let start = 0
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (char === "(") depth += 1
+    else if (char === ")") depth = Math.max(0, depth - 1)
+    else if (char === "," && depth === 0) {
+      pieces.push(text.slice(start, index))
+      start = index + 1
+    }
+  }
+  pieces.push(text.slice(start))
+  return pieces
 }
 
 /** What follows the at-keyword in the prelude of an at-rule. */
