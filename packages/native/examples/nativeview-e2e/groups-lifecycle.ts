@@ -1,6 +1,7 @@
 /** The groups about attach and detach: when `onAttach` and `onDetach` come, what the library's view is
  *  then, and what the window does with a view when it closes. */
 import { writeFileSync } from "node:fs"
+import { ownRenderer } from "@ghia/native/host"
 import { flushSync } from "@ghia/react"
 import { addon, LogEntry } from "./addon"
 import { auditLog } from "./audit"
@@ -46,9 +47,9 @@ interface TickingRenderer {
 
 /** The renderer the app was rendered with. */
 function liveRenderer(): TickingRenderer {
-  const host = Reflect.get(globalThis, "__gpuixRenderHost") as { renderer?: TickingRenderer } | undefined
-  if (!host?.renderer) throw new Error("the app has no renderer to hook")
-  return host.renderer
+  const renderer = ownRenderer() as TickingRenderer | undefined
+  if (!renderer) throw new Error("the app has no renderer to hook")
+  return renderer
 }
 
 /** Mounts a nativeview and, in the same turn of the event loop as the tick that makes its surface (the window

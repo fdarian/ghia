@@ -2,6 +2,7 @@
  *  the window really shows (its captured pixels) and what AppKit really does with the events handed
  *  to it. */
 import { existsSync, mkdirSync, readFileSync } from "node:fs"
+import { ownRenderer } from "@ghia/native/host"
 import { cpus, loadavg } from "node:os"
 import { checkSkipActivation, describeWindow, makeCheckable, NotCheckable, problem } from "./environment"
 import { helper, Shot } from "./helper"
@@ -534,7 +535,7 @@ async function inputRouting() {
 
 async function focus() {
   const group = "focus"
-  const focusedId = () => ((globalThis as any).__gpuixRenderHost?.renderer?.getFocusedElementId?.() ?? null) as number | null
+  const focusedId = () => (ownRenderer()?.getFocusedElementId?.() ?? null) as number | null
   const idOf = (name: string) => element(name).id
   const responder = () => helper.firstResponder()
   const pageHasKeyboard = (name: string) => {
@@ -605,7 +606,7 @@ async function focus() {
 
 async function tabbing() {
   const group = "tab"
-  const focusedId = () => ((globalThis as any).__gpuixRenderHost?.renderer?.getFocusedElementId?.() ?? null) as number | null
+  const focusedId = () => (ownRenderer()?.getFocusedElementId?.() ?? null) as number | null
   const idOf = (name: string) => element(name).id
   const pageHasKeyboard = (name: string) => {
     const [x, y] = inPage(name, 150, 60)
