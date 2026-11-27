@@ -1,10 +1,11 @@
 //! Media Queries Level 4: the parser and evaluator behind a stylesheet's `@media`.
 //!
 //! The grammar and the feature set are those of `js/media-query.ts`, which `matchMedia` runs: a
-//! query list item that does not parse, or that names a feature or a value this engine does not
-//! know, is `not all` (it never matches), as in browsers, and the other items of its comma list
-//! still count. `resolution` is the one feature added here, since a window's scale factor is at
-//! hand natively. The serializer is not ported: nothing here reports `media` text back.
+//! query list item that does not parse is `not all` (it never matches), as in browsers, and the
+//! other items of its comma list still count. A parenthesized block that names a feature or a value
+//! this engine does not know is `<general-enclosed>`: its result is unknown, which is false at the top
+//! and for `and`, but does not void an `or` sibling that is true, and `not` of it is still unknown.
+//! `resolution` is the one feature added here, since a window's scale factor is at hand natively. The serializer is not ported: nothing here reports `media` text back.
 //!
 //! Pure: no window, no sheet. [`MediaEnvironment`] holds what a query reads of the window.
 
@@ -50,7 +51,7 @@ impl MediaQueryList {
 
 #[derive(Debug)]
 enum Item {
-    /// `not all`: a syntax error, or a feature or value that is not known.
+    /// `not all`: a syntax error.
     Never,
     Query { negate: bool, type_matches: bool, condition: Option<Condition> },
 }
@@ -60,9 +61,48 @@ impl Item {
         match self {
             Item::Never => false,
             Item::Query { negate, type_matches, condition } => {
-                let result = *type_matches && condition.as_ref().is_none_or(|condition| condition.evaluate(environment));
-                result != *negate
+                let result = Truth::of(*type_matches).and(condition.as_ref().map_or(Truth::True, |condition| condition.evaluate(environment)));
+                (if *negate { result.not() } else { result }) == Truth::True
             }
+        }
+    }
+}
+
+/// A condition's result in three values: an unknown stays unknown through `not`, and an `and` or `or`
+/// is decided by the operands that are known when they decide it alone.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Truth {
+    True,
+    False,
+    Unknown,
+}
+
+impl Truth {
+    fn of(known: bool) -> Truth {
+        if known { Truth::True } else { Truth::False }
+    }
+
+    fn not(self) -> Truth {
+        match self {
+            Truth::True => Truth::False,
+            Truth::False => Truth::True,
+            Truth::Unknown => Truth::Unknown,
+        }
+    }
+
+    fn and(self, other: Truth) -> Truth {
+        match (self, other) {
+            (Truth::False, _) | (_, Truth::False) => Truth::False,
+            (Truth::Unknown, _) | (_, Truth::Unknown) => Truth::Unknown,
+            _ => Truth::True,
+        }
+    }
+
+    fn or(self, other: Truth) -> Truth {
+        match (self, other) {
+            (Truth::True, _) | (_, Truth::True) => Truth::True,
+            (Truth::Unknown, _) | (_, Truth::Unknown) => Truth::Unknown,
+            _ => Truth::False,
         }
     }
 }
@@ -297,44 +337,39 @@ enum Condition {
     Not(Box<Condition>),
     And(Vec<Condition>),
     Or(Vec<Condition>),
+    /// `<general-enclosed>`: a block of an unknown feature or an invalid value.
+    Unknown,
 }
 
 impl Condition {
-    fn evaluate(&self, environment: &MediaEnvironment) -> bool {
+    fn evaluate(&self, environment: &MediaEnvironment) -> Truth {
         match self {
-            Condition::Not(child) => !child.evaluate(environment),
-            Condition::And(children) => children.iter().all(|child| child.evaluate(environment)),
-            Condition::Or(children) => children.iter().any(|child| child.evaluate(environment)),
-            Condition::Boolean(feature) => match feature.kind() {
+            Condition::Unknown => Truth::Unknown,
+            Condition::Not(child) => child.evaluate(environment).not(),
+            Condition::And(children) => children.iter().fold(Truth::True, |all, child| all.and(child.evaluate(environment))),
+            Condition::Or(children) => children.iter().fold(Truth::False, |any, child| any.or(child.evaluate(environment))),
+            Condition::Boolean(feature) => Truth::of(match feature.kind() {
                 Kind::Discrete { falsy, .. } => Some(feature.keyword(environment)) != falsy,
                 _ => feature.number(environment) != 0.0,
-            },
+            }),
             Condition::Plain { feature, prefix, value } => {
                 if matches!(feature.kind(), Kind::Discrete { .. }) {
-                    return matches!(value, Value::Ident(word) if word == feature.keyword(environment));
+                    return Truth::of(matches!(value, Value::Ident(word) if word == feature.keyword(environment)));
                 }
                 let actual = feature.number(environment);
                 let wanted = value.number(environment);
-                match prefix {
+                Truth::of(match prefix {
                     Some(Prefix::Min) => actual >= wanted,
                     Some(Prefix::Max) => actual <= wanted,
                     None => actual == wanted,
-                }
+                })
             }
             Condition::Range { feature, left, right } => {
                 let actual = feature.number(environment);
                 // `400px <= width` reads as `width >= 400px`.
-                if let Some((op, value)) = left {
-                    if !op.flipped().holds(actual, value.number(environment)) {
-                        return false;
-                    }
-                }
-                if let Some((op, value)) = right {
-                    if !op.holds(actual, value.number(environment)) {
-                        return false;
-                    }
-                }
-                true
+                let left_holds = left.as_ref().is_none_or(|(op, value)| op.flipped().holds(actual, value.number(environment)));
+                let right_holds = right.as_ref().is_none_or(|(op, value)| op.holds(actual, value.number(environment)));
+                Truth::of(left_holds && right_holds)
             }
         }
     }
@@ -588,14 +623,46 @@ impl Parser<'_> {
     }
 
     fn parse_in_parens(&mut self) -> Parse<Condition> {
+        let open = self.index;
         if !matches!(self.next(), Some(Token { tok: Tok::Open, .. })) {
             return Err(Unsupported);
         }
-        let result = if self.at_condition() { self.parse_condition(true)? } else { self.parse_feature()? };
-        if !matches!(self.next(), Some(Token { tok: Tok::Close, .. })) {
-            return Err(Unsupported);
+        if self.at_condition() {
+            let result = self.parse_condition(true)?;
+            if !matches!(self.next(), Some(Token { tok: Tok::Close, .. })) {
+                return Err(Unsupported);
+            }
+            return Ok(result);
         }
-        Ok(result)
+        let feature = self.parse_feature();
+        if let Ok(result) = feature {
+            if matches!(self.peek(), Some(Token { tok: Tok::Close, .. })) {
+                self.index += 1;
+                return Ok(result);
+            }
+        }
+        // Not a feature this engine knows with a value it takes: the block is `<general-enclosed>`,
+        // as long as it is closed.
+        self.index = self.close_of(open).ok_or(Unsupported)? + 1;
+        Ok(Condition::Unknown)
+    }
+
+    /// The index of the `)` that closes the `(` at `open`.
+    fn close_of(&self, open: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        for (index, token) in self.tokens.iter().enumerate().skip(open) {
+            match token.tok {
+                Tok::Open => depth += 1,
+                Tok::Close => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     fn comparison(&self) -> Option<Compare> {
@@ -901,6 +968,22 @@ mod tests {
         }
         assert!(matches("(bogus: 1), (min-width: 800px)", &size));
         assert!(matches("screen and (min-width: 800px), (bogus)", &size));
+    }
+
+    #[test]
+    fn an_unknown_feature_is_unknown_and_does_not_void_its_or_siblings() {
+        let size = environment(800.0, 600.0);
+        assert!(matches("(bogus) or (min-width: 800px)", &size));
+        assert!(matches("(min-width: 800px) or (bogus: 1)", &size));
+        assert!(matches("(min-width: red) or (min-width: 800px) or (bogus)", &size));
+        assert!(matches("screen and ((bogus) or (min-width: 800px))", &size));
+        assert!(!matches("(bogus) or (min-width: 900px)", &size));
+        assert!(!matches("(bogus) and (min-width: 800px)", &size));
+        assert!(!matches("(min-width: 800px) and (bogus)", &size));
+        assert!(!matches("not ((bogus) or (min-width: 900px))", &size), "not of unknown is unknown");
+        assert!(matches("not ((bogus) and (min-width: 900px))", &size), "false and unknown is false");
+        assert!(!matches("not screen and (bogus)", &size));
+        assert!(matches("(bogus) or (bogus2), screen", &size));
     }
 
     #[test]

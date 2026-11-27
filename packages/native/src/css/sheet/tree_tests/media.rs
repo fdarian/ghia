@@ -46,6 +46,17 @@ fn a_rule_in_media_applies_while_its_query_matches() {
 }
 
 #[test]
+fn an_unknown_feature_does_not_void_the_or_siblings_of_a_sheet_query() {
+    let mut doc = Doc::new();
+    let div = doc.classed("div", ROOT, "a");
+    doc.tree.set_media_environment(window(700.0));
+    doc.set_adopted("@media (not-a-feature) or (min-width: 600px) { .a { color: blue } } @media (not-a-feature) and (min-width: 600px) { .a { top: 1px } }");
+    doc.flush();
+    assert_eq!(doc.color(div), Some("blue"));
+    assert_eq!(doc.tree.sheets.index.rules.len(), 1, "the unknown feature in an and is false");
+}
+
+#[test]
 fn no_media_rule_applies_before_the_window_reports() {
     let mut doc = Doc::new();
     let div = doc.classed("div", ROOT, "a");
