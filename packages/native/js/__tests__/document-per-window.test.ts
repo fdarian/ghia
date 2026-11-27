@@ -621,6 +621,28 @@ describe.skipIf(!hasNativeTestRenderer)("a document and a window target per rend
     })
   })
 
+  it("keeps the document object of a renderer whose root unmounts and mounts again, as a reload of the entry does", () => {
+    const first = openWindow(400, 400, { width: 100, height: 100 }, "first")
+    const before = documentOf(first.renderer)
+    expect(before).toBe(document)
+    first.body.props["data-before"] = "yes"
+    first.detach()
+    // Between the two the window has the stand-in roots a reloaded entry writes to.
+    expect(before.body).not.toBe(first.body)
+    expect(document.body).toBe(before.body)
+    const binding = createRendererState(first.renderer).attach()
+    const stop = installElementSource(first.renderer, () => undefined, () => ({ html: first.html, head: first.head, body: first.body }))
+    try {
+      expect(documentOf(first.renderer)).toBe(before)
+      expect(globalThis.document).toBe(before)
+      expect(document.body).toBe(first.body)
+      expect(windowOf(first.renderer)).toBe(globalWindow())
+    } finally {
+      stop()
+      binding.detach()
+    }
+  })
+
   it("lets a window that was released leave its renderer's window to the next one", () => {
     const first = openWindow(400, 400, { width: 100, height: 100 }, "first")
     expect(documentOf(first.renderer)).toBe(document)
