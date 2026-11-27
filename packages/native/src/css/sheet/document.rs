@@ -20,6 +20,7 @@ use super::atoms::{Atom, Atoms};
 use super::cascade::{merge, MatchedInterner, MatchedRules};
 use super::conditions::{self, Watched};
 use super::definitions::winners;
+use super::font_face::SheetFontFaces;
 use super::index::{DocRule, RuleIndex};
 use super::invalidation::Reach;
 use super::keyframes::SheetKeyframes;
@@ -89,6 +90,8 @@ pub struct StyleSheets {
     pub(crate) media_flipped: bool,
     /// The sets of keyframes the loaded sheets define, which the animation engine reads.
     pub(crate) keyframes: Arc<SheetKeyframes>,
+    /// The `@font-face` rules that hold in the window, which the text system registers before a build.
+    pub(crate) font_faces: Arc<SheetFontFaces>,
     /// What the loaded sheets register with `@property`.
     pub(crate) registered: Option<Arc<Registered>>,
     /// A load changed the keyframes or the registrations: what a build reads that is not an element's
@@ -139,6 +142,7 @@ impl Default for StyleSheets {
             watched: Watched::default(),
             media_flipped: false,
             keyframes: Arc::default(),
+            font_faces: Arc::default(),
             registered: None,
             document_changed: false,
             loaded_units: None,
@@ -247,11 +251,12 @@ impl StyleSheets {
                 .iter()
                 .map(|rule| &rule.conditions)
                 .chain(assembled.keyframes.iter().map(|rule| &rule.conditions))
-                .chain(assembled.properties.iter().map(|rule| &rule.conditions)),
+                .chain(assembled.properties.iter().map(|rule| &rule.conditions))
+                .chain(assembled.font_faces.iter().map(|rule| &rule.conditions)),
             self.media.as_ref(),
         );
         let order = layers.order();
-        self.settle_definitions(&assembled.keyframes, &assembled.properties, &order);
+        self.settle_definitions(&assembled.keyframes, &assembled.properties, &assembled.font_faces, &order);
         let applying: Vec<DocRule> = if self.watched.is_empty() {
             assembled.rules
         } else {
@@ -267,17 +272,23 @@ impl StyleSheets {
         }
     }
 
-    /// Settles the `@keyframes` and `@property` rules of a load on one definition for each name.
+    /// Settles the `@keyframes`, `@property` and `@font-face` rules of a load on one definition for each name (for a face, each set of descriptors).
     fn settle_definitions(
         &mut self,
         keyframes: &[super::definitions::Defined<super::keyframes::KeyframesRule>],
         properties: &[super::definitions::Defined<crate::css::registered_properties::Registration>],
+        font_faces: &[super::definitions::Defined<super::font_face::FontFaceRule>],
         order: &super::layers::LayerOrder,
     ) {
         let environment = self.media.as_ref();
         let chosen = winners(keyframes, environment, order, |rule| &rule.name);
         if let Some(replaced) = SheetKeyframes::replaced_by(&self.keyframes, chosen) {
             self.keyframes = replaced;
+            self.document_changed = true;
+        }
+        let chosen = winners(font_faces, environment, order, |rule| &rule.identity);
+        if let Some(replaced) = SheetFontFaces::replaced_by(&self.font_faces, chosen) {
+            self.font_faces = replaced;
             self.document_changed = true;
         }
         let chosen = winners(properties, environment, order, |registration| &registration.name);

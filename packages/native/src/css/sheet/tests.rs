@@ -319,12 +319,13 @@ fn unknown_at_rules_are_skipped_whole_and_recorded() {
     let mut doc = Doc::new();
     let sheet = doc.parse(
         "@charset \"utf-8\"; @import url(a.css) layer(x); a { color: red } \
-         @keyframes k { from { top: 0 } to { top: 1px } } @font-face { font-family: x; } \
+         @keyframes k { from { top: 0 } to { top: 1px } } @font-face { font-family: x; src: url(x.ttf) } \
          @property --p { syntax: '<length>'; inherits: false; initial-value: 0px } \
          @namespace svg url(x); @container (min-width: 1px) { b { top: 2px } } e { top: 1px }",
     );
-    assert_eq!(sheet.unsupported, ["charset", "import", "font-face", "namespace", "container"]);
+    assert_eq!(sheet.unsupported, ["charset", "import", "namespace", "container"]);
     assert_eq!(sheet.keyframes.len(), 1);
+    assert_eq!(sheet.font_faces.len(), 1);
     assert_eq!(sheet.properties.len(), 1);
     let colors: Vec<_> = sheet.rules.iter().map(|rule| pairs(&rule.normal)[0].0).collect();
     assert_eq!(colors, ["color", "top"]);

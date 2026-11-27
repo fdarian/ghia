@@ -9,6 +9,7 @@ use super::atoms::Atoms;
 use super::conditions::Conditions;
 use super::declarations::{parse_declaration, push_declaration};
 use super::definitions::Defined;
+use super::font_face;
 use super::keyframes;
 use super::property_rules;
 use super::layers::{LayerId, Layers};
@@ -28,7 +29,7 @@ pub fn parse_sheet(text: &str, atoms: &mut Atoms, layers: &mut Layers, validator
         atoms,
         layers,
         validator,
-        sheet: StyleSheet { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), unsupported: Vec::new() },
+        sheet: StyleSheet { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), font_faces: Vec::new(), unsupported: Vec::new() },
         depth: 0,
         conditions: None,
     };
@@ -182,6 +183,10 @@ impl Parser<'_> {
             self.conditional(name, prelude, |parser| parser.rule_list(stop + 1, contents_end, layer));
             return after;
         }
+        if name == "font-face" {
+            self.font_face(prelude, contents_end, stop, terminator, layer);
+            return after;
+        }
         if matches!(name, "keyframes" | "-webkit-keyframes" | "property") {
             self.definition(name, prelude, stop, contents_end, terminator, layer);
             return after;
@@ -249,6 +254,19 @@ impl Parser<'_> {
                 let head = head();
                 self.sheet.unsupported.push(head);
             }
+        }
+    }
+
+    /// `@font-face`, whose block starts at `open`. One that makes no face is dropped, and recorded with its reason.
+    fn font_face(&mut self, prelude: &[Token], end: usize, open: usize, terminator: Terminator, layer: Option<LayerId>) {
+        if !matches!(terminator, Terminator::Block) || !prelude.is_empty() {
+            self.record_dropped_at_rule("font-face", prelude);
+            return;
+        }
+        let contents = &self.tokens[(open + 1).min(end)..end];
+        match font_face::parse(self.src, contents) {
+            Ok(rule) => self.sheet.font_faces.push(Defined { body: Arc::new(rule), layer, conditions: self.conditions.clone() }),
+            Err(reason) => self.sheet.unsupported.push(format!("@font-face: {reason}")),
         }
     }
 

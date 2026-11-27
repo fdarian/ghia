@@ -20,6 +20,7 @@ mod conditions;
 mod declarations;
 mod definitions;
 mod document;
+mod font_face;
 mod has;
 mod index;
 mod initial;
@@ -57,6 +58,7 @@ pub use cascade::{CascadeCache, MatchedRules};
 pub use document::{ClassAtoms, ElementCss, StyleSheets};
 pub use declarations::render_declarations;
 pub use definitions::Defined;
+pub use font_face::{FaceSource, FaceStyle, FontFaceRule, SheetFontFaces};
 pub use keyframes::{KeyframeBlock, KeyframesRule, SheetKeyframes};
 pub use has::{HasArguments, HasInvalidation, HasRead, RelativeSelector};
 pub use invalidation::{Invalidation, Reach};
@@ -83,7 +85,9 @@ pub struct StyleSheet {
     pub keyframes: Vec<Defined<KeyframesRule>>,
     /// The valid `@property` rules of the sheet, in source order.
     pub properties: Vec<Defined<Registration>>,
-    /// The name of each skipped at-rule (`font-face`, without the `@`), the head of each `@media`
+    /// The valid `@font-face` rules of the sheet, in source order.
+    pub font_faces: Vec<Defined<FontFaceRule>>,
+    /// The name of each skipped at-rule (`container`, without the `@`), the head of each `@media`
     /// and `@supports` that was malformed, the head and the reason of each `@property` that makes
     /// no registration, and the text of each selector list that was invalid, in source order.
     pub unsupported: Vec<String>,

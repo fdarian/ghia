@@ -176,3 +176,82 @@ fn for_a_name_the_last_registration_wins_with_layers_ranked_first() {
     assert_eq!(registered.initial_of("--b"), Some("3"));
     assert_eq!(registered.initial_of("--c"), Some("5"), "an invalid rule is no registration, so it does not replace one");
 }
+
+/// The family and first address of each face that stands.
+fn faces(doc: &Doc) -> Vec<(String, String)> {
+    doc.tree
+        .sheets
+        .font_faces
+        .rules()
+        .iter()
+        .map(|rule| {
+            let address = match &rule.sources[0] {
+                crate::css::sheet::FaceSource::Url { address, .. } => address.clone(),
+                crate::css::sheet::FaceSource::Local(name) => format!("local:{name}"),
+            };
+            (rule.family.clone(), address)
+        })
+        .collect()
+}
+
+#[test]
+fn faces_of_one_family_all_stand_and_the_last_of_equal_descriptors_wins() {
+    let mut doc = Doc::new();
+    doc.set_adopted(
+        "@font-face { font-family: A; src: url(regular.ttf) } \
+         @font-face { font-family: A; font-weight: bold; src: url(bold.ttf) } \
+         @font-face { font-family: a; src: url(again.ttf) }",
+    );
+    doc.flush();
+    assert_eq!(faces(&doc), named(&[("a", "again.ttf"), ("A", "bold.ttf")]));
+    assert_eq!(doc.tree.sheets.font_faces.epoch(), 1);
+}
+
+#[test]
+fn faces_under_a_media_query_or_supports_stand_only_while_it_holds() {
+    let mut doc = Doc::new();
+    doc.tree.set_media_environment(window(500.0));
+    doc.set_adopted(
+        "@font-face { font-family: A; src: url(a.ttf) } \
+         @media (min-width: 600px) { @font-face { font-family: Wide; src: url(w.ttf) } } \
+         @supports (display: grid) { @font-face { font-family: Grid; src: url(g.ttf) } } \
+         @supports (nonsense: 1) { @font-face { font-family: Nope; src: url(n.ttf) } }",
+    );
+    doc.flush();
+    assert_eq!(faces(&doc), named(&[("A", "a.ttf"), ("Grid", "g.ttf")]));
+    let epoch = doc.tree.sheets.font_faces.epoch();
+    doc.tree.take_dirty();
+
+    assert!(doc.tree.set_media_environment(window(700.0)), "a face's query is watched");
+    doc.flush();
+    assert_eq!(faces(&doc), named(&[("A", "a.ttf"), ("Grid", "g.ttf"), ("Wide", "w.ttf")]));
+    assert_ne!(doc.tree.sheets.font_faces.epoch(), epoch);
+    assert_ne!(doc.tree.take_dirty(), Dirty::Clean, "the text is laid out again");
+
+    assert!(doc.tree.set_media_environment(window(500.0)));
+    doc.flush();
+    assert_eq!(faces(&doc), named(&[("A", "a.ttf"), ("Grid", "g.ttf")]));
+}
+
+#[test]
+fn a_layered_face_does_not_hide_an_unlayered_one_of_other_descriptors_and_loses_to_it_for_the_same() {
+    let mut doc = Doc::new();
+    doc.set_adopted(
+        "@font-face { font-family: A; src: url(plain.ttf) } \
+         @layer base { @font-face { font-family: A; src: url(layered.ttf) } @font-face { font-family: A; font-style: italic; src: url(italic.ttf) } }",
+    );
+    doc.flush();
+    assert_eq!(faces(&doc), named(&[("A", "italic.ttf"), ("A", "plain.ttf")]));
+}
+
+#[test]
+fn a_load_that_leaves_the_faces_alone_keeps_their_epoch() {
+    let mut doc = Doc::new();
+    doc.style_element(ROOT, "@font-face { font-family: A; src: url(a.ttf) }");
+    let (_, text) = doc.style_element(ROOT, ".a { color: red }");
+    doc.flush();
+    let epoch = doc.tree.sheets.font_faces.epoch();
+    doc.tree.set_text(text, ".a { color: blue }".into());
+    doc.flush();
+    assert_eq!(doc.tree.sheets.font_faces.epoch(), epoch);
+}

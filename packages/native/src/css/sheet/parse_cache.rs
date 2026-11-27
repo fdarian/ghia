@@ -20,6 +20,7 @@ use crate::css::registered_properties::Registration;
 use super::atoms::Atoms;
 use super::conditions::{self, Conditions};
 use super::definitions::Defined;
+use super::font_face::FontFaceRule;
 use super::index::{DocRule, RuleBody};
 use super::keyframes::KeyframesRule;
 use super::layers::{LayerId, Layers};
@@ -47,6 +48,7 @@ pub(super) struct ParsedRule {
     /// Their layers are ids of `layers`, as the rules' are.
     keyframes: Vec<Defined<KeyframesRule>>,
     properties: Vec<Defined<Registration>>,
+    font_faces: Vec<Defined<FontFaceRule>>,
     unsupported: Vec<String>,
     /// The layers the rule declares, which `rules` are in.
     layers: Layers,
@@ -65,6 +67,7 @@ pub(super) struct Assembled {
     /// The `@keyframes` and `@property` rules, in the same order.
     pub(super) keyframes: Vec<Defined<KeyframesRule>>,
     pub(super) properties: Vec<Defined<Registration>>,
+    pub(super) font_faces: Vec<Defined<FontFaceRule>>,
     /// The name of each skipped at-rule and the text of each invalid selector list, in source order.
     pub(super) unsupported: Vec<String>,
     /// The top-level rules the rules came from, in order, to tell what a change touched. `None`
@@ -115,7 +118,7 @@ impl ParseCache {
         let load = self.loads;
         let mut used = 0;
         let mut cut = Vec::with_capacity(texts.len());
-        let mut assembled = Assembled { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), unsupported: Vec::new(), units: Some(Vec::new()) };
+        let mut assembled = Assembled { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), font_faces: Vec::new(), unsupported: Vec::new(), units: Some(Vec::new()) };
         let mut touch = |cached: &Cached| {
             if cached.used_in.swap(load, Ordering::Relaxed) != load {
                 used += 1;
@@ -146,6 +149,7 @@ impl ParseCache {
                 assembled.rules.extend(whole.rules);
                 assembled.keyframes.extend(whole.keyframes);
                 assembled.properties.extend(whole.properties);
+                assembled.font_faces.extend(whole.font_faces);
                 assembled.unsupported.extend(whole.unsupported);
                 assembled.units = None;
                 cut.push(None);
@@ -172,6 +176,11 @@ impl ParseCache {
                     layer: mapped_layer(rule.layer),
                     conditions: rule.conditions.clone(),
                 }));
+                assembled.font_faces.extend(parsed.font_faces.iter().map(|rule| Defined {
+                    body: rule.body.clone(),
+                    layer: mapped_layer(rule.layer),
+                    conditions: rule.conditions.clone(),
+                }));
                 assembled.unsupported.extend(parsed.unsupported.iter().cloned());
                 if let Some(units) = &mut assembled.units {
                     units.push(parsed.clone());
@@ -193,13 +202,14 @@ struct Whole {
     rules: Vec<DocRule>,
     keyframes: Vec<Defined<KeyframesRule>>,
     properties: Vec<Defined<Registration>>,
+    font_faces: Vec<Defined<FontFaceRule>>,
     unsupported: Vec<String>,
 }
 
 fn parse_whole(text: &str, atoms: &mut Atoms, layers: &mut Layers, validator: &mut Validator) -> Whole {
     let mut sheet = parse_sheet(text, atoms, layers, validator);
     validator.filter(&mut sheet.rules);
-    Whole { rules: doc_rules(sheet.rules), keyframes: sheet.keyframes, properties: sheet.properties, unsupported: sheet.unsupported }
+    Whole { rules: doc_rules(sheet.rules), keyframes: sheet.keyframes, properties: sheet.properties, font_faces: sheet.font_faces, unsupported: sheet.unsupported }
 }
 
 fn parse_rule(text: &str, atoms: &mut Atoms, validator: &mut Validator) -> ParsedRule {
@@ -210,7 +220,7 @@ fn parse_rule(text: &str, atoms: &mut Atoms, validator: &mut Validator) -> Parse
         .into_iter()
         .map(|rule| LocalRule { body: rule.body, layer: rule.layer.map(LocalLayer), conditions: rule.conditions })
         .collect();
-    ParsedRule { rules, keyframes: sheet.keyframes, properties: sheet.properties, unsupported: sheet.unsupported, layers }
+    ParsedRule { rules, keyframes: sheet.keyframes, properties: sheet.properties, font_faces: sheet.font_faces, unsupported: sheet.unsupported, layers }
 }
 
 /// `rules` in cascade order, without the selectors that name a pseudo-element and the rules that
@@ -565,18 +575,22 @@ mod tests {
         lines.extend(assembled.properties.iter().map(|rule| {
             format!("rank {} {:?}", order.rank(rule.layer), rule.body)
         }));
+        lines.extend(assembled.font_faces.iter().map(|rule| {
+            format!("rank {} {:?}", order.rank(rule.layer), rule.body)
+        }));
         lines.push(format!("unsupported {:?}", assembled.unsupported));
         lines
     }
 
     fn whole(texts: &[String], atoms: &mut Atoms) -> Vec<String> {
         let (mut layers, mut validator) = (Layers::default(), Validator::default());
-        let mut assembled = Assembled { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), unsupported: Vec::new(), units: None };
+        let mut assembled = Assembled { rules: Vec::new(), keyframes: Vec::new(), properties: Vec::new(), font_faces: Vec::new(), unsupported: Vec::new(), units: None };
         for text in texts {
             let whole = parse_whole(text, atoms, &mut layers, &mut validator);
             assembled.rules.extend(whole.rules);
             assembled.keyframes.extend(whole.keyframes);
             assembled.properties.extend(whole.properties);
+            assembled.font_faces.extend(whole.font_faces);
             assembled.unsupported.extend(whole.unsupported);
         }
         describe(&assembled, &layers)
