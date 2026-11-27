@@ -99,24 +99,41 @@ export function createNativeRenderer(
       enableAutomation(renderer).catch((error) => state.reportError(error))
     }
   }
+  // What a renderer drops once its window is gone: this tick ends the app, or the shared frame loop
+  // saw this renderer's window close while the others went on.
+  rendererReleasers.set(renderer, () => {
+    unregisterKeyframesHost(renderer)
+    closeWebAnimations(renderer)
+    forgetWindowSource(renderer)
+    detachRenderer(renderer)
+  })
+  tickPreparers.set(renderer, () => flushPendingMutations(renderer))
   renderer.tick = () => {
     // Writes an element made since the last flush (`element.style`) reach native before the frame this tick draws.
     flushPendingMutations(renderer)
     const running = tick()
-    if (!running) {
-      unregisterKeyframesHost(renderer)
-      closeWebAnimations(renderer)
-      forgetWindowSource(renderer)
-      detachRenderer(renderer)
-    }
+    if (!running) releaseRenderer(renderer)
     return running
   }
   return renderer
 }
 
+const rendererReleasers = new WeakMap<object, () => void>()
+const tickPreparers = new WeakMap<object, () => void>()
+
+function releaseRenderer(renderer: object): void {
+  rendererReleasers.get(renderer)?.()
+}
+
 export interface FrameLoopOptions {
+  /** Polls with a timer of this period instead of waking on the run loop. The first renderer of
+   *  the shared loop decides: the loop is one. */
   frameMs?: number
+  /** The app ended: the last window closed or the platform quit. Runs once, whichever renderer's
+   *  options it came from, however many renderers the loop served. */
   onTerminated?: () => void
+  /** This renderer's window closed while the app goes on for other windows. */
+  onWindowClosed?: () => void
   onError?: (error: unknown) => void
 }
 
@@ -129,100 +146,228 @@ type FrameLoopRenderer = Pick<GpuixRenderer, "requiresTick" | "tick"> &
       | "keyEventPending"
       | "startedLinksPending"
       | "stepStartedLinks"
+      | "isWindowClosed"
     >
   >
 
-/** The last window closed: the sync handler captures the renderer, so it has to be
- *  released for the renderer to be collectable. */
-function windowClosed(renderer: FrameLoopRenderer, options: FrameLoopOptions): void {
-  renderer.setSyncEventHandler?.(null)
-  flushStorage()
-  options.onTerminated?.()
+interface FrameLoopMember {
+  renderer: FrameLoopRenderer
+  options: FrameLoopOptions
 }
 
-export function startFrameLoop(
-  renderer: FrameLoopRenderer,
-  options: FrameLoopOptions = {}
-): FrameLoop {
-  if (!renderer.requiresTick()) return { stop() {} }
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let scheduledFrame: ReturnType<typeof setImmediate> | undefined
-  let scheduledInputFrame: ReturnType<typeof setImmediate> | undefined
-  let stopped = false
-  const stop = () => {
-    if (stopped) return
-    stopped = true
-    if (frameWake) renderer.setFrameWakeCallback?.(null)
-    if (timer !== undefined) clearTimeout(timer)
-    timer = undefined
-    if (scheduledFrame !== undefined) clearImmediate(scheduledFrame)
-    scheduledFrame = undefined
-    if (scheduledInputFrame !== undefined) clearImmediate(scheduledInputFrame)
-    scheduledInputFrame = undefined
+/** The windows of one App share one platform to pump, so they share one loop: it ticks the
+ *  platform once per iteration, and services every renderer that registered (`startFrameLoop`). */
+class SharedFrameLoop {
+  private readonly members = new Set<FrameLoopMember>()
+  /** The `onTerminated` of every renderer that was served, a renderer whose window closed earlier
+   *  included: the app ending is news to the app, not to one window. */
+  private readonly terminated = new Set<() => void>()
+  private timer: ReturnType<typeof setTimeout> | undefined
+  private scheduledFrame: ReturnType<typeof setImmediate> | undefined
+  private scheduledInputFrame: ReturnType<typeof setImmediate> | undefined
+  private stopped = false
+  /** The renderer the run-loop wake is installed on: the hook is the platform's, so one is
+   *  enough, and it moves when its renderer leaves. */
+  private wakeOwner: FrameLoopMember | undefined
+  private readonly frameMs: number | undefined
+  private frameWake = false
+
+  constructor(first: FrameLoopMember) {
+    this.frameMs = first.options.frameMs
+    this.members.add(first)
+    if (first.options.onTerminated) this.terminated.add(first.options.onTerminated)
+    this.frameWake = this.installWake(first)
+    this.loop()
   }
+
+  get isStopped(): boolean {
+    return this.stopped
+  }
+
+  add(member: FrameLoopMember): void {
+    this.members.add(member)
+    if (member.options.onTerminated) this.terminated.add(member.options.onTerminated)
+    // A new window has not been ticked yet, and nothing wakes an idle platform for it.
+    this.scheduleLoop()
+  }
+
+  remove(member: FrameLoopMember): void {
+    if (!this.members.delete(member)) return
+    this.moveWake(member)
+    if (this.members.size === 0) this.shutDown()
+  }
+
+  private installWake(member: FrameLoopMember): boolean {
+    if (this.frameMs !== undefined) return false
+    const installed = member.renderer.setFrameWakeCallback?.(this.wake) === true
+    if (installed) this.wakeOwner = member
+    return installed
+  }
+
+  /** `leaving` stops being the renderer the wake hangs on, if it was. */
+  private moveWake(leaving: FrameLoopMember): void {
+    if (this.wakeOwner !== leaving) return
+    this.wakeOwner = undefined
+    leaving.renderer.setFrameWakeCallback?.(null)
+    const next = this.leader()
+    if (next && this.frameWake && !this.stopped) this.frameWake = this.installWake(next)
+  }
+
+  private leader(): FrameLoopMember | undefined {
+    for (const member of this.members) return member
+    return undefined
+  }
+
+  private shutDown(): void {
+    this.stopped = true
+    if (this.timer !== undefined) clearTimeout(this.timer)
+    this.timer = undefined
+    if (this.scheduledFrame !== undefined) clearImmediate(this.scheduledFrame)
+    this.scheduledFrame = undefined
+    if (this.scheduledInputFrame !== undefined) clearImmediate(this.scheduledInputFrame)
+    this.scheduledInputFrame = undefined
+  }
+
+  // The frame runs as its own task, not inside the wake callback: Bun and Node run I/O
+  // and timers after the immediates phase, before the next wake's frame, while a threadsafe
+  // function callback that ticks inline keeps Bun inside its dispatch loop.
+  private readonly wake = (): void => {
+    this.scheduleLoop()
+  }
+
+  private scheduleLoop(): void {
+    if (this.stopped || this.scheduledFrame !== undefined) return
+    this.scheduledFrame = setImmediate(() => {
+      this.scheduledFrame = undefined
+      this.loop()
+    })
+  }
+
   // The frame of an input draws from a task of its own, after the microtasks the tick's handlers
   // queued (an editor that commits its update in one, Lexical), as a browser paints after the input
   // task and its microtasks. Never from inside tick(), which pumps and draws no frame of its own.
   // Whether a link is owed is asked inside the immediate, not after the tick: a link only one of
   // those microtasks starts (a commit after a prevented edit) does not exist yet when tick() returns.
-  const scheduleInputFrame = () => {
-    if (!renderer.startedLinksPending || !renderer.stepStartedLinks) return
-    if (scheduledInputFrame !== undefined) return
-    scheduledInputFrame = setImmediate(() => {
-      scheduledInputFrame = undefined
-      if (stopped) return
+  // The display links belong to the platform, not to a window, so the leader asks for them.
+  private scheduleInputFrame(): void {
+    const leader = this.leader()
+    if (!leader?.renderer.startedLinksPending || !leader.renderer.stepStartedLinks) return
+    if (this.scheduledInputFrame !== undefined) return
+    this.scheduledInputFrame = setImmediate(() => {
+      this.scheduledInputFrame = undefined
+      if (this.stopped) return
+      const current = this.leader()
+      if (!current) return
       try {
-        if (renderer.startedLinksPending?.()) renderer.stepStartedLinks?.()
+        if (current.renderer.startedLinksPending?.()) current.renderer.stepStartedLinks?.()
       } catch (error) {
-        options.onError?.(error)
+        current.options.onError?.(error)
       }
     })
   }
-  const loop = () => {
-    if (stopped) return
-    if (timer !== undefined) clearTimeout(timer)
-    timer = undefined
+
+  private loop(): void {
+    if (this.stopped) return
+    if (this.timer !== undefined) clearTimeout(this.timer)
+    this.timer = undefined
     const started = performance.now()
+    const leader = this.leader()
+    if (!leader) return
+    // Writes made since the last flush reach native before the frame this tick draws: the leader's
+    // own tick does that for its renderer.
+    for (const member of this.members) {
+      if (member !== leader) tickPreparers.get(member.renderer)?.()
+    }
     let running = true
     try {
-      running = renderer.tick()
+      running = leader.renderer.tick()
     } catch (error) {
-      options.onError?.(error)
+      leader.options.onError?.(error)
     }
     if (running === false) {
-      stop()
-      windowClosed(renderer, options)
+      this.terminate()
       return
     }
-    if (stopped) return
-    scheduleInputFrame()
+    this.releaseClosedWindows()
+    if (this.stopped) return
+    this.scheduleInputFrame()
     // On the wake path nothing re-arms a timer: an idle app is not ticked until the run loop has work.
-    if (frameWake) return
+    if (this.frameWake) return
     // A tick that left a key queued runs one key per tick, so the next key waits for no timer.
-    if (renderer.keyEventPending?.()) {
-      scheduledFrame = setImmediate(() => {
-        scheduledFrame = undefined
-        loop()
+    if (this.leader()?.renderer.keyEventPending?.()) {
+      this.scheduledFrame = setImmediate(() => {
+        this.scheduledFrame = undefined
+        this.loop()
       })
       return
     }
-    const delay = Math.max(0, (options.frameMs ?? DEFAULT_FRAME_MS) - (performance.now() - started))
-    timer = setTimeout(loop, delay)
+    const delay = Math.max(0, (this.frameMs ?? DEFAULT_FRAME_MS) - (performance.now() - started))
+    this.timer = setTimeout(() => this.loop(), delay)
   }
-  // The frame runs as its own task, not inside the wake callback: Bun and Node run I/O
-  // and timers after the immediates phase, before the next wake's frame, while a threadsafe
-  // function callback that ticks inline keeps Bun inside its dispatch loop.
-  const wake = () => {
-    if (stopped || scheduledFrame !== undefined) return
-    scheduledFrame = setImmediate(() => {
-      scheduledFrame = undefined
-      loop()
-    })
+
+  /** The app goes on while another window is open, so a renderer whose window closed leaves the
+   *  loop; the platform's own quit is the last window's, and `tick()` reports that. */
+  private releaseClosedWindows(): void {
+    if (this.members.size < 2) return
+    for (const member of [...this.members]) {
+      if (!member.renderer.isWindowClosed?.()) continue
+      this.members.delete(member)
+      this.moveWake(member)
+      member.renderer.setSyncEventHandler?.(null)
+      releaseRenderer(member.renderer)
+      try {
+        member.options.onWindowClosed?.()
+      } catch (error) {
+        member.options.onError?.(error)
+      }
+    }
   }
-  const frameWake = options.frameMs === undefined &&
-    renderer.setFrameWakeCallback?.(wake) === true
-  loop()
-  return { stop }
+
+  /** `tick()` said the platform quit: the last window closed, or the Dock, ⌘Q or a logout asked. */
+  private terminate(): void {
+    const members = [...this.members]
+    this.members.clear()
+    if (this.wakeOwner) {
+      this.wakeOwner.renderer.setFrameWakeCallback?.(null)
+      this.wakeOwner = undefined
+    }
+    this.shutDown()
+    // The sync handler captures the renderer, so it has to be released for the renderer to be collectable.
+    for (const member of members) {
+      member.renderer.setSyncEventHandler?.(null)
+      releaseRenderer(member.renderer)
+    }
+    flushStorage()
+    for (const onTerminated of this.terminated) onTerminated()
+  }
+}
+
+let sharedLoop: SharedFrameLoop | undefined
+
+/** Registers `renderer` with the app's one frame loop, which it starts when it is the first. A
+ *  second window's renderer joins the loop that is running: the platform is pumped once per
+ *  iteration, and a window that closes leaves it (`onWindowClosed`) while the rest go on. The
+ *  loop ends, and `onTerminated` runs once, when the platform quits. */
+export function startFrameLoop(
+  renderer: FrameLoopRenderer,
+  options: FrameLoopOptions = {}
+): FrameLoop {
+  if (!renderer.requiresTick()) return { stop() {} }
+  const member: FrameLoopMember = { renderer, options }
+  let loop = sharedLoop
+  if (!loop || loop.isStopped) {
+    loop = new SharedFrameLoop(member)
+    sharedLoop = loop
+  } else {
+    loop.add(member)
+  }
+  const joined = loop
+  return {
+    stop() {
+      joined.remove(member)
+      if (joined.isStopped && sharedLoop === joined) sharedLoop = undefined
+    },
+  }
 }
 
 // The client pulls in zod and eventsource-parser, so an app that never turns

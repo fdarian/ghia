@@ -2312,13 +2312,12 @@ impl GpuixRenderer {
                 return Err(Error::from_reason("Renderer is already initialized"));
             }
         }
-        let has_app = GPUI_APP.with(|app| app.borrow().is_some());
-        if !has_app && MAC_PLATFORM.with(|platform| platform.borrow().is_some()) {
-            return Err(Error::from_reason(
-                "The GPUI application of this thread has ended, so it cannot open a window",
-            ));
-        }
-        if has_app && crate::window_set::app_has_ended() {
+        // `MAC_PLATFORM`, not `GPUI_APP`, says whether an App exists: thread-locals are destroyed
+        // in the order they were first used, and the App (in `GPUI_APP`) has to go before the
+        // profiler journal's thread-local that its windows write to when they drop, so `GPUI_APP`
+        // must not be touched before the first window is open.
+        let has_app = MAC_PLATFORM.with(|platform| platform.borrow().is_some());
+        if has_app && (crate::window_set::app_has_ended() || GPUI_APP.with(|app| app.borrow().is_none())) {
             return Err(Error::from_reason(
                 "The GPUI application of this thread has ended, so it cannot open a window",
             ));

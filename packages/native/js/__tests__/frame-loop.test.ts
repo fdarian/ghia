@@ -351,3 +351,127 @@ describe("startFrameLoop without display-link wakes", () => {
     expect(errors).toHaveLength(1)
   })
 })
+
+// The windows of one App share one platform to pump, so the renderers of several windows share one loop.
+describe("startFrameLoop with several windows on one App", () => {
+  const window = (tick: () => boolean = () => true) => {
+    const state = { closed: false, handlerCleared: false }
+    // Not a spread: the fake keeps its wake on itself.
+    const renderer = Object.assign(wakeableRenderer(tick), {
+      isWindowClosed: () => state.closed,
+      setSyncEventHandler: (handler: unknown) => {
+        if (handler === null) state.handlerCleared = true
+      },
+    })
+    return { renderer, state }
+  }
+
+  it("pumps the platform once per iteration, through the first renderer", async () => {
+    const ticks = { first: 0, second: 0 }
+    const first = window(() => (ticks.first += 1) > 0)
+    const second = window(() => (ticks.second += 1) > 0)
+    const firstLoop = startFrameLoop(first.renderer)
+    const secondLoop = startFrameLoop(second.renderer)
+    await nextImmediate()
+    first.renderer.wake?.()
+    await nextImmediate()
+    secondLoop.stop()
+    firstLoop.stop()
+    expect(ticks.second).toBe(0)
+    expect(ticks.first).toBeGreaterThanOrEqual(3)
+  })
+
+  it("keeps the first renderer's wake: a second renderer does not take the hook over", async () => {
+    const first = window()
+    const second = window()
+    const firstLoop = startFrameLoop(first.renderer)
+    const secondLoop = startFrameLoop(second.renderer)
+    expect(first.renderer.wake).not.toBeNull()
+    expect(second.renderer.wake).toBeNull()
+    secondLoop.stop()
+    firstLoop.stop()
+    expect(first.renderer.wake).toBeNull()
+  })
+
+  it("ticks a window that joins an idle loop, without a wake", async () => {
+    let ticks = 0
+    const first = window(() => (ticks += 1) > 0)
+    const firstLoop = startFrameLoop(first.renderer)
+    expect(ticks).toBe(1)
+    const secondLoop = startFrameLoop(window().renderer)
+    await nextImmediate()
+    secondLoop.stop()
+    firstLoop.stop()
+    expect(ticks).toBe(2)
+  })
+
+  it("lets a window whose window closed leave while the others go on, and tells it", async () => {
+    let ticks = 0
+    const first = window(() => (ticks += 1) > 0)
+    const second = window()
+    const closed: string[] = []
+    const firstLoop = startFrameLoop(first.renderer, { onWindowClosed: () => closed.push("first") })
+    const secondLoop = startFrameLoop(second.renderer, { onWindowClosed: () => closed.push("second") })
+    first.state.closed = true
+    first.renderer.wake?.()
+    await nextImmediate()
+    // The closed one is gone: its wake moved to the renderer that is left, which is pumped from now on.
+    expect(closed).toEqual(["first"])
+    expect(first.state.handlerCleared).toBe(true)
+    expect(first.renderer.wake).toBeNull()
+    expect(second.renderer.wake).not.toBeNull()
+    const ticksBefore = ticks
+    second.renderer.wake?.()
+    await nextImmediate()
+    expect(ticks).toBe(ticksBefore)
+    firstLoop.stop()
+    secondLoop.stop()
+  })
+
+  it("ends once for the whole app, running onTerminated once, and releases every window", () => {
+    let terminated = 0
+    const onTerminated = () => (terminated += 1)
+    const first = window(() => false)
+    const second = window()
+    startFrameLoop(first.renderer, { onTerminated })
+    expect(terminated).toBe(1)
+    expect(first.state.handlerCleared).toBe(true)
+    expect(first.renderer.wake).toBeNull()
+    // A renderer after the end starts a loop of its own: the one that ended is not joined.
+    let ticks = 0
+    const next = startFrameLoop(second.renderer, { onTerminated })
+    startFrameLoop(window(() => (ticks += 1) > 0).renderer).stop()
+    next.stop()
+    expect(terminated).toBe(1)
+    expect(ticks).toBe(0)
+  })
+
+  it("runs the onTerminated of each window once when the app ends with all of them in the loop", async () => {
+    const ended = { first: 0, second: 0 }
+    let running = true
+    const first = window(() => running)
+    const second = window()
+    startFrameLoop(first.renderer, { onTerminated: () => (ended.first += 1) })
+    startFrameLoop(second.renderer, { onTerminated: () => (ended.second += 1) })
+    running = false
+    first.renderer.wake?.()
+    await nextImmediate()
+    expect(ended).toEqual({ first: 1, second: 1 })
+    expect(first.state.handlerCleared && second.state.handlerCleared).toBe(true)
+  })
+
+  it("stopping one window's handle leaves the loop to the others", async () => {
+    let ticks = 0
+    const first = window(() => (ticks += 1) > 0)
+    const second = window()
+    const firstLoop = startFrameLoop(first.renderer)
+    const secondLoop = startFrameLoop(second.renderer)
+    firstLoop.stop()
+    expect(first.renderer.wake).toBeNull()
+    expect(second.renderer.wake).not.toBeNull()
+    second.renderer.wake?.()
+    await nextImmediate()
+    secondLoop.stop()
+    expect(second.renderer.wake).toBeNull()
+  })
+})

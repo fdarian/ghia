@@ -53,6 +53,18 @@ export declare class GpuixRenderer {
   tick(): boolean
   isInitialized(): boolean
   /**
+   * Whether the window this renderer opened is gone: the user closed it, `closeWindow()` did, or
+   * the app quit. The App goes on for the windows that are left, and `tick()` keeps pumping it
+   * and answering `true` until the last one closes. False before `init`.
+   */
+  isWindowClosed(): boolean
+  /**
+   * Closes this renderer's window and no other. The App ends when the last window closes (the
+   * quit `tick()` reports), as when the user closes it. Closing a window that is already gone
+   * does nothing.
+   */
+  closeWindow(): void
+  /**
    * Whether a display link started since it last drew still waits for its first step, so the
    * frame loop has to call `stepStartedLinks` after the task and microtasks of the tick that
    * started it. macOS only; everything else answers false.
