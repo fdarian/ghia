@@ -247,4 +247,77 @@ describe.skipIf(!hasNativeTestRenderer)("the boxes of ::before and ::after", () 
     expect(renderer.getRetainedElementCount()).toBe(3)
     done(renderer)
   })
+  it("a scroll of a box with overflow: auto is a scroll of its element", () => {
+    const events: { eventType: string; elementId: number }[] = []
+    const renderer = new TestRenderer({
+      width: 400,
+      height: 400,
+      dispatchEvent: (event: { eventType: string; elementId: number }) => events.push(event),
+      dispatchSyncEvent: (event: { eventType: string; elementId: number }) => {
+        events.push(event)
+        return { defaultPrevented: false, propagationStopped: false }
+      },
+    })
+    renderer.clockPause()
+    renderer.applyBatch(
+      encodeWireBatchForTest([
+        ["createElement", 1, "div"],
+        ["setRoot", 1],
+        ["setStyle", 1, { display: "flex", flexDirection: "column", alignItems: "flex-start", fontSize: 14 }],
+        [
+          "setStyleSheet",
+          900,
+          `.a::before { content: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen"; display: block; width: 80px; height: 30px; overflow: auto }`,
+        ],
+        ["setAdoptedStyleSheets", [900]],
+        ...element(10, 1, "div", "a"),
+        ["setEventListener", 10, "scroll", true],
+      ])
+    )
+    renderer.flush()
+    const box = renderer.getElementBounds(10)
+    if (!box) throw new Error("10 has no box")
+    renderer.nativeSimulateScrollWheel(box.x + 10, box.y + 10, 0, 20)
+    renderer.flush()
+    const scrolls = events.filter((event) => event.eventType === "scroll")
+    expect(scrolls.length).toBeGreaterThan(0)
+    expect(scrolls.every((event) => event.elementId === 10)).toBe(true)
+    renderer.dispose()
+  })
+  it("keeps the caret of an editing host out of a placeholder box, and does not crash beside it", () => {
+    // Tiptap's placeholder: `p.is-empty::before { content: attr(data-placeholder); float: left; height: 0 }`.
+    const sheet = `.is-empty::before { content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: gray } p { margin: 0; height: 24px }`
+    const renderer = mount(sheet, [
+      ...element(10, 1, "div", "editor", [["setCustomProp", 10, "contentEditable", true], ["setStyle", 10, { width: 300, fontSize: 18 }]]),
+      ...element(11, 10, "p", "is-empty", [["setAttribute", 11, "data-placeholder", "Type something"]]),
+      ["createElement", 12, "br"],
+      ["appendChild", 11, 12],
+      ...element(13, 10, "p", "is-empty", [["setAttribute", 13, "data-placeholder", "Before the text"]]),
+      ...text(14, 13, "Hello"),
+    ])
+    renderer.focusElement(10)
+    renderer.flush()
+    const generated = (id: number) => id >= 2 ** 53
+    const box = bounds(renderer, 13)
+    let found = 0
+    for (const dx of [0, 5, 30, 60, 100, 160, 250]) {
+      const point = renderer.caretPositionFromPoint(box.x + dx, box.y + 6)
+      if (point) {
+        found++
+        expect(generated(point.nodeId), `a caret at ${dx} is in a node of the document`).toBe(false)
+        expect(generated(point.containerId)).toBe(false)
+      }
+    }
+    expect(found, "the text of the paragraph is hit").toBeGreaterThan(0)
+    for (const op of ["lineUp", "lineDown", "lineStart", "lineEnd"]) {
+      const moved = renderer.moveCaretVisually(14, 0, op)
+      if (moved) expect(generated(moved.nodeId), op).toBe(false)
+    }
+    const empty = bounds(renderer, 11)
+    renderer.nativeSimulateClick(empty.x + 20, empty.y + 6)
+    renderer.nativeSimulateClick(box.x + 20, box.y + 6)
+    renderer.flush()
+    expect(renderer.getPaintedNodeSelection()).toBeDefined()
+    done(renderer)
+  })
 })
