@@ -1,5 +1,5 @@
 /**
- * The `<html>`, `<head>` and `<body>` `document` answers with while no root is mounted. A browser's
+ * The `<html>`, `<head>` and `<body>` a document answers with while no root of its window is mounted. A browser's
  * document always has them, and a library that keeps an element past the unmount reaches them
  * (floating-ui's `getOffsetParent` compares `getDocumentElement(el)` with `el.offsetParent`, and a
  * `null` there is read as a match).
@@ -19,12 +19,13 @@ import { ElementListeners } from "../events/element-listeners.js"
 import { defineScrollMembers } from "../scroll.js"
 import type { StyleDesc } from "../host.js"
 import { recordAttributeChanges } from "./mutation-observer.js"
-import { DOM_BINDING, HTMLElement, ROOT_ELEMENT_TYPES, type ElementBinding, type Node } from "./nodes.js"
+import { adoptSubtree, DOM_BINDING, HTMLElement, ROOT_ELEMENT_TYPES, type Document, type ElementBinding, type Node } from "./nodes.js"
 import type { DocumentElements } from "../events/window-target.js"
 
 type StandIns = { html: StandInElement; head: StandInElement; body: StandInElement }
 
-let created: StandIns | undefined
+/** By document: every window's document has its own, read while no root of it is mounted. */
+const created = new WeakMap<Node, StandIns>()
 
 /** The detached renderer every stand-in element measures and focuses through. */
 let gone: ReturnType<typeof createDetachedRenderer> | undefined
@@ -140,21 +141,26 @@ export function defineDetachedElementMembers<This extends object>(target: object
   }
 }
 
+let membersDefined = false
+
 /** Members are defined on first use: this module is loaded by the document's own, which `dom-members` loads too. */
 function create(document: Node): StandIns {
-  defineDetachedElementMembers(StandInElement.prototype, (element: StandInElement) => ({
-    listeners: element.listeners,
-    get connected() {
-      return !element.replaced
-    },
-    layout: undefined,
-    prop: (name) => element.props.get(name),
-    propNames: () => element.props.keys(),
-    setProp: (name, value) => element[DOM_BINDING]().setProp(name, value as string),
-    get style() {
-      return element.liveStyle
-    },
-  }))
+  if (!membersDefined) {
+    membersDefined = true
+    defineDetachedElementMembers(StandInElement.prototype, (element: StandInElement) => ({
+      listeners: element.listeners,
+      get connected() {
+        return !element.replaced
+      },
+      layout: undefined,
+      prop: (name) => element.props.get(name),
+      propNames: () => element.props.keys(),
+      setProp: (name, value) => element[DOM_BINDING]().setProp(name, value as string),
+      get style() {
+        return element.liveStyle
+      },
+    }))
+  }
   const html = new StandInElement(ROOT_ELEMENT_TYPES.html)
   const head = new StandInElement(ROOT_ELEMENT_TYPES.head)
   const body = new StandInElement(ROOT_ELEMENT_TYPES.body)
@@ -163,13 +169,17 @@ function create(document: Node): StandIns {
     child.parent = html
     html.kids.push(child)
   }
+  for (const element of [html, head, body]) adoptSubtree(element, document as Document)
   return { html, head, body }
 }
 
-/** The one stand-in `<html>` with its `<head>` and `<body>`, made when first read; `document` is where `html`'s `parentNode` points. */
+/** The stand-in `<html>` with its `<head>` and `<body>` of `document`, made when first read; `document` is where `html`'s `parentNode` points. */
 export function standInDocumentElements(document: Node): DocumentElements {
-  created ??= create(document)
-  return created
+  const known = created.get(document)
+  if (known !== undefined) return known
+  const made = create(document)
+  created.set(document, made)
+  return made
 }
 
 /**
@@ -177,10 +187,10 @@ export function standInDocumentElements(document: Node): DocumentElements {
  * elements of that root (so a stylesheet and a `MutationObserver` see it), and the stand-ins are
  * then nodes in no document. A stand-in nobody read has nothing to give.
  */
-export function replaceStandInDocumentElements(mounted: DocumentElements): void {
-  const standIns = created
+export function replaceStandInDocumentElements(document: Node, mounted: DocumentElements): void {
+  const standIns = created.get(document)
   if (standIns === undefined) return
-  created = undefined
+  created.delete(document)
   for (const part of ["html", "head", "body"] as const) {
     const from = standIns[part]
     const to = mounted[part] as DomElement

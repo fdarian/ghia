@@ -8,7 +8,7 @@ import {
   crossRootError,
   cssNamedStyle,
   defineDomMembers,
-  document,
+  documentOf,
   DocumentFragment,
   DOM_BINDING,
   HTMLElement,
@@ -639,11 +639,11 @@ export class HostFragment extends DocumentFragment {
   }
 }
 
-/** `<html>` is in the document, which is the top of every mounted tree. */
+/** `<html>` is in the document of its window, which is the top of that window's tree. */
 function parentNodeOf(node: HostNode): HostElement | HostFragment | Document | null {
   const parent = node.parent
   if (parent === null) return null
-  return parent.kind === "root" ? document : parent
+  return parent.kind === "root" ? documentOf(parent.nativeRenderer) : parent
 }
 
 class ElementDomBinding implements ElementBinding {

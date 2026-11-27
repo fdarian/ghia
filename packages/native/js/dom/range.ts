@@ -15,6 +15,7 @@ import {
   CharacterData,
   DOM_BINDING,
   Node,
+  ownerDocumentOf,
   runtimeDocument,
   type DocumentFragment,
   type ParentBinding,
@@ -107,18 +108,18 @@ function appendContainedText(node: Node, into: string[]): void {
   for (const child of node[DOM_BINDING]().children) appendContainedText(child, into)
 }
 
-/** An empty fragment of the window `node` belongs to; the document's, which has no window of its own, for a node that is not in one. */
+/** An empty fragment of the window `node` belongs to; the document's that made it, which has no window of its own, for a node that is not in one. */
 export function createFragmentFor(node: Node): DocumentFragment {
   const binding = node[DOM_BINDING]() as Partial<ParentBinding & TextBinding>
   if (binding.createFragment !== undefined) return binding.createFragment()
-  return (runtimeDocument() as unknown as { createDocumentFragment(): DocumentFragment }).createDocumentFragment()
+  return (ownerDocumentOf(node) as unknown as { createDocumentFragment(): DocumentFragment }).createDocumentFragment()
 }
 
 /** A Text node of the window `node` belongs to, holding `data`, in no tree yet. */
 export function createTextFor(node: Node, data: string): Text {
   const binding = node[DOM_BINDING]() as Partial<ParentBinding & TextBinding>
   if (binding.createText !== undefined) return binding.createText(data)
-  return (runtimeDocument() as unknown as { createTextNode(data: string): Text }).createTextNode(data)
+  return (ownerDocumentOf(node) as unknown as { createTextNode(data: string): Text }).createTextNode(data)
 }
 
 /** The children of the common ancestor that hold one end of the range but not the other. */

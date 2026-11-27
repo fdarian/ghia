@@ -12,7 +12,6 @@ import { flushPendingMutations } from "../bounds.js"
 import { DOMRect } from "../dom/dom-rect.js"
 import { DOM_BINDING, type Element, type ElementBinding, type Node, type Text, type TextBinding } from "../dom/nodes.js"
 import type { NativeRenderer } from "../host.js"
-import { mountedRenderer } from "../mounted-renderer.js"
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
@@ -157,12 +156,8 @@ function targetOf(renderer: NativeRenderer, caret: NativeCaret): CaretTarget {
   return { node, offset: caret.offset, x: caret.x }
 }
 
-/** The position at the window point, in the text under it or the nearest, or `null` when no text painted. */
-export function caretFromPoint(x: number, y: number): CaretTarget | null {
-  const renderer = mountedRenderer()
-  if (renderer === undefined) {
-    throw new Error("caretPositionFromPoint needs a mounted GPUIX root. Call it after render().")
-  }
+/** The position at the point of `renderer`'s window, in the text under it or the nearest, or `null` when no text painted. */
+export function caretFromPoint(renderer: NativeRenderer, x: number, y: number): CaretTarget | null {
   const read = requireMethod(renderer, "caretPositionFromPoint", "document.caretPositionFromPoint")
   flushPendingMutations(renderer)
   const caret = read(x, y)

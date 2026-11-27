@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as classes from "../events/classes.js"
-import { document, window as ghiaWindow } from "../events/window-target.js"
+import { document, window as ghiaWindow, windowOf } from "../events/window-target.js"
 import "../dom-globals.js"
 import { getComputedStyle } from "../computed-style.js"
 import { matchMedia } from "../match-media.js"
@@ -144,17 +144,23 @@ describe("window size members", () => {
     expect(() => window.visualViewport!.width).toThrow(/mounted/)
   })
 
-  it("reads innerWidth and innerHeight live from the window that mounted last", () => {
+  it("reads innerWidth and innerHeight live from the global window, the first that mounted, and each window from its own", () => {
     const first = mountWindow()
     const second = mountWindow()
     second.width = 300
     second.height = 200
-    expect(window.innerWidth).toBe(300)
-    expect(window.innerHeight).toBe(200)
-    second.width = 450
-    expect(window.innerWidth).toBe(450)
-    mounted.pop()!.detach()
     expect(window.innerWidth).toBe(first.width)
+    expect(window.innerHeight).toBe(first.height)
+    expect(windowOf(second as unknown as NativeRenderer).innerWidth).toBe(300)
+    expect(windowOf(second as unknown as NativeRenderer).innerHeight).toBe(200)
+    first.width = 450
+    second.width = 350
+    expect(window.innerWidth).toBe(450)
+    expect(windowOf(second as unknown as NativeRenderer).innerWidth).toBe(350)
+    // The second window going away leaves the global one.
+    mounted.pop()!.detach()
+    expect(window.innerWidth).toBe(450)
+    expect(() => windowOf(second as unknown as NativeRenderer).innerWidth).toThrow(/mounted/)
   })
 
   it("has a visualViewport the size of the window, with no offset, scroll or zoom", () => {

@@ -13,8 +13,7 @@ import {
   type ElementBinding,
   type TextBinding,
 } from "../dom/nodes.js"
-import { document, GpuixDocument, installElementSource } from "../events/window-target.js"
-import { mountedRenderers } from "../mounted-renderer.js"
+import { document, documentOf, GpuixDocument, installElementSource } from "../events/window-target.js"
 import type { NativeRenderer } from "../host.js"
 import { defineDomMembers } from "../dom-members.js"
 import "../dom-globals.js"
@@ -382,44 +381,49 @@ describe("document", () => {
     expect(document.documentElement.parentNode).toBe(document)
   })
 
-  /** A window whose root is `html` > `head` + `body`, the most recently mounted. */
+  /** A window whose root is `html` > `head` + `body`. */
   function mountWindow() {
     const renderer = {} as NativeRenderer
     const html = new FakeHtml("html")
     const head = new FakeHtml("head")
     const body = new FakeHtml("body")
-    html.parent = document
+    const remove = installElementSource(renderer, () => undefined, () => ({ html, head, body }))
+    html.parent = documentOf(renderer)
     place(html, head)
     place(html, body)
-    const remove = installElementSource(renderer, () => undefined, () => ({ html, head, body }))
-    mountedRenderers().push(renderer)
     return {
+      renderer,
       html,
       head,
       body,
       unmount() {
-        mountedRenderers().splice(mountedRenderers().indexOf(renderer), 1)
         remove()
       },
     }
   }
 
-  it("has the html and body of the window that mounted last", () => {
+  it("has the html and body of the window that mounted first, and another window its own document", () => {
     const first = mountWindow()
     const second = mountWindow()
-    expect(document.documentElement).toBe(second.html)
-    expect(document.head).toBe(second.head)
-    expect(document.body).toBe(second.body)
-    expect(document.scrollingElement).toBe(second.html)
-    expect(document.childNodes).toEqual([first.html, second.html])
-    expect(second.html.parentNode).toBe(document)
+    expect(document.documentElement).toBe(first.html)
+    expect(document.head).toBe(first.head)
+    expect(document.body).toBe(first.body)
+    expect(document.scrollingElement).toBe(first.html)
+    expect(document.childNodes).toEqual([first.html])
+    expect(first.html.parentNode).toBe(document)
+    const other = documentOf(second.renderer)
+    expect(other).not.toBe(document)
+    expect(other.documentElement).toBe(second.html)
+    expect(other.body).toBe(second.body)
+    expect(other.childNodes).toEqual([second.html])
     second.unmount()
+    // The window that went away has fresh empty roots; the global document is still the first window's.
+    expect(other.documentElement).not.toBe(second.html)
     expect(document.documentElement).toBe(first.html)
     first.unmount()
     expect(document.documentElement).not.toBe(first.html)
     expect(document.documentElement.parentNode).toBe(document)
   })
-
   it("contains a mounted node, and compares against it", () => {
     const window = mountWindow()
     const mounted = new FakeHtml("div")

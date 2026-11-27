@@ -10,7 +10,8 @@ import { toAppearance } from "./host-runtime.js"
 import type { NativeRenderer } from "./host.js"
 import { parseMediaQueryList } from "./media-query.js"
 import type { MediaEnvironment, ParsedMediaQueryList } from "./media-query.js"
-import { createRendererState, mountedRenderer } from "./renderer-state.js"
+import { globalWindow } from "./events/window-target.js"
+import { createRendererState } from "./renderer-state.js"
 
 export type { MediaEnvironment } from "./media-query.js"
 export type { MediaFeatures }
@@ -295,15 +296,12 @@ export function matchMediaFor(host: NativeRenderer): MatchMedia {
 }
 
 /**
- * `window.matchMedia` for code with no component to ask: the window of the
- * most recently mounted root. Throws before any root is mounted.
+ * `window.matchMedia` for code with no component to ask: the global window's, which is the first
+ * window that mounted. Throws before any root is mounted. A second window answers through its own
+ * window target (`windowOf(renderer).matchMedia`) or `matchMediaFor(renderer)`.
  */
 export function matchMedia(query: string): MediaQueryList {
-  const host = mountedRenderer()
-  if (!host) {
-    throw new Error("matchMedia needs a mounted GPUIX root. Call it after render(), or use useMatchMedia() / createMatchMedia() inside a component.")
-  }
-  return matchMediaFor(host)(query)
+  return globalWindow().matchMedia(query)
 }
 
 /**

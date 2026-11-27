@@ -61,17 +61,21 @@ export type { AriaProps }
 export * from "./clipboard.js"
 export {
   document,
+  documentOf,
   GpuixDocument,
   forgetElementSource,
+  globalWindow,
   GpuixEventTarget,
   installElementSource,
   syncWindowEventListeners,
   syncWindowSelectionChange,
   window,
+  windowOf,
   type AddEventListenerOptions,
   type DomNodeFactory,
   type WindowEventListener,
 } from "./events/window-target.js"
+export { type GpuixWindow } from "./events/window-targets.js"
 export { registerRoot } from "./roots.js"
 export { isWebBuild } from "./web-build.js"
 export { preventEventDefault, type DomEvent, type RootEvent } from "./events/dispatch.js"

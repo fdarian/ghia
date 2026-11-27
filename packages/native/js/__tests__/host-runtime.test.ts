@@ -13,7 +13,7 @@ import {
   readWindowSize,
 } from "../host.js"
 import type { MutationHost, NativeRenderer, WindowInsetsHost, WindowSizeHost } from "../host.js"
-import { document, installElementSource, window } from "../events/window-target.js"
+import { installElementSource, windowOf } from "../events/window-target.js"
 
 class RecordingRenderer implements MutationHost, WindowSizeHost, WindowInsetsHost {
   batches: unknown[][] = []
@@ -399,26 +399,27 @@ describe("shared host runtime", () => {
     ).toBe(false)
   })
 
-  it("aims pointer lock events at document whatever element the payload names, and window hears them", () => {
+  it("aims pointer lock events at the document of the window whatever element the payload names, and its window hears them", () => {
     const renderer = new RecordingRenderer()
     const state = createRendererState(renderer)
     installElementSource(renderer, () => ({}))
     state.attach({})
+    const top = windowOf(renderer)
     const seen: Array<[string, object | null, object | null]> = []
     const listener = (event: { type: string; target: object | null; currentTarget: object | null }) =>
       seen.push([event.type, event.target, event.currentTarget])
-    document.addEventListener("pointerlockchange", listener as never)
-    window.addEventListener("pointerlockerror", listener as never)
+    top.document.addEventListener("pointerlockchange", listener as never)
+    top.events.addEventListener("pointerlockerror", listener as never)
     try {
       expect(state.dispatch({ elementId: 0, eventType: "pointerlockchange", target: 7 })).toBe(true)
       expect(state.dispatch({ elementId: 0, eventType: "pointerlockerror" })).toBe(true)
     } finally {
-      document.removeEventListener("pointerlockchange", listener as never)
-      window.removeEventListener("pointerlockerror", listener as never)
+      top.document.removeEventListener("pointerlockchange", listener as never)
+      top.events.removeEventListener("pointerlockerror", listener as never)
     }
     expect(seen).toEqual([
-      ["pointerlockchange", document, document],
-      ["pointerlockerror", document, globalThis],
+      ["pointerlockchange", top.document, top.document],
+      ["pointerlockerror", top.document, top.resizeTarget],
     ])
   })
 

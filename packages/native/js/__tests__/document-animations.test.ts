@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ElementWebAnimationInfo, WebAnimationInfo } from "../../index.js"
-import { document, forgetWindowSource, installElementSource } from "../events/window-target.js"
+import { document, documentOf, forgetElementSource, forgetWindowSource, installElementSource } from "../events/window-target.js"
 import type { NativeRenderer } from "../host.js"
 import { GpuixRenderer } from "../../index.js"
 import { createNativeRenderer } from "../runtime.js"
@@ -47,7 +47,7 @@ function fakeRenderer(listed: ElementWebAnimationInfo[]): NativeRenderer {
 }
 
 describe("document.getAnimations()", () => {
-  it("lists the animations of every installed renderer in the order the roots were installed", () => {
+  it("lists the animations of the window it is the document of, and no other window's", () => {
     const one = { id: 1 }
     const two = { id: 2 }
     const first = fakeRenderer([{ elementId: 1, info: info(10, "grow") }])
@@ -55,26 +55,32 @@ describe("document.getAnimations()", () => {
     const removeSecond = installElementSource(second, () => two)
     const removeFirst = installElementSource(first, () => one)
     try {
-      const listed = document.getAnimations()
-      expect(listed.map((animation) => (animation as CSSAnimation).animationName)).toEqual(["tall", "grow"])
-      expect(listed[0].effect.target).toBe(two)
-      expect(listed[1].effect.target).toBe(one)
-      expect(document.getAnimations()[0]).toBe(listed[0])
-      expect(getElementAnimations(first, 1, one)[0]).toBe(listed[1])
+      // The window that mounted first holds the global `document`.
+      expect(documentOf(second)).toBe(document)
+      const listedSecond = document.getAnimations()
+      expect(listedSecond.map((animation) => (animation as CSSAnimation).animationName)).toEqual(["tall"])
+      expect(listedSecond[0].effect.target).toBe(two)
+      expect(document.getAnimations()[0]).toBe(listedSecond[0])
+      const listedFirst = documentOf(first).getAnimations()
+      expect(listedFirst.map((animation) => (animation as CSSAnimation).animationName)).toEqual(["grow"])
+      expect(listedFirst[0].effect.target).toBe(one)
+      expect(getElementAnimations(first, 1, one)[0]).toBe(listedFirst[0])
     } finally {
       removeSecond()
       removeFirst()
     }
     expect(document.getAnimations()).toEqual([])
+    expect(documentOf(first).getAnimations()).toEqual([])
   })
 
   it("throws for an animation whose element the root no longer has", () => {
     const renderer = fakeRenderer([{ elementId: 5, info: info(30, "grow") }])
     const remove = installElementSource(renderer, () => undefined)
     try {
-      expect(() => document.getAnimations()).toThrow("Element 5 has an animation")
+      expect(() => documentOf(renderer).getAnimations()).toThrow("Element 5 has an animation")
     } finally {
       remove()
+      forgetElementSource(renderer)
     }
   })
 })
@@ -88,14 +94,17 @@ describe("document.getAnimations() and a window that is gone", () => {
     const removeStale = installElementSource(stale, () => undefined)
     const removeLive = installElementSource(live, () => element)
     try {
-      expect(() => document.getAnimations()).toThrow("Element 3 has an animation")
+      expect(() => documentOf(stale).getAnimations()).toThrow("Element 3 has an animation")
       forgetWindowSource(stale)
-      const listed = document.getAnimations()
+      expect(documentOf(stale).getAnimations()).toEqual([])
+      const listed = documentOf(live).getAnimations()
       expect(listed.map((animation) => (animation as CSSAnimation).animationName)).toEqual(["tall"])
       expect(listed[0].effect.target).toBe(element)
     } finally {
       removeStale()
       removeLive()
+      forgetElementSource(stale)
+      forgetElementSource(live)
     }
   })
 
@@ -108,13 +117,14 @@ describe("document.getAnimations() and a window that is gone", () => {
       const renderer = createNativeRenderer()
       const remove = installElementSource(renderer, () => ({}))
       try {
-        expect(document.getAnimations()).toHaveLength(1)
+        expect(documentOf(renderer).getAnimations()).toHaveLength(1)
         running.mockReturnValueOnce(false)
         expect(renderer.tick()).toBe(false)
-        expect(document.getAnimations()).toEqual([])
+        expect(documentOf(renderer).getAnimations()).toEqual([])
         expect(listed).toHaveBeenCalledTimes(1)
       } finally {
         remove()
+        forgetElementSource(renderer)
       }
     } finally {
       vi.restoreAllMocks()

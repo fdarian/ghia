@@ -7,10 +7,9 @@ import { bindClipboard } from "./clipboard.js"
 import { bindEyeDropper } from "./eyedropper.js"
 import { bindLinkOpener } from "./shell/open-link.js"
 import { flushStorage } from "./shell/storage.js"
-import { forgetWindowSource } from "./events/window-target.js"
+import { forgetWindowSource, windowOf } from "./events/window-target.js"
 import { detachRenderer } from "./detached-renderer.js"
 import { closeWebAnimations } from "./web-animations.js"
-import { resumeFrameRequests } from "./animation-frame.js"
 import { flushPendingMutations } from "./bounds.js"
 import {
   registerKeyframesHost,
@@ -91,7 +90,7 @@ export function createNativeRenderer(
     const fonts = readFontFiles(windowOptions?.fonts)
     init(windowOptions)
     // Callbacks requested before the window existed had no window to ask.
-    resumeFrameRequests(renderer)
+    windowOf(renderer).frames.resume()
     for (const font of fonts) renderer.registerFont(font)
     // The web renderer has no motion engine, so nothing to define keyframes on.
     if (typeof renderer.defineKeyframes === "function") registerKeyframesHost(renderer)

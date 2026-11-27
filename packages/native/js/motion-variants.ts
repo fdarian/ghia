@@ -4,7 +4,8 @@
 /// part of the description native takes, and the gesture callbacks.
 
 import type { DomEvent } from "./events/dispatch.js"
-import { window } from "./events/window-target.js"
+import type { GpuixDocument } from "./events/window-target.js"
+import { ownerDocumentOf, type Node } from "./dom/nodes.js"
 import { IntersectionObserver, type IntersectionObserverEntry } from "./observers.js"
 import type { MotionTransition } from "./host.js"
 
@@ -383,6 +384,9 @@ export function gestureHandlers(
       own.onPointerDown?.(event)
       if (event.button !== 0) return
       const element = event.currentTarget
+      // The press ends in the window it began in, which hears the release even outside the element.
+      if (element === null) throw new Error("A pointerdown handler runs with its element as currentTarget")
+      const window = (ownerDocumentOf(element as unknown as Node) as unknown as GpuixDocument).window
       callbacks().onTapStart?.(event, pointOf(event))
       const finish = (end: DomEvent) => {
         window.removeEventListener("pointerup", finish, true)

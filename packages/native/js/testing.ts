@@ -45,7 +45,11 @@ import type {
 import { bindClipboard } from "./clipboard.js"
 import { bindLinkOpener } from "./shell/open-link.js"
 import { runEditingComposition, runEditingInput, type EditingCompositionStep } from "./editing/input.js"
-import { forgetElementSource } from "./events/window-target.js"
+import { documentOf, forgetElementSource, windowOf } from "./events/window-target.js"
+import type { GpuixDocument } from "./events/window-target.js"
+import type { GpuixWindow } from "./events/window-targets.js"
+
+export { documentOf, windowOf }
 import { detachRenderer } from "./detached-renderer.js"
 import type { HostDropEffect } from "./events/types.js"
 import { matchableText } from "./text-match.js"
@@ -855,6 +859,16 @@ export class TestRenderer implements NativeRenderer {
     this.#release()
   }
 
+  /** @internal The `document` of this window: its own `<html>`, `<body>`, selection, focus and `elementFromPoint`. */
+  get document(): GpuixDocument {
+    return documentOf(this)
+  }
+
+  /** @internal The window target of this window, at the top of its event path: its `innerWidth`, `matchMedia` and `requestAnimationFrame`. */
+  get windowTarget(): GpuixWindow {
+    return windowOf(this)
+  }
+
   /** Everything `dispose()` does but the retention report: what is left of a window nobody
    *  disposed does not fail the test that made it. */
   #release(): void {
@@ -1029,7 +1043,7 @@ export class TestRenderer implements NativeRenderer {
   simulateEditingInput(inputType: string, data?: string): void {
     this.native.flushIfDirty()
     this.dispatchNativeEvents()
-    if (!runEditingInput(inputType, data ?? null).handled) throw noEditingHost("simulateEditingInput")
+    if (!runEditingInput(documentOf(this), inputType, data ?? null).handled) throw noEditingHost("simulateEditingInput")
     this.dispatchNativeEvents()
     this.native.flushIfDirty()
   }
@@ -1046,7 +1060,7 @@ export class TestRenderer implements NativeRenderer {
     this.native.flushIfDirty()
     this.dispatchNativeEvents()
     for (const step of steps) {
-      if (!runEditingComposition(step)) throw noEditingHost("simulateEditingComposition")
+      if (!runEditingComposition(documentOf(this), step)) throw noEditingHost("simulateEditingComposition")
       this.dispatchNativeEvents()
     }
     this.native.flushIfDirty()

@@ -9,9 +9,10 @@
  */
 
 import type { Element } from "../dom/nodes.js"
-import { getSelection, holdsNodeSelection } from "../dom/selection.js"
+import { holdsNodeSelection, selectionOfNode } from "../dom/selection.js"
 import type { DomEvent } from "../events/dispatch.js"
 import { editingHostOf } from "./host.js"
+import type { GpuixDocument } from "../events/window-target.js"
 import { focusedEditingHost, runEditingInput } from "./input.js"
 
 type Granularity = "character" | "word" | "line" | "lineboundary" | "documentboundary"
@@ -89,8 +90,8 @@ function bindingOf(event: DomEvent): Binding | null {
 
 /** Whether the selection is a range in `host`, which is what a move or a deletion works on. */
 function selectionIsIn(host: Element): boolean {
-  if (!holdsNodeSelection()) return false
-  const selection = getSelection()
+  const selection = selectionOfNode(host)
+  if (!holdsNodeSelection(selection)) return false
   return (
     selection.anchorNode !== null &&
     selection.focusNode !== null &&
@@ -100,24 +101,24 @@ function selectionIsIn(host: Element): boolean {
 }
 
 /**
- * Performs the binding of `event` in the focused editing host. Returns true when the key was one of
+ * Performs the binding of `event` in the focused editing host of `document`. Returns true when the key was one of
  * them, so that the platform adds nothing and the scroll keys do not move the page under the caret.
  */
-export function runKeyBinding(event: DomEvent): boolean {
+export function runKeyBinding(document: GpuixDocument, event: DomEvent): boolean {
   // A key the input method is composing with is the input method's.
   if (event.isComposing) return false
   const binding = bindingOf(event)
   if (binding === null) return false
-  const host = focusedEditingHost()
+  const host = focusedEditingHost(document)
   if (host === null) return false
 
   if (binding.action === "selectAll") {
     // The select-all of the editing host, not of the document.
-    getSelection().selectAllChildren(host)
+    document.getSelection().selectAllChildren(host)
     return true
   }
   if (!selectionIsIn(host)) return false
-  if (binding.action === "delete") return runEditingInput(binding.inputType, null).handled
-  getSelection().modify(binding.alter, binding.forward ? "forward" : "backward", binding.granularity)
+  if (binding.action === "delete") return runEditingInput(document, binding.inputType, null).handled
+  document.getSelection().modify(binding.alter, binding.forward ? "forward" : "backward", binding.granularity)
   return true
 }

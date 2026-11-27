@@ -11,7 +11,7 @@ import {
   defineScrollMembers,
   DocumentFragment,
   SentWrites,
-  document,
+  documentOf,
   DOM_BINDING,
   focusHostElement,
   HOST_BINDING,
@@ -285,11 +285,11 @@ class ElementDomBinding implements ElementBinding {
     private readonly state: HostNodeState
   ) {}
 
-  /** A mounted `<html>` is in the document, which is the top of every mounted tree; a destroyed one is in nothing. */
+  /** A mounted `<html>` is in the document of its window, which is the top of that window's tree; a destroyed one is in nothing. */
   get parent(): NodeBinding["parent"] {
     const parent = this.state.parent
     if (parent !== null) return parent
-    return this.state.container.html === this.instance && isConnected(this.instance) ? document : null
+    return this.state.container.html === this.instance && isConnected(this.instance) ? documentOf(this.state.container.nativeRenderer) : null
   }
 
   get children(): NodeBinding["children"] {

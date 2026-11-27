@@ -1,9 +1,8 @@
 import { editingHostOf } from "../editing/host.js"
-import { mountedRenderer } from "../mounted-renderer.js"
 import { namedError } from "../named-error.js"
 import type { NativeRenderer } from "../host.js"
 import type { RangeBoundaries } from "./live-ranges.js"
-import { inRuntimeDocument, Node, type Element, type Text } from "./nodes.js"
+import { Node, ownerDocumentOf, type Element, type Text } from "./nodes.js"
 import { boundariesOf, Range, StaticRange } from "./range.js"
 import { moveByLine, moveToDocumentBoundary, moveToLineBoundary, type MovedPosition } from "../editing/line-movement.js"
 import { movePoint } from "./selection-movement.js"
@@ -25,6 +24,15 @@ export interface SelectionHooks {
   focusHost(host: Element): void
 }
 
+/** What a document gives its selection: the window it is of, and the hooks into the document. */
+export interface SelectionContext {
+  /** The document: only nodes whose root is it can be selected. */
+  readonly document: Node
+  /** The renderer of the document's window, or `undefined` while it has none. */
+  renderer(): NativeRenderer | undefined
+  readonly hooks: SelectionHooks
+}
+
 type Direction = "forwards" | "backwards"
 const GRANULARITIES: ReadonlySet<string> = new Set([
   "character",
@@ -42,34 +50,13 @@ const GRANULARITIES: ReadonlySet<string> = new Set([
 const SUPPORTED: ReadonlySet<string> = new Set(["character", "word", "line", "lineboundary", "documentboundary"])
 
 const INTERNAL = {
-  hooks: Symbol.for("@ghia/native/selection-hooks"),
   holds: Symbol.for("@ghia/native/selection-holds"),
   painted: Symbol.for("@ghia/native/selection-painted"),
   caret: Symbol.for("@ghia/native/selection-caret"),
-  subscribe: Symbol.for("@ghia/native/selection-subscribe"),
+  context: Symbol.for("@ghia/native/selection-context"),
 } as const
 
 const CREATE = Symbol("create selection")
-
-function currentRenderer(member: string): NativeRenderer {
-  const renderer = mountedRenderer()
-  if (renderer === undefined) {
-    throw new Error(`${member} needs a mounted GPUIX root. Read it after render().`)
-  }
-  return renderer
-}
-
-function selectedText(member: string): string | null {
-  const renderer = currentRenderer(member)
-  if (renderer.getSelectedText === undefined) {
-    throw new Error(`This renderer does not report the text selection, so ${member} cannot be read`)
-  }
-  return renderer.getSelectedText()
-}
-
-
-/** The standard has a selection ignore a node whose root is not its document, so a `DOMParser` document's nodes cannot be selected. */
-const inDocument = inRuntimeDocument
 
 function assertNodeArgument(value: unknown, method: string, position: number): asserts value is Node {
   if (!(value instanceof Node)) {
@@ -116,8 +103,8 @@ abstract class SelectionClass {
   /** Code holds `#range` (`getRangeAt` or `addRange` gave it out), so the selection sets itself anew with another one. */
   #shared = false
   #changePending = false
-  #hooks: SelectionHooks | undefined
-  #nodeSelectionListener: (() => void) | undefined
+  readonly #context: SelectionContext
+  readonly #hooks: SelectionHooks
   readonly #rangeChanged = (): void => {
     this.#goalX = null
     this.#queueChange()
@@ -128,8 +115,31 @@ abstract class SelectionClass {
    */
   #goalX: number | null = null
 
-  constructor(token?: symbol) {
-    if (token !== CREATE) throw new TypeError("Illegal constructor")
+  constructor(token?: symbol, context?: SelectionContext) {
+    if (token !== CREATE || context === undefined) throw new TypeError("Illegal constructor")
+    this.#context = context
+    this.#hooks = context.hooks
+  }
+
+  #renderer(member: string): NativeRenderer {
+    const renderer = this.#context.renderer()
+    if (renderer === undefined) {
+      throw new Error(`${member} needs a mounted GPUIX root. Read it after render().`)
+    }
+    return renderer
+  }
+
+  #selectedText(member: string): string | null {
+    const renderer = this.#renderer(member)
+    if (renderer.getSelectedText === undefined) {
+      throw new Error(`This renderer does not report the text selection, so ${member} cannot be read`)
+    }
+    return renderer.getSelectedText()
+  }
+
+  /** The standard has a selection ignore a node whose root is not its document, so a `DOMParser` document's nodes, and another window's, cannot be selected. */
+  #inDocument(node: Node): boolean {
+    return node.getRootNode() === this.#context.document
   }
 
   get #own(): { range: Range; bounds: RangeBoundaries } | null {
@@ -170,23 +180,23 @@ abstract class SelectionClass {
   /** 1 while a node range or any painted text is selected, 0 otherwise. */
   get rangeCount(): number {
     if (this.#range !== null) return 1
-    return selectedText("Selection.rangeCount") === null ? 0 : 1
+    return this.#selectedText("Selection.rangeCount") === null ? 0 : 1
   }
 
   get isCollapsed(): boolean {
     if (this.#range !== null) return this.#range.collapsed
-    return selectedText("Selection.isCollapsed") === null
+    return this.#selectedText("Selection.isCollapsed") === null
   }
 
   /** `Caret` for a collapsed node range. Painted text has no caret, so it is `Range` or `None`. */
   get type(): "None" | "Caret" | "Range" {
     if (this.#range !== null) return this.#range.collapsed ? "Caret" : "Range"
-    return selectedText("Selection.type") === null ? "None" : "Range"
+    return this.#selectedText("Selection.type") === null ? "None" : "Range"
   }
 
   toString(): string {
     if (this.#range !== null) return this.#range.toString()
-    return selectedText("Selection.toString") ?? ""
+    return this.#selectedText("Selection.toString") ?? ""
   }
 
   getRangeAt(index: number): Range {
@@ -205,12 +215,12 @@ abstract class SelectionClass {
       throw new TypeError("Failed to execute 'addRange' on 'Selection': parameter 1 is not of type 'Range'.")
     }
     if (this.#range !== null) return
-    if (!inDocument(range.startContainer)) return
+    if (!this.#inDocument(range.startContainer)) return
     this.#clearPainted()
     this.#hold(range)
     this.#shared = true
     this.#direction = "forwards"
-    this.#hooks?.heldChanged()
+    this.#hooks.heldChanged()
     this.#queueChange()
     this.#focusHostOfSelection()
   }
@@ -232,7 +242,7 @@ abstract class SelectionClass {
       this.#clearPainted()
       return
     }
-    const renderer = currentRenderer("Selection.removeAllRanges")
+    const renderer = this.#renderer("Selection.removeAllRanges")
     if (renderer.clearSelection === undefined) {
       throw new Error("This renderer cannot clear the text selection, so Selection.removeAllRanges is unavailable")
     }
@@ -252,7 +262,7 @@ abstract class SelectionClass {
     assertNodeArgument(node, "collapse", 1)
     const point = offset >>> 0
     assertBoundary(node, point)
-    if (!inDocument(node)) return
+    if (!this.#inDocument(node)) return
     this.#assign(node, point, node, point, "forwards")
   }
 
@@ -276,7 +286,7 @@ abstract class SelectionClass {
     const point = offset >>> 0
     const own = this.#requireOwn("extend")
     assertBoundary(node, point)
-    if (!inDocument(node)) return
+    if (!this.#inDocument(node)) return
     this.#extendTo(node, point, own.bounds)
   }
 
@@ -287,7 +297,7 @@ abstract class SelectionClass {
     const focusPoint = focusOffset >>> 0
     assertBoundary(anchorNode, anchorPoint)
     assertBoundary(focusNode, focusPoint)
-    if (!inDocument(anchorNode) || !inDocument(focusNode)) return
+    if (!this.#inDocument(anchorNode) || !this.#inDocument(focusNode)) return
     if (comparePoints(anchorNode, anchorPoint, focusNode, focusPoint) <= 0) {
       this.#assign(anchorNode, anchorPoint, focusNode, focusPoint, "forwards")
     } else {
@@ -298,7 +308,7 @@ abstract class SelectionClass {
   selectAllChildren(node: Node): void {
     assertNodeArgument(node, "selectAllChildren", 1)
     assertBoundary(node, 0)
-    if (!inDocument(node)) return
+    if (!this.#inDocument(node)) return
     this.#assign(node, 0, node, childCount(node), "forwards")
   }
 
@@ -306,7 +316,7 @@ abstract class SelectionClass {
   containsNode(node: Node, allowPartialContainment: boolean = false): boolean {
     assertNodeArgument(node, "containsNode", 1)
     const own = this.#own
-    if (own === null || !inDocument(node)) return false
+    if (own === null || !this.#inDocument(node)) return false
     const length = nodeLength(node)
     const bounds = own.bounds
     if (allowPartialContainment) {
@@ -464,7 +474,7 @@ abstract class SelectionClass {
       bounds.endOffset = endOffset
     }
     this.#direction = direction
-    if (!held) this.#hooks?.heldChanged()
+    if (!held) this.#hooks.heldChanged()
     if (changed) this.#queueChange()
     if (focusesHost) this.#focusHostOfSelection()
   }
@@ -484,7 +494,7 @@ abstract class SelectionClass {
    */
   #focusHostOfSelection(): void {
     const host = this.#focusHost()
-    if (host !== null) this.#hooks?.focusHost(host)
+    if (host !== null) this.#hooks.focusHost(host)
   }
 
   /** Makes `range` the selection's range, which tells the selection of every change to it; the range it had stops doing so. */
@@ -509,14 +519,14 @@ abstract class SelectionClass {
     this.#goalX = null
     this.#shared = false
     this.#direction = "forwards"
-    this.#hooks?.heldChanged()
+    this.#hooks.heldChanged()
     if (announce) this.#queueChange()
-    else this.#nodeSelectionListener?.()
+    else notifyNodeSelection(this)
   }
 
   /** Painted text and a node range are exclusive, so a new node range removes what was painted. */
   #clearPainted(): void {
-    const renderer = mountedRenderer()
+    const renderer = this.#context.renderer()
     if (renderer?.getSelectedText === undefined || renderer.clearSelection === undefined) return
     if (renderer.getSelectedText() !== null) renderer.clearSelection()
   }
@@ -526,21 +536,17 @@ abstract class SelectionClass {
    * change and before the task runs hears it, so the task is queued whether or not one listens now.
    */
   #queueChange(): void {
-    this.#nodeSelectionListener?.()
-    if (this.#changePending || this.#hooks === undefined) return
+    notifyNodeSelection(this)
+    if (this.#changePending) return
     this.#changePending = true
     setTimeout(() => {
       this.#changePending = false
-      if (this.#hooks?.listens()) this.#hooks.dispatch()
+      if (this.#hooks.listens()) this.#hooks.dispatch()
     }, 0)
   }
 
-  [INTERNAL.hooks](hooks: SelectionHooks): void {
-    this.#hooks = hooks
-  }
-
-  [INTERNAL.subscribe](listener: () => void): void {
-    this.#nodeSelectionListener = listener
+  [INTERNAL.context](): SelectionContext {
+    return this.#context
   }
 
   [INTERNAL.holds](): boolean {
@@ -565,24 +571,23 @@ abstract class SelectionClass {
 
 Object.defineProperty(SelectionClass.prototype, Symbol.toStringTag, { value: "Selection", configurable: true })
 
-type SelectionSet = { Selection: typeof SelectionClass; instance: SelectionClass }
+type SelectionSet = {
+  Selection: typeof SelectionClass
+  /** Whoever listens for a change of any selection's node range: the one that sends it to native. */
+  listeners: Set<(selection: SelectionClass) => void>
+}
 
 const SELECTION_KEY = Symbol.for("@ghia/native/selection")
 
 /**
  * Kept on `globalThis` like the DOM classes: a second copy of this package must share the class,
- * or `selection instanceof Selection` fails across copies, and `getSelection()` is one object.
+ * or `selection instanceof Selection` fails across copies.
  */
 const shared: SelectionSet = (() => {
   const existing = Reflect.get(globalThis, SELECTION_KEY) as SelectionSet | undefined
   if (existing) return existing
   Object.defineProperty(SelectionClass, "name", { value: "Selection" })
-  // The abstract class is only a type: the runtime class is concrete so the one instance can be made.
-  const Selection = SelectionClass as unknown as new (token: symbol) => SelectionClass
-  const created: SelectionSet = {
-    Selection: SelectionClass,
-    instance: new Selection(CREATE),
-  }
+  const created: SelectionSet = { Selection: SelectionClass, listeners: new Set() }
   Reflect.set(globalThis, SELECTION_KEY, created)
   return created
 })()
@@ -590,36 +595,48 @@ const shared: SelectionSet = (() => {
 export const Selection = shared.Selection
 export type Selection = SelectionClass
 
-/** `document.getSelection()` and `window.getSelection()`: the one selection of the app. */
-export function getSelection(): Selection {
-  return shared.instance
+function notifyNodeSelection(selection: SelectionClass): void {
+  for (const listener of shared.listeners) listener(selection)
 }
 
-/** Tells the selection how to reach `document`: see `SelectionHooks`. */
-export function setSelectionHooks(hooks: SelectionHooks): void {
-  const instance = shared.instance as unknown as Record<symbol, (hooks: SelectionHooks) => void>
-  instance[INTERNAL.hooks](hooks)
+/** @internal The selection of one document, made with it: `document.getSelection()` answers it. */
+export function createSelection(context: SelectionContext): Selection {
+  // The abstract class is only a type: the runtime class is concrete so an instance can be made.
+  const Create = SelectionClass as unknown as new (token: symbol, context: SelectionContext) => SelectionClass
+  return new Create(CREATE, context)
 }
 
 /**
- * Calls `listener` whenever the node range changes: a new one, a boundary that moved (a selection method,
- * or a tree change under it) or none. One listener: the one that sends the selection to native.
+ * Calls `listener` whenever the node range of any document's selection changes: a new one, a boundary
+ * that moved (a selection method, or a tree change under it) or none. The listener that sends the
+ * selection to native is the one.
  */
-export function subscribeNodeSelection(listener: () => void): void {
-  ;(shared.instance as unknown as Record<symbol, (listener: () => void) => void>)[INTERNAL.subscribe](listener)
+export function subscribeNodeSelection(listener: (selection: Selection) => void): void {
+  shared.listeners.add(listener)
 }
 
-/** Whether the selection holds a node range, which a painted selection replaces. */
-export function holdsNodeSelection(): boolean {
-  return (shared.instance as unknown as Record<symbol, () => boolean>)[INTERNAL.holds]()
+/** The selection of the window `node` is in. */
+export function selectionOfNode(node: Node): Selection {
+  return (ownerDocumentOf(node) as unknown as { getSelection(): Selection }).getSelection()
 }
 
-/** Native painted text is selected now: the node range, if any, gives way to it. */
-export function paintedSelectionTookOver(): void {
-  ;(shared.instance as unknown as Record<symbol, () => void>)[INTERNAL.painted]()
+/** The renderer of the window `selection` is of, or `undefined` while it has none. */
+export function rendererOfSelection(selection: Selection): NativeRenderer | undefined {
+  return (selection as unknown as Record<symbol, () => SelectionContext>)[INTERNAL.context]().renderer()
 }
 
-/** `element.focus()` on an editing host: a collapsed caret at the first position of the host unless the selection is already in it. */
+/** Whether `selection` holds a node range, which a painted selection replaces. */
+export function holdsNodeSelection(selection: Selection): boolean {
+  return (selection as unknown as Record<symbol, () => boolean>)[INTERNAL.holds]()
+}
+
+/** Native painted text is selected now: the node range of `selection`, if any, gives way to it. */
+export function paintedSelectionTookOver(selection: Selection): void {
+  ;(selection as unknown as Record<symbol, () => void>)[INTERNAL.painted]()
+}
+
+/** `element.focus()` on an editing host: a collapsed caret at the first position of the host unless the selection of its document is already in it. */
 export function placeCaretInEditingHost(host: Element): void {
-  ;(shared.instance as unknown as Record<symbol, (host: Element) => void>)[INTERNAL.caret](host)
+  const document = ownerDocumentOf(host as unknown as Node) as unknown as { getSelection(): Selection }
+  ;(document.getSelection() as unknown as Record<symbol, (host: Element) => void>)[INTERNAL.caret](host)
 }

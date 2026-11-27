@@ -16,7 +16,7 @@ import type { EventPayload } from "../../index.js"
 import { DOM_BINDING, indexOfNode, type Element, type ElementBinding, type Node, type Text } from "../dom/nodes.js"
 import { enclosingBlock } from "../dom/selection-movement.js"
 import { setPointerFocusHost } from "../focus.js"
-import { getSelection, holdsNodeSelection } from "../dom/selection.js"
+import { holdsNodeSelection, selectionOfNode } from "../dom/selection.js"
 import { wordAt } from "../dom/text-segmentation.js"
 import { comparePoints, isInclusiveAncestor } from "../dom/tree-order.js"
 import type { NativeRenderer } from "../host.js"
@@ -106,11 +106,11 @@ function unitAt(host: Element, place: Place, granularity: Granularity): Unit {
 }
 
 /** The selection from the unit the press began in to the unit under the pointer, in the direction the pointer went. */
-function selectBetween(anchor: Unit, focus: Unit): void {
+function selectBetween(host: Element, anchor: Unit, focus: Unit): void {
   const backwards = comparePoints(focus.start.node, focus.start.offset, anchor.start.node, anchor.start.offset) < 0
   const from = backwards ? anchor.end : anchor.start
   const to = backwards ? focus.start : focus.end
-  getSelection().setBaseAndExtent(from.node, from.offset, to.node, to.offset)
+  selectionOfNode(host).setBaseAndExtent(from.node, from.offset, to.node, to.offset)
 }
 
 function granularityOf(clickCount: number): Granularity {
@@ -120,8 +120,8 @@ function granularityOf(clickCount: number): Granularity {
 
 /** The anchor of the selection when it is a range in `host`: what Shift+click extends from. */
 function anchorIn(host: Element): Place | null {
-  if (!holdsNodeSelection()) return null
-  const selection = getSelection()
+  const selection = selectionOfNode(host)
+  if (!holdsNodeSelection(selection)) return null
   const node = selection.anchorNode
   if (node === null || editingHostOf(node) !== host) return null
   return { node, offset: selection.anchorOffset }
@@ -134,7 +134,7 @@ function press(host: Element, event: EventPayload): void {
   const extended = granularity === "caret" && event.shiftKey === true ? anchorIn(host) : null
   const anchor: Unit = extended === null ? unitAt(host, place, granularity) : { start: extended, end: extended }
   drag = { host, granularity, anchor }
-  selectBetween(anchor, extended === null ? anchor : unitAt(host, place, granularity))
+  selectBetween(host, anchor, extended === null ? anchor : unitAt(host, place, granularity))
 }
 
 function extend(held: Drag, event: EventPayload): void {
@@ -143,7 +143,7 @@ function extend(held: Drag, event: EventPayload): void {
     drag = null
     return
   }
-  selectBetween(held.anchor, unitAt(held.host, placeOf(held.host, event), held.granularity))
+  selectBetween(held.host, held.anchor, unitAt(held.host, placeOf(held.host, event), held.granularity))
 }
 
 /**

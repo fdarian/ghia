@@ -1,5 +1,4 @@
 import type { EventPayload } from "../index.js"
-import { addFrameSource, runAnimationFrame } from "./animation-frame.js"
 import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
 import { focusElementById, placeCaretOnFocusIn } from "./focus.js"
@@ -9,8 +8,8 @@ import { EDIT_INPUT_EVENT, endCompositionOnBlur, runNativeEditInput } from "./ed
 import { EDIT_POINTER_EVENT, runEditingPointer } from "./editing/pointer-selection.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { popoversOfRendererGone } from "./dom/popover.js"
-import { elementOf, GpuixEventTarget, noteFocusEvent, trackFocusedElement } from "./events/window-target.js"
-import { mountedRenderers, notifyMountedRenderer } from "./mounted-renderer.js"
+import { elementOf, GpuixEventTarget, noteFocusEvent, trackFocusedElement, windowOf } from "./events/window-target.js"
+import type { GpuixWindow } from "./events/window-targets.js"
 import { deliverObservation } from "./observers.js"
 import type {
   ElementIdAllocator,
@@ -180,12 +179,12 @@ export type ActiveRoot = RendererRootBinding & {
   elementById(id: number): object | undefined
   /** Listens at the window level for this root only: the `onKeyDown` / `onKeyUp` options. */
   scoped: GpuixEventTarget
+  /** The window of the root: the top of the event path of every event of its tree. */
+  window: GpuixWindow
 }
 
 /** What native sends in the frame steps of a window that was asked for `requestAnimationFrame`. */
 const ANIMATION_FRAME_EVENT = "animationframe"
-
-export { mountedRenderer } from "./mounted-renderer.js"
 
 const STATE_KEY = Symbol.for("@ghia/native/renderer-states")
 
@@ -305,7 +304,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       throw new Error("An animationframe event arrived without its timelineTime")
     }
     const time = event.timelineTime
-    const run = () => runAnimationFrame(renderer, time, (error) => state.reportError(error))
+    const run = () => windowOf(renderer).frames.run(time, (error) => state.reportError(error))
     if (active?.handlers.schedule) active.handlers.schedule(run)
     else run()
   }
@@ -336,6 +335,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         reportError: (error) => state.reportError(error),
         elementById: (id) => elementOf(renderer, id),
         scoped,
+        window: windowOf(renderer),
         windowKeyEventId: generation,
         windowSelectionEventId: generation,
         windowAppearanceEventId: generation,
@@ -345,16 +345,15 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
           popoversOfRendererGone(renderer)
           removeFrameSource?.()
           removeFrameSource = undefined
-          const mounted = mountedRenderers()
-          mounted.splice(mounted.indexOf(renderer), 1)
-          notifyMountedRenderer()
+          binding.window.attached = false
+          binding.window.syncResize()
           return true
         },
       }
       active = binding
-      mountedRenderers().push(renderer)
-      notifyMountedRenderer()
-      removeFrameSource = addFrameSource(renderer)
+      binding.window.attached = true
+      binding.window.syncResize()
+      removeFrameSource = binding.window.frames.attach(renderer)
       return binding
     },
     dispatch(received) {

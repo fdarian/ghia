@@ -94,7 +94,7 @@ export class FakeTx extends Text {
       parent: this.parent as Node | null,
       children: [],
       connected: true,
-      root: null,
+      root: this.window === undefined ? null : { nativeRenderer: this.window.renderer },
       data: this.text,
       native: this.window === undefined ? undefined : { renderer: this.window.renderer, id: this.id },
       setData: (data) => {
@@ -119,7 +119,7 @@ function elementBinding(element: FakeEl): ElementBinding {
     parent: element.parent as Node | null,
     children: element.kids as readonly Node[],
     connected: true,
-    root: null,
+    root: element.window === undefined ? null : { nativeRenderer: element.window.renderer },
     type: element.type,
     prop: (name) => element.props[name],
     propNames: () => Object.keys(element.props),

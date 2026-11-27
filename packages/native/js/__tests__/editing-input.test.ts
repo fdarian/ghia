@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { DOM_BINDING, HTMLElement, Text, type ElementBinding, type Node, type TextBinding } from "../dom/nodes.js"
 import { hasLiveRanges, liveRangesAfterInsert, liveRangesBeforeRemove } from "../dom/live-ranges.js"
 import { StaticRange } from "../dom/range.js"
-import { runEditingComposition, runEditingInput } from "../editing/input.js"
+import { runEditingComposition as composeIn, runEditingInput as inputIn } from "../editing/input.js"
 import { ElementListeners } from "../events/element-listeners.js"
 import { InputEvent } from "../events/classes.js"
 import { document, window as ghiaWindow } from "../events/window-target.js"
@@ -10,6 +10,10 @@ import { defineDomMembers } from "../dom-members.js"
 import { createRendererState } from "../renderer-state.js"
 import type { NativeRenderer } from "../host.js"
 import "../dom-globals.js"
+
+/** The editing of the global window's document: these fixtures mount the one window. */
+const runEditingInput = (inputType: string, data: string | null, options?: Parameters<typeof inputIn>[3]) => inputIn(document, inputType, data, options)
+const runEditingComposition = (step: Parameters<typeof composeIn>[1], options?: Parameters<typeof composeIn>[2]) => composeIn(document, step, options)
 
 class FakeEl extends HTMLElement {
   parent: FakeEl | null = null

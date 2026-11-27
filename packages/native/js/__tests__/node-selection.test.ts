@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import "../dom-globals.js"
 import { registerMutationQueue } from "../bounds.js"
 import { takeNodeSelectionWrite } from "../editing/node-selection.js"
-import { document } from "../events/window-target.js"
+import { documentOf } from "../events/window-target.js"
 import { createRendererState } from "../renderer-state.js"
 import { asNode, el, scriptedWindow, tx, type FakeEl, type ScriptedWindow } from "./fixtures/painted-dom.js"
 
@@ -22,19 +22,24 @@ function fakeQueue(renderer: object): { flushes: number } {
 }
 
 describe("sending the selection of nodes to native", () => {
-  const selection = document.getSelection()
   const cleanups: Array<() => void> = []
   let one: ScriptedWindow
   let two: ScriptedWindow
+  /** The selection of the first window; each window has its own. */
+  let selection: ReturnType<ReturnType<typeof documentOf>["getSelection"]>
+  let secondSelection: typeof selection
 
   beforeEach(() => {
     one = scriptedWindow()
     two = scriptedWindow()
     for (const window of [one, two]) cleanups.push(createRendererState(window.renderer).attach({ onSelectionChange: undefined }).detach)
+    selection = documentOf(one.renderer).getSelection()
+    secondSelection = documentOf(two.renderer).getSelection()
   })
 
   afterEach(() => {
     selection.collapse(null)
+    secondSelection.collapse(null)
     // The clear the collapse asked for is taken, as the flush of a queue would.
     takeNodeSelectionWrite(one.renderer)
     takeNodeSelectionWrite(two.renderer)
@@ -83,25 +88,33 @@ describe("sending the selection of nodes to native", () => {
     expect(takeNodeSelectionWrite(one.renderer)).toMatchObject({ hostId: 0 })
   })
 
-  it("asks the queue of the root for a flush when the selection changes, and for the root it left", () => {
+  it("asks the queue of the root of the selection's own window for a flush, and no other's", () => {
     const first = paragraphs(one, "first").texts[0]!
     const second = paragraphs(two, "second").texts[0]!
     const queues = [fakeQueue(one.renderer), fakeQueue(two.renderer)]
     selection.collapse(n(first), 1)
     expect(queues.map((queue) => queue.flushes)).toEqual([1, 0])
-    takeNodeSelectionWrite(one.renderer)
-    selection.collapse(n(second), 1)
-    expect(queues.map((queue) => queue.flushes)).toEqual([2, 1])
+    secondSelection.collapse(n(second), 1)
+    expect(queues.map((queue) => queue.flushes)).toEqual([1, 1])
   })
 
-  it("moves with the selection between two roots: the new one is sent it and the old one is cleared", () => {
+  it("keeps a selection per window: each root is sent its own and clearing one leaves the other", () => {
     const first = paragraphs(one, "first").texts[0]!
     const second = paragraphs(two, "second").texts[0]!
     selection.collapse(n(first), 1)
+    secondSelection.collapse(n(second), 3)
     expect(takeNodeSelectionWrite(one.renderer)).toMatchObject({ anchorId: first.id })
-    selection.collapse(n(second), 3)
     expect(takeNodeSelectionWrite(two.renderer)).toMatchObject({ anchorId: second.id, anchorOffset: 3 })
+    selection.removeAllRanges()
     expect(takeNodeSelectionWrite(one.renderer)).toBeNull()
+    expect(takeNodeSelectionWrite(two.renderer)).toBeUndefined()
+    expect(secondSelection.anchorNode).toBe(n(second))
+  })
+
+  it("does not take a node of another window into a selection", () => {
+    const second = paragraphs(two, "second").texts[0]!
+    selection.collapse(n(second), 1)
+    expect(selection.rangeCount).toBe(0)
     expect(takeNodeSelectionWrite(one.renderer)).toBeUndefined()
   })
 

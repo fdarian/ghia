@@ -1,17 +1,30 @@
 import type { EventPayload } from "../../index.js"
 import type { FocusableElement } from "../focus.js"
+import type { NativeRenderer } from "../host.js"
 import type { Animation } from "../web-animations.js"
 import { isElementType, isSvgElementType } from "../dom/element-types.js"
-import { Document, DOM_BINDING, registerDocument, type DocumentFragment, type HTMLElement, type Node, type NodeBinding, type Text } from "../dom/nodes.js"
-import { getAdoptedStyleSheets, replaceAdoptedStyleSheets, type CSSStyleSheet } from "../css/index.js"
+import {
+  adoptSubtree,
+  crossRootError,
+  Document,
+  DOM_BINDING,
+  makerDocumentOf,
+  Node,
+  ownerDocumentOf,
+  registerDocument,
+  type DocumentFragment,
+  type HTMLElement,
+  type NodeBinding,
+  type Text,
+} from "../dom/nodes.js"
+import { createAdoptedStyleSheets, setAdoptedSheets, type CSSStyleSheet } from "../css/index.js"
 import { Range } from "../dom/range.js"
 import { createCaretPosition, type CaretPosition } from "../editing/caret-position.js"
 import { documentCommands } from "../editing/document-commands.js"
 import { caretFromPoint, setElementLookup } from "../editing/geometry.js"
-import { getSelection, holdsNodeSelection, setSelectionHooks, type Selection } from "../dom/selection.js"
+import { createSelection, holdsNodeSelection, type Selection } from "../dom/selection.js"
 import { bumpTreeVersion } from "../dom/tree-version.js"
 import { createTreeWalker, type NodeFilterLike, type TreeWalker } from "../dom/tree-walker.js"
-import { mountedRenderer } from "../mounted-renderer.js"
 import {
   createDomEvent,
   EVENT_PHASE_AT_TARGET,
@@ -30,119 +43,16 @@ import {
   walkDomEvent,
 } from "./dispatch.js"
 import { dispatchStateOf, type DispatchState } from "./event-state.js"
+import { GpuixEventTarget, type AddEventListenerOptions, type WindowEventListener } from "./event-target.js"
+import { GpuixWindow } from "./window-targets.js"
 
-export type WindowEventListener = (event: DomEvent) => void
-
-export interface AddEventListenerOptions {
-  /** Listen in the capture phase, before the element tree sees the event. */
-  capture?: boolean
-  /** Remove the listener after its first call. */
-  once?: boolean
-}
-
-interface Registration {
-  listener: WindowEventListener
-  capture: boolean
-  once: boolean
-}
+export { GpuixEventTarget, type AddEventListenerOptions, type WindowEventListener } from "./event-target.js"
 
 /**
- * The `window` and `document` of a GPUIX app: an `EventTarget` shaped like the
- * DOM's, for events that reach the top of the tree.
- *
- * Event types are the DOM's lowercase names (`keydown`, `keyup`, `focusin`,
- * `focusout`, `focus`, `blur`). `focus` and `blur` do not bubble, so only a
- * capture listener hears them, as in the DOM.
+ * Kept on `globalThis` like the element sources: the module that makes `Animation` objects
+ * (`web-animations`) imports this one, so it hands `document` the way to list a renderer's.
  */
-export class GpuixEventTarget {
-  private readonly registrations = new Map<string, Registration[]>()
-
-  /**
-   * @param onTypesChange Called when a type gains its first listener or loses its last.
-   * @param owner What `event.currentTarget` is while this target runs its listeners, when it
-   * stands in for another object (a `document` that holds its target by composition).
-   */
-  constructor(
-    private readonly onTypesChange?: () => void,
-    private readonly owner?: object
-  ) {}
-
-  addEventListener(
-    type: string,
-    listener: WindowEventListener,
-    options?: boolean | AddEventListenerOptions
-  ): void {
-    const capture = typeof options === "boolean" ? options : options?.capture === true
-    const once = typeof options === "object" && options.once === true
-    const key = type.toLowerCase()
-    const registrations = this.registrations.get(key) ?? []
-    if (registrations.some((entry) => entry.listener === listener && entry.capture === capture)) {
-      return
-    }
-    registrations.push({ listener, capture, once })
-    this.registrations.set(key, registrations)
-    if (registrations.length === 1) this.onTypesChange?.()
-  }
-
-  removeEventListener(
-    type: string,
-    listener: WindowEventListener,
-    options?: boolean | Pick<AddEventListenerOptions, "capture">
-  ): void {
-    const capture = typeof options === "boolean" ? options : options?.capture === true
-    const key = type.toLowerCase()
-    const registrations = this.registrations.get(key)
-    if (!registrations) return
-    const index = registrations.findIndex(
-      (entry) => entry.listener === listener && entry.capture === capture
-    )
-    if (index < 0) return
-    registrations.splice(index, 1)
-    if (registrations.length === 0) {
-      this.registrations.delete(key)
-      this.onTypesChange?.()
-    }
-  }
-
-  /** Whether any listener is registered for `type` in either phase. */
-  hasListeners(type: string): boolean {
-    return this.registrations.has(type.toLowerCase())
-  }
-
-  /** @internal The types with a listener in either phase. */
-  listenedTypes(): string[] {
-    return [...this.registrations.keys()]
-  }
-
-  /**
-   * @internal Calls the listeners of one phase. A listener that throws does not
-   * end the phase: its error goes to `fail`.
-   */
-  run(
-    event: DomEvent,
-    state: DomEventState,
-    capture: boolean,
-    phase: number,
-    fail: (error: unknown) => void
-  ): void {
-    const registrations = this.registrations.get(event.type.toLowerCase())
-    if (!registrations) return
-    event.currentTarget = this.owner ?? this
-    event.eventPhase = phase
-    // A listener may add or remove listeners; this call sees the ones that
-    // were there when the phase started.
-    for (const entry of [...registrations]) {
-      if (state.immediatePropagationStopped) return
-      if (entry.capture !== capture) continue
-      if (entry.once) this.removeEventListener(event.type, entry.listener, entry.capture)
-      try {
-        entry.listener(event)
-      } catch (error) {
-        fail(error)
-      }
-    }
-  }
-}
+const DOCUMENT_ANIMATIONS_KEY = Symbol.for("@ghia/native/document-animations")
 
 const typeSubscribers = new Set<() => void>()
 const notifyTypeSubscribers = () => {
@@ -212,29 +122,11 @@ const elementSources: Map<object, ElementSourceEntry> = (() => {
 })()
 let focusClock = 0
 
-/**
- * The document is the top of every mounted tree. It lists the `<html>` of each window, the
- * most recent of which is `document.documentElement`: one document spans every window. With no
- * window it lists the stand-in `<html>` (`dom/stand-in-document.ts`), as a browser's document always has one.
- */
-const DOCUMENT_BINDING: NodeBinding = {
-  parent: null,
-  get children(): readonly Node[] {
-    const windows = [...elementSources.values()].flatMap((entry) => {
-      const elements = entry.source.documentElements()
-      return elements === null ? [] : [elements.html as Node]
-    })
-    return windows.length > 0 ? windows : [standInDocumentElements().html as Node]
-  },
-  connected: true,
-  root: null,
-}
-
 type StandInDocument = {
-  /** The `<html>`, `<head>` and `<body>` `document` answers with while no root is mounted. */
-  elements: () => DocumentElements
-  /** The first root mounted: the stand-ins give what was written to them to its elements and stop being the document's. */
-  replace: (mounted: DocumentElements) => void
+  /** The `<html>`, `<head>` and `<body>` a document answers with while no root of its window is mounted. */
+  elements: (document: GpuixDocument) => DocumentElements
+  /** A root of the document's window mounted: the stand-ins give what was written to them to its elements and stop being the document's. */
+  replace: (document: GpuixDocument, mounted: DocumentElements) => void
 }
 
 let standInDocument: StandInDocument | undefined
@@ -247,28 +139,11 @@ export function installStandInDocument(stand: StandInDocument): void {
   standInDocument = stand
 }
 
-function standInDocumentElements(): DocumentElements {
-  return installedStandIn().elements()
-}
-
 function installedStandIn(): StandInDocument {
   if (standInDocument === undefined) {
     throw new Error("The stand-in document is not installed: import @ghia/native/host before reading document.documentElement")
   }
   return standInDocument
-}
-
-/** The way the window `document` stands for makes nodes; throws while nothing is mounted. */
-function currentNodeFactory(method: string): DomNodeFactory {
-  const renderer = mountedRenderer()
-  if (renderer === undefined) {
-    throw new Error(`document.${method} needs a mounted Ghia root. Call it after render().`)
-  }
-  const factory = elementSources.get(renderer)?.source.nodeFactory
-  if (factory === undefined || factory === null) {
-    throw new Error(`The root of this window cannot make nodes, so document.${method} is unavailable`)
-  }
-  return factory
 }
 
 const XML_NAME = /^[A-Za-z_:][-A-Za-z0-9_:.]*$/
@@ -285,13 +160,6 @@ function unsupportedElement(name: string, method: string): DOMException {
   return new DOMException(`Failed to execute '${method}' on 'Document': <${name}> is not an element Ghia draws.`, "NotSupportedError")
 }
 
-/** The elements of the window `document` stands for: the most recently mounted root's, or the stand-in's while none is mounted. */
-function currentDocumentElements(): DocumentElements {
-  const renderer = mountedRenderer()
-  const mounted = renderer === undefined ? null : elementSources.get(renderer)?.source.documentElements() ?? null
-  return mounted ?? standInDocumentElements()
-}
-
 function finiteCoordinate(value: number, name: string): number {
   const coordinate = Number(value)
   if (!Number.isFinite(coordinate)) {
@@ -301,23 +169,85 @@ function finiteCoordinate(value: number, name: string): number {
 }
 
 /**
- * The `document` of a GPUIX app: a DOM `Document` node that is also the `window` target,
- * plus `activeElement` and `pointerLockElement`.
+ * The `document` of one window of a GPUIX app: a DOM `Document` node that is also, with its window's
+ * target, the top of the event path of that window's tree. It has its own `<html>`, `<head>` and
+ * `<body>` (the elements its window's root made), `activeElement`, selection, `adoptedStyleSheets`
+ * and node factories. The first window's is the global `document`.
  *
  * `Element` is what the adapter hands out for an element: React's host
  * instance, Solid's element.
  */
 export class GpuixDocument<Element = unknown> extends Document {
   private readonly target: GpuixEventTarget
+  private readonly binding: NodeBinding
+  readonly #selection: Selection
+  readonly #adopted = createAdoptedStyleSheets((sheets) => {
+    const renderer = this.window.renderer
+    if (renderer !== undefined) setAdoptedSheets(renderer, sheets)
+  })
 
   /** @param onTypesChange Called when a type gains its first listener or loses its last. */
-  constructor(onTypesChange?: () => void) {
+  constructor(
+    readonly window: GpuixWindow,
+    onTypesChange?: () => void
+  ) {
     super()
     this.target = new GpuixEventTarget(onTypesChange, this)
+    const document = this
+    this.binding = {
+      parent: null,
+      get children(): readonly Node[] {
+        return [document.documentElements().html as Node]
+      },
+      connected: true,
+      root: null,
+    }
+    this.#selection = createSelection({
+      document: this as unknown as Node,
+      renderer: () => this.window.mountedRenderer,
+      hooks: {
+        listens: () => this.listensForSelectionChange(),
+        dispatch: () => {
+          this.dispatchEvent(new Event("selectionchange"))
+        },
+        heldChanged: notifyTypeSubscribers,
+        focusHost: (host) => {
+          const focused = this.liveEntry()?.focused
+          if (focused !== undefined && focused !== null && host.contains(focused as Node)) return
+          ;(host as unknown as FocusableElement).focus({ preventScroll: true })
+        },
+      },
+    })
   }
 
   [DOM_BINDING](): NodeBinding {
-    return DOCUMENT_BINDING
+    return this.binding
+  }
+
+  /** The window's root, or `undefined` while none is mounted and after the window closed. */
+  private liveEntry(): ElementSourceEntry | undefined {
+    const renderer = this.window.renderer
+    const entry = renderer === undefined ? undefined : elementSources.get(renderer)
+    return entry === undefined || entry.windowGone ? undefined : entry
+  }
+
+  /** @internal The `<html>`, `<head>` and `<body>` of the window's root, or the document's stand-ins while it has none. */
+  documentElements(): DocumentElements {
+    const mounted = this.liveEntry()?.source.documentElements() ?? null
+    return mounted ?? installedStandIn().elements(this)
+  }
+
+  /** @internal The way this window's root makes nodes; throws while nothing is mounted. */
+  private nodeFactory(method: string): DomNodeFactory {
+    const entry = this.liveEntry()
+    if (entry === undefined) {
+      throw new Error(`document.${method} needs a mounted Ghia root. Call it after render().`)
+    }
+    const factory = entry.source.nodeFactory
+    if (factory === null) {
+      throw new Error(`The root of this window cannot make nodes, so document.${method} is unavailable`)
+    }
+    return factory
   }
 
   private executingCommand = false
@@ -331,7 +261,7 @@ export class GpuixDocument<Element = unknown> extends Document {
     if (this.executingCommand) return false
     this.executingCommand = true
     try {
-      return documentCommands().exec(String(commandId))
+      return documentCommands().exec(this, String(commandId))
     } finally {
       this.executingCommand = false
     }
@@ -342,16 +272,21 @@ export class GpuixDocument<Element = unknown> extends Document {
   }
 
   queryCommandEnabled(commandId: string): boolean {
-    return documentCommands().enabled(String(commandId))
+    return documentCommands().enabled(this, String(commandId))
   }
 
-  /** The constructed sheets that apply to every window of the app, in order; later ones win. */
+  /** The constructed sheets that apply to this document's window, in order; later ones win. */
   get adoptedStyleSheets(): CSSStyleSheet[] {
-    return getAdoptedStyleSheets()
+    return this.#adopted.array
   }
 
   set adoptedStyleSheets(sheets: Iterable<CSSStyleSheet>) {
-    replaceAdoptedStyleSheets(sheets)
+    this.#adopted.replace(sheets)
+  }
+
+  /** @internal The window got a renderer (the global window moved to another): its native tree is told the sheets. */
+  sendAdoptedSheets(renderer: NativeRenderer): void {
+    setAdoptedSheets(renderer, this.#adopted.array)
   }
 
   addEventListener(
@@ -391,23 +326,28 @@ export class GpuixDocument<Element = unknown> extends Document {
     this.target.run(event, state, capture, phase, fail)
   }
 
+  /** @internal Whether anything listens for `selectionchange` on this document or its window. */
+  listensForSelectionChange(): boolean {
+    return this.hasListeners("selectionchange") || this.window.events.hasListeners("selectionchange")
+  }
+
   /**
    * Dispatches an event an app built (`new Event`, `new CustomEvent`, `new PointerEvent`) at
-   * `document`: `window` hears its capture phase, `document` its target phase, and `window` its
+   * `document`: its window hears its capture phase, `document` its target phase, and the window its
    * bubble phase if it bubbles. Returns false when a listener called `preventDefault()` on a
    * cancelable event. Throws an `InvalidStateError` for an event already being dispatched.
    */
   dispatchEvent(event: Event): boolean {
     const state = beginDispatch(event, this)
     const errors: unknown[] = []
-    walkAtTop(event as unknown as DomEvent, state, propagationHooks(), (error) => errors.push(error))
+    walkAtTop(event as unknown as DomEvent, state, propagationHooks(this.window), (error) => errors.push(error), this)
     endDispatch(state)
     errors.forEach(reportUncaught)
     return !event.defaultPrevented
   }
 
   /**
-   * A new element of the window that mounted last, in no tree: insert it under a node in the
+   * A new element of this document's window, in no tree: insert it under a node in the
    * document and it is drawn. `tagName` is lowercased, as in an HTML document. A name that is
    * not one of the element types throws `NotSupportedError`, where a browser has an unknown
    * element.
@@ -417,7 +357,7 @@ export class GpuixDocument<Element = unknown> extends Document {
     assertElementName(name, "createElement")
     const type = name.toLowerCase()
     if (!isElementType(type)) throw unsupportedElement(type, "createElement")
-    return currentNodeFactory("createElement").createElement(type) as HTMLElement
+    return this.made(this.nodeFactory("createElement").createElement(type)) as HTMLElement
   }
 
   /** `createElement` for the SVG namespace (names as written, `linearGradient`) or the HTML one. */
@@ -428,31 +368,80 @@ export class GpuixDocument<Element = unknown> extends Document {
     if (wanted === null || !isElementType(name) || isSvgElementType(name) !== (wanted === "svg")) {
       throw unsupportedElement(name, "createElementNS")
     }
-    return currentNodeFactory("createElementNS").createElement(name) as Element
+    return this.made(this.nodeFactory("createElementNS").createElement(name)) as Element
   }
 
-  /** A new text node of the window that mounted last, in no tree. */
+  /** A new text node of this document's window, in no tree. */
   createTextNode(data: string): Text {
-    return currentNodeFactory("createTextNode").createTextNode(String(data))
+    return this.made(this.nodeFactory("createTextNode").createTextNode(String(data)))
   }
 
-  /** A new empty `DocumentFragment` of the window that mounted last. */
+  /** A new empty `DocumentFragment` of this document's window. */
   createDocumentFragment(): DocumentFragment {
-    return currentNodeFactory("createDocumentFragment").createDocumentFragment() as DocumentFragment
+    return this.made(this.nodeFactory("createDocumentFragment").createDocumentFragment()) as DocumentFragment
   }
 
-  /** A new `Range` collapsed at the start of the document: `(document, 0)`. */
-  createRange(): Range {
-    return new Range()
+  private made<Made extends object>(node: Made): Made {
+    adoptSubtree(node as unknown as Node, this)
+    return node
   }
 
   /**
-   * Whether a window of the app is open. Native does not tell JS which window is the key one, so
-   * the document of an app with a window is taken to have focus.
+   * Takes `node` out of the tree it is in and makes this document its owner, as browsers do. A node
+   * that a window mounted belongs to that window for good: it throws `HierarchyRequestError`, as moving it
+   * into another window's tree does.
+   */
+  adoptNode<Adopted extends Node>(node: Adopted): Adopted {
+    if (!(node instanceof Node)) {
+      throw new TypeError("Failed to execute 'adoptNode' on 'Document': parameter 1 is not of type 'Node'.")
+    }
+    if (node.nodeType === NODE_TYPE_DOCUMENT) {
+      throw new DOMException("Failed to execute 'adoptNode' on 'Document': Nodes of type '#document' may not be adopted.", "NotSupportedError")
+    }
+    const owner = ownerDocumentOf(node)
+    if (owner !== (this as unknown as Document) && node[DOM_BINDING]().root !== null) throw crossRootError()
+    node.parentNode?.removeChild(node)
+    if (owner !== (this as unknown as Document)) adoptSubtree(node, this)
+    return node
+  }
+
+  /** A copy of `node`, with its children when `deep`, that this document owns and no tree holds yet. */
+  importNode<Imported extends Node>(node: Imported, deep = false): Imported {
+    if (!(node instanceof Node)) {
+      throw new TypeError("Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.")
+    }
+    if (node.nodeType === NODE_TYPE_DOCUMENT) {
+      throw new DOMException("Failed to execute 'importNode' on 'Document': The node provided is a document, which may not be imported.", "NotSupportedError")
+    }
+    const clone = node.cloneNode(Boolean(deep)) as Imported
+    if (ownerDocumentOf(clone) !== (this as unknown as Document)) {
+      if (clone[DOM_BINDING]().root !== null) throw crossRootError()
+      adoptSubtree(clone, this)
+    }
+    return clone
+  }
+
+  /** A new `Range` collapsed at the start of this document: `(document, 0)`. */
+  createRange(): Range {
+    const range = new Range()
+    range.setStart(this as unknown as Node, 0)
+    range.collapse(true)
+    return range
+  }
+
+  /**
+   * Whether this document's window has focus. Native does not tell JS which window is the key one,
+   * so it is the open window that heard a focus event last, and the first one open while none has.
    */
   hasFocus(): boolean {
-    for (const entry of elementSources.values()) if (!entry.windowGone) return true
-    return false
+    const own = this.liveEntry()
+    if (own === undefined) return false
+    let key: ElementSourceEntry | undefined
+    for (const entry of elementSources.values()) {
+      if (entry.windowGone) continue
+      if (key === undefined || entry.focusedAt > key.focusedAt) key = entry
+    }
+    return key === own
   }
 
   /** A `TreeWalker` over `root`, standing on `root`, as `document.createTreeWalker` does: `whatToShow` is every node by default. */
@@ -460,19 +449,19 @@ export class GpuixDocument<Element = unknown> extends Document {
     return createTreeWalker(root, whatToShow, filter)
   }
 
-  /** The `<html>` element of the window that mounted last, or the stand-in `<html>` while nothing is mounted: never `null`. */
+  /** The `<html>` element of this document's window, or the document's stand-in `<html>` while none is mounted: never `null`. */
   get documentElement(): Element {
-    return currentDocumentElements().html as Element
+    return this.documentElements().html as Element
   }
 
-  /** The `<head>` element of the window that mounted last, before `body` in `documentElement`. */
+  /** The `<head>` element of this document's window, before `body` in `documentElement`. */
   get head(): Element {
-    return currentDocumentElements().head as Element
+    return this.documentElements().head as Element
   }
 
-  /** The `<body>` element of the window that mounted last: where the app's top-level nodes are. */
+  /** The `<body>` element of this document's window: where the app's top-level nodes are. */
   get body(): Element {
-    return currentDocumentElements().body as Element
+    return this.documentElements().body as Element
   }
 
   /** `"CSS1Compat"`: the document is laid out as a standards-mode page, which is what a library that tests for quirks mode expects. */
@@ -486,17 +475,14 @@ export class GpuixDocument<Element = unknown> extends Document {
   }
 
   /**
-   * The elements under the point `(x, y)` of the window that mounted last, in CSS pixels from its
+   * The elements under the point `(x, y)` of this document's window, in CSS pixels from its
    * top left corner, topmost first and ending with `body` then `html`: what `elementFromPoint`
    * answers with its first. Empty for a point outside the window. The window is laid out first,
    * so an element mounted in this turn is found, and `pointer-events: none`, `visibility: hidden`
    * and `display: none` elements are left out.
    */
   elementsFromPoint(x: number, y: number): Element[] {
-    const renderer = mountedRenderer()
-    if (renderer === undefined) {
-      throw new Error("document.elementsFromPoint needs a mounted GPUIX root. Call it after render().")
-    }
+    const renderer = this.window.requireRenderer("document.elementsFromPoint")
     if (renderer.getElementsAt === undefined) {
       throw new Error("This renderer cannot hit test, so document.elementsFromPoint is unavailable")
     }
@@ -515,19 +501,19 @@ export class GpuixDocument<Element = unknown> extends Document {
   }
 
   /**
-   * The place in a Text node at the point `(x, y)` of the window that mounted last, in CSS pixels from
+   * The place in a Text node at the point `(x, y)` of this document's window, in CSS pixels from
    * its top left corner: the text under the point, or the nearest painted text, and the offset of the
    * character boundary nearest to it. `null` when no text is painted. A point over no text still
    * answers, with the nearest one (deviations.md).
    */
   caretPositionFromPoint(x: number, y: number, _options?: unknown): CaretPosition | null {
-    const found = caretFromPoint(finiteCoordinate(x, "x"), finiteCoordinate(y, "y"))
+    const found = caretFromPoint(this.window.requireRenderer("document.caretPositionFromPoint"), finiteCoordinate(x, "x"), finiteCoordinate(y, "y"))
     return found === null ? null : createCaretPosition(found.node, found.offset)
   }
 
   /** `caretPositionFromPoint` as a collapsed `Range`. */
   caretRangeFromPoint(x: number, y: number): Range | null {
-    const found = caretFromPoint(finiteCoordinate(x, "x"), finiteCoordinate(y, "y"))
+    const found = caretFromPoint(this.window.requireRenderer("document.caretRangeFromPoint"), finiteCoordinate(x, "x"), finiteCoordinate(y, "y"))
     if (found === null) return null
     const range = new Range()
     range.setStart(found.node, found.offset)
@@ -535,110 +521,176 @@ export class GpuixDocument<Element = unknown> extends Document {
     return range
   }
 
-  /** The text selection of the window that mounted last. */
+  /** The text selection of this document's window. */
   getSelection(): Selection {
-    return getSelection()
+    return this.#selection
   }
 
   /**
-   * The global object, which `dom-globals` installs as `window`: where a library that takes
-   * `element.ownerDocument.defaultView` as its window finds `setTimeout`, `requestAnimationFrame`
-   * and `ResizeObserver`. There is one window object for every window of the app.
+   * The window the document is in: the global object, which `dom-globals` installs as `window`, for the first
+   * window (where a library that takes `element.ownerDocument.defaultView` as its window finds
+   * `setTimeout`, `requestAnimationFrame` and `ResizeObserver`), and the window's own target for another.
    */
   get defaultView(): typeof globalThis {
-    return globalThis
+    return (this.window === globalWindow() ? globalThis : this.window) as typeof globalThis
   }
 
   /**
-   * The focused element, the same object a `ref` gives, or `body` when nothing
-   * is focused, as in a browser (floating-ui's focus management compares the active
+   * The focused element of this document's window, the same object a `ref` gives, or `body` when
+   * nothing is focused, as in a browser (floating-ui's focus management compares the active
    * element with `document.body` to tell "focus was lost" from "focus went elsewhere").
-   * With several windows (one root each), the window that holds focus decides: of the
-   * roots that have a focused element, the one that heard a focus event last.
    */
   get activeElement(): Element {
-    let chosen: { entry: ElementSourceEntry; id: number } | undefined
-    for (const entry of elementSources.values()) {
-      if (entry.windowGone) continue
-      const id = entry.source.focusedId()
-      if (id === null) continue
-      if (!chosen || entry.focusedAt > chosen.entry.focusedAt) chosen = { entry, id }
-    }
-    if (!chosen) return this.body
-    const element = chosen.entry.source.elementById(chosen.id)
+    const entry = this.liveEntry()
+    const id = entry?.source.focusedId() ?? null
+    if (entry === undefined || id === null) return this.body
+    const element = entry.source.elementById(id)
     if (element === undefined) {
-      throw new Error(`Element ${chosen.id} holds focus but its root has no element for it`)
+      throw new Error(`Element ${id} holds focus but its root has no element for it`)
     }
     return element as Element
   }
 
   /**
-   * The element that holds the pointer lock, the same object a `ref` gives, or
-   * `null` while none does. Where the platform can lock (macOS) it is held as
+   * The element of this document's window that holds the pointer lock, the same object a `ref`
+   * gives, or `null` while none does. Where the platform can lock (macOS) it is held as
    * soon as `requestPointerLock()` returns, before `pointerlockchange` arrives.
    */
   get pointerLockElement(): Element | null {
-    for (const entry of elementSources.values()) {
-      if (entry.windowGone) continue
-      const id = entry.source.pointerLockId()
-      if (id === null) continue
-      const element = entry.source.elementById(id)
-      if (element === undefined) {
-        throw new Error(`Element ${id} holds the pointer lock but its root has no element for it`)
-      }
-      return element as Element
+    const entry = this.liveEntry()
+    const id = entry?.source.pointerLockId() ?? null
+    if (entry === undefined || id === null) return null
+    const element = entry.source.elementById(id)
+    if (element === undefined) {
+      throw new Error(`Element ${id} holds the pointer lock but its root has no element for it`)
     }
-    return null
+    return element as Element
   }
 
   /**
-   * The CSS transitions, then the CSS animations, of every window, as `Animation` objects: for
-   * each renderer in the order its root was installed, those of its elements in document order
-   * (every transition, then every animation). The same objects `element.getAnimations()` gives.
+   * The CSS transitions, then the CSS animations, of this document's window, as `Animation` objects:
+   * those of its elements in document order (every transition, then every animation). The same
+   * objects `element.getAnimations()` gives.
    */
   getAnimations(): Animation[] {
     const list = Reflect.get(globalThis, DOCUMENT_ANIMATIONS_KEY) as ((renderer: object) => Animation[]) | undefined
     if (!list) throw new Error("Web Animations are not loaded: import @ghia/native/host before document.getAnimations()")
-    return [...elementSources].flatMap(([renderer, entry]) => (entry.windowGone ? [] : list(renderer)))
+    const renderer = this.window.renderer
+    return renderer === undefined || this.liveEntry() === undefined ? [] : list(renderer)
   }
 }
 
-/**
- * Kept on `globalThis` like the element sources: the module that makes `Animation` objects
- * (`web-animations`) imports this one, so it hands `document` the way to list a renderer's.
- */
-const DOCUMENT_ANIMATIONS_KEY = Symbol.for("@ghia/native/document-animations")
+const NODE_TYPE_DOCUMENT = 9
 
 /** @internal Called by `web-animations` once, with how to list the animations of one renderer's window. */
 export function setDocumentAnimations(list: (renderer: object) => Animation[]): void {
   Reflect.set(globalThis, DOCUMENT_ANIMATIONS_KEY, list)
 }
 
-/** Calls `listener` whenever a type gains its first listener or loses its last on `window` or `document`. */
+function createWindow(isGlobal: boolean): GpuixWindow {
+  // Its listeners see the global object, which `dom-globals` installs as `window`, as `currentTarget`.
+  const made: GpuixWindow = new GpuixWindow({
+    onTypesChange: notifyTypeSubscribers,
+    owner: isGlobal ? globalThis : undefined,
+    mounted: () => {
+      const renderer = made.renderer
+      if (renderer === undefined) return false
+      const entry = elementSources.get(renderer)
+      return entry === undefined ? made.attached && !made.closed : !entry.windowGone
+    },
+  })
+  made.bindDocument(new GpuixDocument(made, notifyTypeSubscribers))
+  return made
+}
+
+type WindowRegistry = {
+  /** The window of each renderer. */
+  records: WeakMap<object, GpuixWindow>
+  /**
+   * The global window and `document`: the first window's, for as long as it lives. They are made before
+   * any window exists and work as a stand-in until one mounts, and a window that mounts while no
+   * other holds them (none was before, or the one that did was disposed or unmounted and has no
+   * window open) takes them over. A window that mounts while another holds them gets its own.
+   */
+  global: GpuixWindow
+}
+
+/** Kept on `globalThis` like the element sources: a second evaluation of this module (`bun --hot`, two copies of the package) shares the windows. */
+const REGISTRY_KEY = Symbol.for("@ghia/native/window-registry")
+
+const registry: WindowRegistry = (() => {
+  const existing = Reflect.get(globalThis, REGISTRY_KEY) as WindowRegistry | undefined
+  if (existing) return existing
+  const created: WindowRegistry = { records: new WeakMap(), global: createWindow(true) }
+  Reflect.set(globalThis, REGISTRY_KEY, created)
+  return created
+})()
+
+const records = registry.records
+const globalRecord = registry.global
+
+export const window = globalRecord.events
+export const document = globalRecord.document
+
+/** The global window: what `globalThis.window` is, and the first window's target. */
+export function globalWindow(): GpuixWindow {
+  return globalRecord
+}
+
+/** Whether a renderer can still become the global window's: no root holds it, and its window did not close. */
+function globalAvailable(): boolean {
+  const holder = globalRecord.renderer
+  return holder === undefined || (!globalRecord.closed && !globalRecord.attached && !elementSources.has(holder))
+}
+
+function takeGlobal(renderer: NativeRenderer): GpuixWindow {
+  const previous = globalRecord.renderer
+  if (previous !== undefined) records.delete(previous)
+  globalRecord.renderer = renderer
+  globalRecord.closed = false
+  records.set(renderer, globalRecord)
+  globalRecord.document.sendAdoptedSheets(renderer)
+  globalRecord.syncResize()
+  return globalRecord
+}
+
+/**
+ * @internal The window of `renderer`: its `document`, its event target at the top of the event path
+ * and the members of `window` that are its own. The first renderer asked for takes the global window;
+ * every other gets a window of its own, which it keeps for its life.
+ */
+export function windowOf(renderer: NativeRenderer): GpuixWindow {
+  const known = records.get(renderer)
+  if (known !== undefined) return known
+  if (globalAvailable()) return takeGlobal(renderer)
+  const made = createWindow(false)
+  made.renderer = renderer
+  records.set(renderer, made)
+  made.document.sendAdoptedSheets(renderer)
+  return made
+}
+
+/** @internal The document of `renderer`'s window. */
+export function documentOf(renderer: NativeRenderer): GpuixDocument {
+  return windowOf(renderer).document
+}
+
+/** The document a node belongs to: its window's once mounted, else the document that made or adopted it, else the global `document`. */
+function ownerDocumentOfNode(node: Node): Document {
+  const root = node[DOM_BINDING]().root
+  if (root !== null) return documentOf(root.nativeRenderer as NativeRenderer) as unknown as Document
+  return makerDocumentOf(node) ?? (document as unknown as Document)
+}
+
+registerDocument(document as unknown as Document, ownerDocumentOfNode)
+
+/** Calls `listener` whenever a type gains its first listener or loses its last on a `window` or `document`. */
 export function subscribeWindowEventTypes(listener: () => void): () => void {
   typeSubscribers.add(listener)
   return () => {
     typeSubscribers.delete(listener)
   }
 }
-
-/** Its listeners see the global object, which `dom-globals` installs as `window`, as `currentTarget`. */
-export const window = new GpuixEventTarget(notifyTypeSubscribers, globalThis)
-export const document = new GpuixDocument(notifyTypeSubscribers)
-registerDocument(document)
-setSelectionHooks({
-  listens: () => listensForSelectionChange(),
-  dispatch: () => {
-    document.dispatchEvent(new Event("selectionchange"))
-  },
-  heldChanged: notifyTypeSubscribers,
-  focusHost: (host) => {
-    for (const entry of elementSources.values()) {
-      if (!entry.windowGone && entry.focused !== null && host.contains(entry.focused as Node)) return
-    }
-    ;(host as unknown as FocusableElement).focus({ preventScroll: true })
-  },
-})
 
 /**
  * Lets the runtime see the elements of the root that drives `renderer`, through
@@ -670,36 +722,48 @@ export function installElementSource(
     focusedAt: 0,
     focused: null,
   }
-  const firstRoot = elementSources.size === 0
+  const owner = windowOf(renderer as NativeRenderer)
   elementSources.set(renderer, entry)
   bumpTreeVersion()
-  if (firstRoot) {
-    const mounted = entry.source.documentElements()
-    // Not installed: nothing could have read a stand-in, which throws.
-    if (mounted !== null) standInDocument?.replace(mounted)
-  }
+  const mounted = entry.source.documentElements()
+  // Not installed: nothing could have read a stand-in, which throws.
+  if (mounted !== null) standInDocument?.replace(owner.document, mounted)
+  owner.syncResize()
   return () => {
     if (elementSources.get(renderer) === entry) {
       elementSources.delete(renderer)
       bumpTreeVersion()
+      owner.syncResize()
     }
   }
 }
 
-/** Drops the root of `renderer` whose window is gone, so nothing asks it for elements. */
+/**
+ * Releases `renderer` for good, as a test window's `dispose()` does: nothing asks its root for
+ * elements, and if it held the global window, even a closed one, the next window to mount takes it.
+ */
 export function forgetElementSource(renderer: object): void {
   elementSources.delete(renderer)
   bumpTreeVersion()
+  const owner = records.get(renderer)
+  if (owner === undefined) return
+  if (owner === globalRecord) owner.closed = false
+  owner.syncResize()
 }
 
 /**
  * Stops asking `renderer` what is focused or animating, for a renderer whose
  * window another took over or that was closed: its root still names its
- * elements, but the window it would ask about is not its own any more.
+ * elements, but the window it would ask about is not its own any more. Its document
+ * has no roots from then on, and if it is the global one it stays the global one.
  */
 export function forgetWindowSource(renderer: object): void {
   const entry = elementSources.get(renderer)
   if (entry) entry.windowGone = true
+  const owner = records.get(renderer)
+  if (owner === undefined) return
+  owner.closed = true
+  owner.syncResize()
 }
 
 /**
@@ -737,17 +801,16 @@ export function trackFocusedElement(owner: object, eventType: "focusin" | "focus
 }
 
 /**
- * Keeps `renderer` told which event types `window` or `document` listens for,
+ * Keeps `renderer` told which event types its window or its document listens for,
  * so native produces them even when no element on the event's path does (the
  * pointer over bare background). Sends the current set now and again whenever
  * it changes. The returned function clears it on the renderer and stops.
  */
-export function syncWindowEventListeners(renderer: {
-  setWindowEventListeners?: (types: string[]) => void
-}): () => void {
+export function syncWindowEventListeners(renderer: NativeRenderer): () => void {
+  const owner = windowOf(renderer)
   const send = () => {
     renderer.setWindowEventListeners?.([
-      ...new Set([...window.listenedTypes(), ...document.listenedTypes()]),
+      ...new Set([...owner.events.listenedTypes(), ...owner.document.listenedTypes()]),
     ])
   }
   send()
@@ -758,31 +821,27 @@ export function syncWindowEventListeners(renderer: {
   }
 }
 
-/** Whether anything listens for `selectionchange`, which native only produces while it is asked to. */
-export function listensForSelectionChange(): boolean {
-  return document.hasListeners("selectionchange") || window.hasListeners("selectionchange")
-}
-
 /**
- * Whether native's `selectionChange` is wanted: for a listener, and while a node selection is held,
- * which painted text that the user selects replaces.
+ * Whether native's `selectionChange` is wanted in `owner`: for a listener, and while a node selection
+ * is held, which painted text that the user selects replaces.
  */
-export function wantsNativeSelectionChange(): boolean {
-  return listensForSelectionChange() || holdsNodeSelection()
+export function wantsNativeSelectionChange(owner: GpuixWindow): boolean {
+  return owner.document.listensForSelectionChange() || holdsNodeSelection(owner.document.getSelection())
 }
 
 /**
  * Keeps the renderer's `selectionChange` event on while `rootListens()` says the root wants it or a
- * `selectionchange` listener exists on `window` or `document`, or a node selection is held. `resync` after `rootListens` may
+ * `selectionchange` listener exists on its `window` or `document`, or a node selection is held. `resync` after `rootListens` may
  * have changed; `stop` turns it off. Native names the window's event with `eventId`.
  */
 export function syncWindowSelectionChange(
-  renderer: { setWindowSelectionChange?: (enabled: boolean, eventId: number) => void },
+  renderer: NativeRenderer,
   eventId: number,
   rootListens: () => boolean
 ): { resync: () => void; stop: () => void } {
+  const owner = windowOf(renderer)
   const resync = () => {
-    renderer.setWindowSelectionChange?.(rootListens() || wantsNativeSelectionChange(), eventId)
+    renderer.setWindowSelectionChange?.(rootListens() || wantsNativeSelectionChange(owner), eventId)
   }
   resync()
   typeSubscribers.add(resync)
@@ -796,11 +855,11 @@ export function syncWindowSelectionChange(
 }
 
 /**
- * Sends `selectionchange` to `document`, as the DOM does: it does not bubble, so `window` hears
+ * Sends `selectionchange` to `owner`'s `document`, as the DOM does: it does not bubble, so its window hears
  * it in the capture phase only. `payload.value` is the selected text, absent after a clear.
  */
-export function dispatchSelectionChange(root: DomEventRoot, payload: EventPayload): void {
-  dispatchPropagating(root, { ...payload, eventType: "selectionchange", elementId: 0 })
+export function dispatchSelectionChange(root: DomEventRoot, payload: EventPayload, owner: GpuixWindow): void {
+  dispatchPropagating(root, { ...payload, eventType: "selectionchange", elementId: 0 }, owner)
 }
 
 const DOCUMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["pointerlockchange", "pointerlockerror", "selectionchange"])
@@ -816,9 +875,10 @@ export interface PropagationResult extends DomDispatchResult {
 }
 
 /**
- * Runs an event through the whole propagation: window capture, document
+ * Runs an event through the whole propagation: its window's capture, its document's
  * capture, the element path, document bubble, window bubble. An event with no
- * element path is aimed at the window and only those two targets hear it.
+ * element path is aimed at the window and only those two targets hear it. `top` is the
+ * window the event happened in: another window's `window` and `document` never hear it.
  *
  * `scoped` is a window-level target that belongs to one renderer, such as the
  * `onKeyDown` option of its root. It hears the bubble phase after `window`.
@@ -826,9 +886,10 @@ export interface PropagationResult extends DomDispatchResult {
 export function dispatchPropagating(
   root: DomEventRoot,
   payload: EventPayload,
+  top: GpuixWindow,
   scoped?: GpuixEventTarget
 ): PropagationResult {
-  const hooks = propagationHooks(scoped)
+  const hooks = propagationHooks(top, scoped)
   if (payload.path && payload.path.length > 0) {
     let seen: DomEvent | undefined
     const result = dispatchDomEvent(root, payload, {
@@ -846,10 +907,10 @@ export function dispatchPropagating(
     root,
     payload,
     [],
-    isDocumentEvent(payload.eventType) ? document : null
+    isDocumentEvent(payload.eventType) ? top.document : null
   )
   const errors: unknown[] = []
-  walkAtTop(event, state, hooks, (error) => errors.push(error))
+  walkAtTop(event, state, hooks, (error) => errors.push(error), top.document)
   reportHandlerErrors(root, errors)
   return {
     defaultPrevented: event.defaultPrevented,
@@ -858,21 +919,22 @@ export function dispatchPropagating(
   }
 }
 
-/** The phases of `window` and `document` around an element path: both listen in capture, `document` then `window` bubble. */
-function propagationHooks(scoped?: GpuixEventTarget): Required<DomDispatchHooks> {
+/** The phases of a window and its document around an element path: both listen in capture, the document then the window bubble. */
+function propagationHooks(top: GpuixWindow, scoped?: GpuixEventTarget): Required<DomDispatchHooks> {
+  const document = top.document
   // When `document` is the target, both its capture and bubble listeners run at the target.
   const documentPhase = (event: DomEvent, phase: number) =>
     event.target === document ? EVENT_PHASE_AT_TARGET : phase
   return {
     beforeCapture(event, state, fail) {
-      window.run(event, state, true, EVENT_PHASE_CAPTURING, fail)
+      top.events.run(event, state, true, EVENT_PHASE_CAPTURING, fail)
       if (!state.propagationStopped) {
         document.run(event, state, true, documentPhase(event, EVENT_PHASE_CAPTURING), fail)
       }
     },
     afterBubble(event, state, fail) {
       document.run(event, state, false, documentPhase(event, EVENT_PHASE_BUBBLING), fail)
-      if (!state.propagationStopped) window.run(event, state, false, EVENT_PHASE_BUBBLING, fail)
+      if (!state.propagationStopped) top.events.run(event, state, false, EVENT_PHASE_BUBBLING, fail)
       if (!state.propagationStopped) scoped?.run(event, state, false, EVENT_PHASE_BUBBLING, fail)
     },
   }
@@ -883,7 +945,8 @@ function walkAtTop(
   event: DomEvent,
   state: DispatchState,
   hooks: Required<DomDispatchHooks>,
-  fail: (error: unknown) => void
+  fail: (error: unknown) => void,
+  document: GpuixDocument
 ): void {
   state.dispatching = true
   hooks.beforeCapture(event, state, fail)
@@ -899,18 +962,19 @@ function walkAtTop(
 
 /**
  * `dispatchEvent` of a connected element: the event an app built walks the element's ancestors
- * (`path`, target first), with `window` and `document` around them, as one Ghia delivered does.
- * Listeners of a element that is not connected hear it alone. A listener that throws goes to
- * `report`, after the walk.
+ * (`path`, target first), with the `window` and `document` of its window around them, as one Ghia
+ * delivers does. Listeners of a element that is not connected hear it alone. A listener that
+ * throws goes to `report`, after the walk.
  */
 export function dispatchEventAlongPath(
   event: Event,
   path: readonly object[],
   handlersAt: HandlersAt,
   connected: boolean,
-  report: (error: unknown) => void
+  report: (error: unknown) => void,
+  top: GpuixWindow
 ): void {
-  const state = beginDispatch(event, path[0] ?? document)
+  const state = beginDispatch(event, path[0] ?? top.document)
   state.path = path
   const errors: unknown[] = []
   walkDomEvent(
@@ -918,7 +982,7 @@ export function dispatchEventAlongPath(
     state,
     path,
     handlersAt,
-    connected ? propagationHooks() : undefined,
+    connected ? propagationHooks(top) : undefined,
     (error) => errors.push(error)
   )
   endDispatch(state)
