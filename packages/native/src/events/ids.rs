@@ -26,9 +26,12 @@ pub fn host_hitbox<E: InteractiveElement>(el: E, pointer_events_none: bool) -> E
     }
 }
 
+/// The host element a GPUI id stands for. The box of a `::before` or `::after` is built under an id
+/// of its own and stands for the element it is generated for: a pointer over it is over that
+/// element ([`crate::layout::generated`]).
 pub fn host_id_of(element_id: &ElementId) -> Option<u64> {
     match element_id {
-        ElementId::NamedInteger(name, id) if name.as_ref() == NAMESPACE => Some(*id),
+        ElementId::NamedInteger(name, id) if name.as_ref() == NAMESPACE => Some(crate::layout::generated::owner_of(*id)),
         _ => None,
     }
 }

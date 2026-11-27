@@ -487,7 +487,12 @@ impl RetainedTree {
             out.extend(walked.iter().map(|id| (*id, true)));
             // Not a comparison of counts: the walk also lists a child id that has no element.
             let in_document: FxHashSet<u64> = walked.into_iter().collect();
-            out.extend(self.elements.keys().filter(|id| !in_document.contains(id)).map(|id| (*id, false)));
+            out.extend(
+                self.elements
+                    .keys()
+                    .filter(|id| !in_document.contains(id) && !crate::layout::generated::is_generated(**id))
+                    .map(|id| (*id, false)),
+            );
             return out;
         }
         let out: Vec<(u64, bool)> = Vec::with_capacity(marks.len());

@@ -354,7 +354,7 @@ pub(crate) fn settle_children(
 }
 
 fn settle_among(tree: &RetainedTree, parent: &RetainedElement, containers: &dyn Containers, changed: &mut bool) {
-    for child_id in crate::layout::contents::flatten(tree, &parent.children).iter() {
+    for child_id in crate::layout::contents::flatten_of(tree, parent).iter() {
         let Some(child) = tree.elements.get(child_id) else { continue };
         if let Some(style) = child.style.as_deref().filter(|style| style.container_rules.is_some()) {
             let folded = fold(style, containers);

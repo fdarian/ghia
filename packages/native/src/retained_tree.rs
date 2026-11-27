@@ -814,8 +814,8 @@ impl Dirty {
 
 /// What assigning a style changed, for the caller to mark the tree with.
 #[derive(Clone, Copy, Default)]
-struct StyleChange {
-    changed: bool,
+pub(crate) struct StyleChange {
+    pub(crate) changed: bool,
     /// The style differs in a key that is not only painted (see `StyleDesc::differs_only_in_paint`).
     layout: bool,
     /// It paints only, and a patch frame can follow it (`hover_paint::restyle_paints_strictly`).
@@ -1619,7 +1619,7 @@ impl RetainedTree {
         shrink_if_sparse(&mut self.geometry_ids);
     }
 
-    fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
+    pub(crate) fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
             self.removals += 1;
             self.list_markers.element_destroyed(&element.element_type);
@@ -1648,6 +1648,9 @@ impl RetainedTree {
             self.resolved.get_mut().forget(id);
             self.fresh.get_mut().remove(&id);
             destroyed.push(id);
+            if element.pseudo_matches().is_some() {
+                self.destroy_generated_of(id);
+            }
             for child_id in element.children {
                 self.destroy_element_recursive(child_id, destroyed);
             }
@@ -1903,7 +1906,7 @@ impl RetainedTree {
         }
         self.universal = universal;
         self.styles.layered.clear();
-        let ids: Vec<u64> = self.elements.keys().copied().collect();
+        let ids: Vec<u64> = self.elements.keys().copied().filter(|id| !crate::layout::generated::is_generated(*id)).collect();
         let mut total = StyleChange::default();
         for id in ids {
             total.absorb(self.refresh_effective_style(id, false));
@@ -1935,6 +1938,10 @@ impl RetainedTree {
     /// Recompute the effective style of `id` from the style it declared, over the universal
     /// layer, over the user agent style of its tag and of its `popover`, and assign it.
     fn refresh_effective_style(&mut self, id: u64, classify: bool) -> StyleChange {
+        // A generated box has the style its rules gave it and no layer under it.
+        if crate::layout::generated::is_generated(id) {
+            return StyleChange::default();
+        }
         let Some(element) = self.elements.get(&id) else {
             return StyleChange::default();
         };
@@ -1960,7 +1967,7 @@ impl RetainedTree {
     /// from, containing-block escapes and `visibility`. Marking the tree
     /// changed is the caller's, because the universal layer does it once for
     /// all elements.
-    fn assign_style(&mut self, id: u64, style: Option<Arc<StyleDesc>>, classify: bool) -> StyleChange {
+    pub(crate) fn assign_style(&mut self, id: u64, style: Option<Arc<StyleDesc>>, classify: bool) -> StyleChange {
         let Some(element) = self.elements.get_mut(&id) else {
             return StyleChange::default();
         };

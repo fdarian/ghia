@@ -8484,6 +8484,7 @@ impl BuildCtx<'_> {
     /// The states of an inline box, for the style it shows.
     fn inline_states(&self) -> impl Fn(u64, &StyleDesc) -> crate::events::state_styles::PointerStates + '_ {
         move |id: u64, style: &StyleDesc| {
+            let id = crate::layout::generated::state_owner(id);
             let inert = self
                 .tree
                 .elements
@@ -8504,6 +8505,7 @@ impl BuildCtx<'_> {
         let focus_styles = &self.focus_styles;
         let controls = &self.control_styles;
         let states = |id: u64, style: &StyleDesc| {
+            let id = crate::layout::generated::state_owner(id);
             let inert = tree
                 .elements
                 .get(&id)
@@ -12070,6 +12072,8 @@ fn build_element_unpumped(
     let Some(element) = tree.elements.get(&id) else {
         return absent_host(id);
     };
+    // The states of a generated box (`.btn:hover::before`) are those of the element it belongs to.
+    let state_id = crate::layout::generated::state_owner(id);
     crate::perf_counters::element_built();
     if contents_dynamic != 0 {
         ctx.retain.dynamic_bits(contents_dynamic | crate::retain::Dynamic::Spliced as u8);
@@ -12118,7 +12122,7 @@ fn build_element_unpumped(
     // folded into the base here, before motion, so the GPUI element never sees them: the dispatcher
     // decides who is hovered.
     let pointer_states = declared
-        .map(|style| ctx.pointer_states(id, style, element.has_inert_prop()))
+        .map(|style| ctx.pointer_states(state_id, style, element.has_inert_prop()))
         .unwrap_or_default();
     let state_style = declared.and_then(|style| {
         pointer_states
@@ -12129,13 +12133,13 @@ fn build_element_unpumped(
     // A `var()` reads the custom properties the element computes to, its own included, and those
     // of the focus variants that apply to it. It is substituted before anything reads the style, so inheritance, transitions, animations and
     // motion see what the element declares.
-    let (var_style, own_custom) = ctx.substitute_vars(id, base_style);
+    let (var_style, own_custom) = ctx.substitute_vars(state_id, base_style);
     if var_style.is_some() {
         crate::css::custom_properties::reads::note();
     }
     let base_style = var_style.as_deref().or(base_style);
     ctx.retain.pointer(pointer_states);
-    ctx.retain.focus(&ctx.focus_styles, id, ctx.focus_handles.contains_key(&id));
+    ctx.retain.focus(&ctx.focus_styles, state_id, ctx.focus_handles.contains_key(&state_id));
     if let Some(links) = crate::accessibility::links_key(id) {
         ctx.retain.shape(links);
     }
@@ -12189,7 +12193,15 @@ fn build_element_unpumped(
     // moved, as the builders lay it.
     let focus_reset_style = animated
         .current(base_style)
-        .and_then(|style| ctx.focus_styles.folded_for_resets(id, style, ctx.focus_handles.contains_key(&id)));
+        .and_then(|style| {
+            let focusable = ctx.focus_handles.contains_key(&state_id);
+            // A box has no focus handle for the builders to lay a variant over it with.
+            if state_id == id {
+                ctx.focus_styles.folded_for_resets(id, style, focusable)
+            } else {
+                ctx.focus_styles.folded_for_box(state_id, style, focusable)
+            }
+        });
     let current_style = focus_reset_style.as_deref().or(animated.current(base_style));
     // An atomic inline's overlay is laid over its style after it has descended (below): what the boxes around it
     // declare is in `ctx.inherited` already.
@@ -12262,7 +12274,7 @@ fn build_element_unpumped(
     // Children inherit what the element computes to with its focus variants laid over it, which
     // is the style a transitioning element already has (motion folds them), so with or without a
     // transition `.card:focus-within { color: red }` reaches the text below.
-    let descend_style = style.map(|style| ctx.focus_styles.folded(id, style, ctx.focus_handles.contains_key(&id)));
+    let descend_style = style.map(|style| ctx.focus_styles.folded(state_id, style, ctx.focus_handles.contains_key(&state_id)));
     let mut descended = ctx
         .inherited
         .clone()
@@ -12277,7 +12289,7 @@ fn build_element_unpumped(
         descended.colors = ctx
             .inherited
             .colors
-            .descend(&ctx.focus_styles.folded(id, overlaid, ctx.focus_handles.contains_key(&id)));
+            .descend(&ctx.focus_styles.folded(state_id, overlaid, ctx.focus_handles.contains_key(&state_id)));
     }
     let parent_inherited = std::mem::replace(&mut ctx.inherited, descended);
     let style = atomic_overlaid.as_ref().or(style);
@@ -12303,7 +12315,7 @@ fn build_element_unpumped(
     // the focus variants, which the builders lay over the element, folded in.
     let focus_folded = style.map(|style| {
         ctx.focus_styles
-            .folded(id, style, ctx.focus_handles.contains_key(&id))
+            .folded(state_id, style, ctx.focus_handles.contains_key(&state_id))
     });
     let resolved = crate::resolved_style::Resolved::of(
         element,
@@ -13102,7 +13114,7 @@ pub(crate) fn build_host_container(
     }
     // A skipped element is still read out, though its paragraphs are not built.
     let reads_text = !skipped || (a11y_active && crate::accessibility::carries_text(element));
-    let planned = (!element.children.is_empty() && reads_text).then(|| crate::text::plan_cache::planned(ctx.tree, element));
+    let planned = (!crate::layout::generated::childless(ctx.tree, element) && reads_text).then(|| crate::text::plan_cache::planned(ctx.tree, element));
     // Only a screen reader reads it, and the retained replay key has `a11y_active`.
     let text = if a11y_active && reads_text {
         crate::accessibility::read_text(element, planned.as_deref())
@@ -13157,7 +13169,11 @@ pub(crate) fn build_host_container(
     crate::text::atomic::report_containing_height(el, containing_heights);
     let focus_folded = style.map(|style| {
         ctx.focus_styles
-            .folded(element.id, style, ctx.focus_handles.contains_key(&element.id))
+            .folded(
+                crate::layout::generated::state_owner(element.id),
+                style,
+                ctx.focus_handles.contains_key(&crate::layout::generated::state_owner(element.id)),
+            )
     });
     if crate::layout::stacking::forms_context(
         focus_folded.as_deref(),
@@ -13419,7 +13435,7 @@ fn build_content(
     let mut content_elements = Vec::new();
     let mut placements = Vec::new();
     let trim = std::mem::take(&mut ctx.text_box_trim);
-    if element.children.is_empty() {
+    if crate::layout::generated::childless(ctx.tree, element) {
         if let Some(content) = crate::text::search::leaf_text(ctx.tree, element) {
             ctx.retain.text();
             ctx.inherited.colors.note_read();
@@ -13435,7 +13451,7 @@ fn build_content(
 
     // Children. Consecutive inline children are one paragraph, see
     // `text::inline`; the rest are elements of their own.
-    if !element.children.is_empty() {
+    if !crate::layout::generated::childless(ctx.tree, element) {
         // The baseline of an `inline-flex` or `inline-grid` box is its first item's.
         let probe = ctx
             .baseline_probe
@@ -13691,7 +13707,7 @@ fn build_contents_container(
     if let Some(variations) = ctx.inherited.font_variations.clone() {
         el = el.font_variations(variations);
     }
-    let planned = (!element.children.is_empty()).then(|| crate::text::plan_cache::planned(ctx.tree, element));
+    let planned = (!crate::layout::generated::childless(ctx.tree, element)).then(|| crate::text::plan_cache::planned(ctx.tree, element));
     let (content, placements, containing_heights) =
         build_content(element, planned.as_ref().map_or(&[], |planned| &planned.children), ctx, window, cx);
     el = crate::text::atomic::report_containing_height(el, containing_heights);

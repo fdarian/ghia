@@ -136,6 +136,18 @@ impl FocusStyles {
         Some(folded)
     }
 
+    /// [`Self::folded_for_resets`] for the box of a `::before` or `::after`, which has no focus handle for the
+    /// builders to lay a variant over it with: whichever variants apply are folded into the style.
+    pub fn folded_for_box(&self, id: u64, style: &StyleDesc, focusable: bool) -> Option<Box<StyleDesc>> {
+        let mut folded: Option<Box<StyleDesc>> = None;
+        for declared in self.applying(id, style, focusable) {
+            folded = Some(Box::new(crate::events::state_styles::overlay(folded.as_deref().unwrap_or(style), declared)));
+        }
+        let mut folded = folded?;
+        clear_focus_variants(&mut folded);
+        Some(folded)
+    }
+
     /// The custom properties element `id` computes to below `parent`: the ones `style` declares
     /// with those of the focus variants that apply laid over them, the later variant winning. A
     /// custom property a variant sets is the element's, as in CSS, so its base, its other

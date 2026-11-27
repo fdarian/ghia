@@ -898,6 +898,12 @@ impl HoverChange {
             if crate::motion::listens_for_gesture(tree, *id, "whileHover") {
                 return Restyle::Whole;
             }
+            // The hover of a box of the element is built with the element's, and is not a patch's to write.
+            if crate::layout::generated::declares_of(tree, *id, |style| style.hover.is_some()) {
+                restyled.push(*id);
+                paints_only = false;
+                continue;
+            }
             let Some(style) = tree.elements.get(id).and_then(|element| element.style.as_deref()) else {
                 continue;
             };
@@ -906,6 +912,7 @@ impl HoverChange {
                 restyles = true;
                 paints_only &= hover_paint::hover_paints_only(tree, *id, style);
             }
+
             // A group's followers restyle with it, and a group is a frame built whole.
             if style.declared_group().is_some() {
                 restyles = true;
@@ -1180,11 +1187,11 @@ fn relational_changed<'a>(old: &'a [u64], new: &'a [u64]) -> impl Iterator<Item 
         .copied()
 }
 
+/// Whether the element `id`, or a `::before` or `::after` of it, declares a style `has` says yes to.
 fn has_state_style(tree: &RetainedTree, id: u64, has: impl Fn(&StyleDesc) -> bool) -> bool {
     tree.elements
         .get(&id)
-        .and_then(|element| element.style.as_deref())
-        .is_some_and(has)
+        .is_some_and(|element| element.style.as_deref().is_some_and(&has) || crate::layout::generated::declares(tree, element, &has))
 }
 
 #[cfg(test)]

@@ -29,10 +29,18 @@ pub(crate) fn flatten<'a>(tree: &RetainedTree, children: &'a [u64]) -> Cow<'a, [
     Cow::Owned(flat)
 }
 
+/// [`flatten`] for the children of `element` that layout takes: its generated boxes are among them.
+pub(crate) fn flatten_of<'a>(tree: &RetainedTree, element: &'a RetainedElement) -> Cow<'a, [u64]> {
+    match super::generated::layout_children(tree, element) {
+        Cow::Borrowed(children) => flatten(tree, children),
+        Cow::Owned(children) => Cow::Owned(flatten(tree, &children).into_owned()),
+    }
+}
+
 fn splice(tree: &RetainedTree, children: &[u64], into: &mut Vec<u64>) {
     for id in children {
         match tree.elements.get(id) {
-            Some(element) if is_display_contents(element) => splice(tree, &element.children, into),
+            Some(element) if is_display_contents(element) => splice(tree, &super::generated::layout_children(tree, element), into),
             _ => into.push(*id),
         }
     }

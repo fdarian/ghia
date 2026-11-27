@@ -138,7 +138,6 @@ impl PseudoStyle {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl RetainedElement {
     /// The style the rules declare for the box, whether or not it has content: what
     /// `getComputedStyle` reads. `None` when no rule matched the box.
@@ -148,11 +147,13 @@ impl RetainedElement {
 
     /// The style of the box when it can have content in some state, the one a build folds the
     /// element's states into before [`PseudoStyle::generate`].
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn pseudo_candidate(&self, pseudo: Pseudo) -> Option<&Arc<StyleDesc>> {
         self.pseudo_matches()?.side(pseudo).filter(|side| side.may_generate()).map(|side| &side.style)
     }
 
     /// The box of the element as the rules declare it, with no state applied.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn pseudo_box(&self, pseudo: Pseudo) -> Option<PseudoStyle> {
         PseudoStyle::generate(self.pseudo_style(pseudo)?, self)
     }
@@ -297,18 +298,15 @@ impl RetainedTree {
         changes
     }
 
-    /// Gives the elements their boxes. An element whose box has, or had, content is drawn again:
-    /// a style no box reads changes nothing to draw.
+    /// Gives the elements their boxes, and makes the boxes they draw (`layout::generated`): a
+    /// rule for a box that sets no `content` changes nothing to draw.
     pub(super) fn apply_pseudo(&mut self, changes: Vec<(u64, Option<Arc<PseudoMatches>>)>) {
         for (id, new) in changes {
             let Some(element) = self.elements.get_mut(&id) else {
                 continue;
             };
-            let old = element.set_pseudo_matches(new.clone());
-            let has_content = |matches: &Option<Arc<PseudoMatches>>| matches.as_ref().is_some_and(|matches| matches.may_generate());
-            if has_content(&old) || has_content(&new) {
-                self.mark_render_changed(id);
-            }
+            element.set_pseudo_matches(new);
+            self.sync_generated(id);
         }
     }
 
@@ -323,7 +321,7 @@ impl RetainedTree {
             .and_then(|element| element.pseudo_matches())
             .is_some_and(|matches| matches.reads_attribute(lower_name));
         if reads {
-            self.mark_render_changed(id);
+            self.sync_generated(id);
         }
     }
 }
