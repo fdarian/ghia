@@ -351,6 +351,10 @@ pub trait CustomElement: 'static {
         false
     }
 
+    /// The window stopped blinking what it follows the clock in, so the next frame has to paint it
+    /// again: the same as the clock being due.
+    fn repaint_clock(&self) {}
+
     /// Whether a change of what it draws is made in the paint that shows it, so that a tick which
     /// builds only this element again can paint it alone and show the change. An element whose
     /// paint hands the change to a job that lands in a later paint is not.
@@ -574,6 +578,13 @@ impl CustomElementRegistry {
     /// See [`CustomElement::clock_due`].
     pub(crate) fn clock_due(&self, id: u64) -> bool {
         self.instances.get(&id).is_some_and(|instance| instance.element.clock_due())
+    }
+
+    /// See [`CustomElement::repaint_clock`].
+    pub(crate) fn repaint_clocks(&self) {
+        for instance in self.instances.values() {
+            instance.element.repaint_clock();
+        }
     }
 
     /// See [`CustomElement::draws_changes_at_once`]. An element that is gone does not.

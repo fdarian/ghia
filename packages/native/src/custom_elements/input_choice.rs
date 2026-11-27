@@ -660,6 +660,10 @@ impl CustomElement for InputElement {
         self.inner.clock_due()
     }
 
+    fn repaint_clock(&self) {
+        self.inner.repaint_clock()
+    }
+
     fn draws_changes_at_once(&self) -> bool {
         self.inner.draws_changes_at_once()
     }

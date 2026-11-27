@@ -740,6 +740,10 @@ impl CustomElement for TextEditorElement {
         self.caret_due.get()
     }
 
+    fn repaint_clock(&self) {
+        self.caret_due.set(true);
+    }
+
     fn text_selection(&mut self, cx: &mut App) -> Option<TextSelection> {
         self.apply_value(cx);
         Some(match &self.state {

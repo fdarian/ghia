@@ -122,6 +122,11 @@ impl EditingCaret {
         self.holder.get() == Some(id) && (self.timer_due.get() || self.painted_shown.get() != shown)
     }
 
+    /// The window stopped blinking the caret: the container that paints it has to paint it again.
+    pub fn repaint(&self) {
+        self.timer_due.set(true);
+    }
+
     pub fn blink_due(&self, shown: bool, window: &mut Window) -> bool {
         if !shown {
             self.armed.set(false);

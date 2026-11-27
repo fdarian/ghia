@@ -6547,6 +6547,8 @@ pub(crate) struct GpuixView {
     pub(crate) tapes: crate::tape::Tapes,
     /// The caret of the editing host the node selection is in, see `editing::caret`.
     pub(crate) editing_caret: Rc<crate::editing::caret::EditingCaret>,
+    /// Whether the window has asked the page to blink a caret it blinked before, see `caret::hand_over`.
+    caret_handover: crate::caret::Handover,
     /// The press in an editing host that is down, see `editing::pointer`.
     pub(crate) editing_pointer: Rc<crate::editing::pointer::EditingPointerState>,
     /// Where the pointer is and what it is pressing.
@@ -7592,6 +7594,7 @@ impl GpuixView {
             },
             tapes: Default::default(),
             editing_caret: crate::editing::caret::EditingCaret::new(Theme::dark().caret),
+            caret_handover: Default::default(),
             editing_pointer: Default::default(),
             pointer: Rc::new(RefCell::new(crate::events::state::PointerState::with_requests(
                 pointer_requests,
@@ -10159,6 +10162,7 @@ impl GpuixView {
             .copied()
             .collect();
         let value_bindings = self.bindings_of(self.motion_value_key(&tree, window));
+        crate::caret::hand_over(&self.caret_handover, window, &self.custom_registry, &self.editing_caret);
         let caret_shown = crate::editing::caret::is_shown(&tree, &self.focus_handles, window);
         let sources = crate::retain::Sources {
             tree: &tree,
@@ -10766,6 +10770,7 @@ impl gpui::Render for GpuixView {
         if !window.is_layout_pass() {
             self.tapes.begin_rows();
         }
+        crate::caret::hand_over(&self.caret_handover, window, &self.custom_registry, &self.editing_caret);
         let caret_shown = self.sync_editing_caret(&tree, window, cx);
         self.retain.begin_frame(crate::retain::Sources {
             tree: &tree,
