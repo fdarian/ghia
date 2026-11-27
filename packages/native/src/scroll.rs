@@ -183,7 +183,7 @@ pub(crate) fn on_translated<E: gpui::StatefulInteractiveElement>(
     el.on_scroll_translated(
         move || ready.try_lock().is_ok(),
         move |_, _, translation| {
-            let tree = tree.try_lock().expect("the translate was planned with the tree free, and nothing runs between the plan and the write");
+            let tree = tree.try_lock().expect("the translate was planned with the tree free; what runs between the plan and the write (thumb moved callbacks, `RetainedPhase::Scrolled` hooks) does not hold its lock");
             let roots: rustc_hash::FxHashSet<u64> = translation.roots.iter().filter_map(crate::renderer::retained_root_of).collect();
             let mut built = Vec::new();
             let scroller = tree.elements.get(&id).expect("the gate found the tree as the frame shown was built from, which has the scroller");

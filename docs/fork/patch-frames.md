@@ -1402,9 +1402,9 @@ scroller's pixels on both axes (`ShiftPlan` takes `shift.x` too). Code: zed `win
   script moved (`scrollTop = n` from the `onScroll` of another scroller, instant, with no commit) would be left where the frame shown had it. Such a wheel step is a
   frame built whole, which shows it.
 - **The thumb.** A scroller's bar notes its thumbs (`Window::paint_scroll_thumb(scroll_key, ..)`, one per axis) and is planned and moved as a list's; the
-  fade of its thumb is still a built frame (`repaint_thumb` is a list's). A bar painted inside a recording (a row that holds a scroller with an
-  `overflow: auto` child) notes nothing: the recording that holds it moves with its root, it is no scroller of the frame shown, and noting it as `Untracked` made
-  `plan_thumbs` hold every translate of the frame after a build of such a row as `Thumb.track`.
+  fade of its thumb is still a built frame (`repaint_thumb` is a list's). A bar painted inside a recording (a scroller that is a retained root of its own, or one a
+  non-Ghia owner records) notes nothing: the recording that holds it moves with its root and it is no scroller of the frame shown, so `plan_thumbs` has no thumb to hold the
+  translate for (`Thumb.track`). A row that holds a scroller with `overflow: auto` is never recorded (`Exclusion::Scroller`); one with `overflow: hidden` is, and is recorded with its scroller.
 - **After a translate the offsets are the frame shown's.** `Retain::seen.scrolls` is what the next frame or tick compares a scroller's
   offset with, and a frame that built nothing left it at the offset of the frame built whole, so the next tick (a hover that follows the
   scroll, a caret's blink) declined `Sourced` for a scroll the translate had drawn. The settled callback of the translate
@@ -1462,8 +1462,7 @@ two rows now: the patch of a root that a translate moved compares its tape with 
 still a frame built whole after a `Relocated` decline of the hover patch, which is the engine's (`region` of `prepare_unit` needs `Placement::InPlace`) and costs one
 frame per scroll. For a list the follow at the end of a scroll whose rows left the frame (the row the hover was on is no longer built) is a patch of the row it enters
 when the commit's frames were drawn before the wheel went quiet, as `scroll-patch-hover.test.tsx` asserts (the commit's frame is the one built whole, the follow one patch and no
-frame built whole). A follow that finds the commit's view still queued at the end of the wheel (`PendingView`) is built whole: that is what the test first measured, by advancing the
-clock before the commit's frames were drawn, which is not a regression of the follow.
+frame built whole). A follow that finds the commit's view still queued at the end of the wheel (`PendingView`) is built whole: it is the case of a clock advanced before the commit's frames were drawn.
 
 Tests: zed `scroll_patch_div_tests.rs` (`what_a_root_built_in_the_frame_hands_to_a_context_of_its_own_is_the_roots`: the roots rebuilt in the
 frame shown, then a translate that is the frame built whole), `retain.rs` (`a_scroller_whose_content_a_frame_moved_in_place_is_where_the_next_frame_finds_it`),

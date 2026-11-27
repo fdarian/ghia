@@ -6632,7 +6632,7 @@ mod tests {
     }
 
     #[test]
-    fn a_translate_is_the_frame_shown_for_the_scroller_it_moved_and_for_no_other() {
+    fn a_translate_notes_the_scroller_it_moved_and_not_another_so_the_next_frame_finds_the_other_moved() {
         let mut page = Units::new();
         page.scrolls.insert(2, gpui::ScrollHandle::new());
         page.scrolls.insert(3, gpui::ScrollHandle::new());

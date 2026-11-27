@@ -69,7 +69,7 @@ function Page({ log, layout, bar, hover, rich, events, inner, tint, salt = 0, co
             if (instance !== null) log.inners[index] = instance
           }}
           testId={`inner-${index}`}
-          style={{ position: "absolute", left: 90, top: 4, width: 40, height: 30, overflowY: "auto" }}
+          style={{ position: "absolute", left: 90, top: 4, width: 40, height: 30, overflow: "hidden" }}
         >
           {["#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff"].map((color) => (
             <div key={color} style={{ height: 30, flexShrink: 0, backgroundColor: color }} />
@@ -584,19 +584,19 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
 
   /**
    * A page that keeps two scrollers in step moves one from the `scroll` event of the other, with no commit: the `scrollTop` it writes
-   * is instant. When the frame shown built the rows (a commit did) the scroller inside a row is recorded with it, and the frame knows it
-   * as no scroller: a translate of the outer one would leave it where that frame had it (and hide it from the frame built whole after).
-   * Such a wheel step is a frame built whole. Ghia prepaints the scroller of a replayed row outside its recording, so the frame shown does know it
-   * (it holds the outer scroller as `NotRelocatable.nested`) and no step here is a translate; the case the gate answers for, a scroller gpui does not
-   * know, is pinned by `retain.rs` and zed's `scroll_patch_div_tests.rs`. What is pinned here is what the page shows.
+   * is instant. The scroller inside a row is `overflow: hidden`, so the row is retained and the scroller is recorded inside it; gpui does not
+   * know it, and a translate of the outer scroller would leave it where the frame shown had it (and hide it from the frame built whole after).
+   * A wheel step after the script moved it is a frame built whole: the gate holds the translate as `Edited` when the script ran in a
+   * `scroll` event, and the recording of the row cannot be moved either way.
+   * What is pinned here is that, and what the page shows.
    */
-  function steppedInner(translate: boolean, move: "event" | "before" | "none") {
-    const opened = open(translate, "absolute", false, { inner: true })
+  function steppedInner(translate: boolean, move: "event" | "before") {
+    const opened = open(translate, "transform", false, { inner: true })
     const renderer = opened.renderer
     try {
       tick(renderer, 4)
       tick(renderer, -4)
-      opened.render(<Page log={opened.log} layout="absolute" bar={false} inner salt={1} />)
+      opened.render(<Page log={opened.log} layout="transform" bar={false} inner salt={1} />)
       renderer.drawFrame()
       let top = 0
       if (move === "event") opened.log.onScroll = () => void (opened.log.inners[1].scrollTop = top += 9)
@@ -615,7 +615,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       renderer.drawFrame()
       const settled = { ...seen(renderer, points), inner: innerOffset() }
       // A commit that changes nothing of the rows draws a frame built whole: the inner scroller is where the script put it.
-      opened.render(<Page log={opened.log} layout="absolute" bar={false} inner salt={1} tint />)
+      opened.render(<Page log={opened.log} layout="transform" bar={false} inner salt={1} tint />)
       renderer.drawFrame()
       renderer.dispatchNativeEvents()
       renderer.drawFrame()
@@ -631,6 +631,9 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       const on = steppedInner(true, move)
       const off = steppedInner(false, move)
       expect(on.top).toBeGreaterThan(0)
+      expect(on.translated, "no step is a translate: the scroller in the row is gpui's unknown, or its row is a recording gpui cannot move").toEqual([false, false, false, false, false])
+      // A write made before the wheel is held by the recording of the row (`NotRelocatable.unmovable`), not by the gate.
+      if (move === "event") expect(on.counters.reasons.Edited, "the gate found the scroller moved").toBeGreaterThan(0)
       expect(on.frames).toEqual(off.frames)
       expect(on.settled).toEqual(off.settled)
       expect(on.whole).toEqual(off.whole)
@@ -640,12 +643,12 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
   }
 
   it.runIf(verifying)("draws the same as the build after script moved a scroller inside a row, under the verifier", () => {
-    const opened = open(true, "absolute", false, { inner: true })
+    const opened = open(true, "transform", false, { inner: true })
     const renderer = opened.renderer
     try {
       tick(renderer, 4)
       tick(renderer, -4)
-      opened.render(<Page log={opened.log} layout="absolute" bar={false} inner salt={1} />)
+      opened.render(<Page log={opened.log} layout="transform" bar={false} inner salt={1} />)
       renderer.drawFrame()
       for (const [index, step] of [3, 5, 8].entries()) {
         opened.log.inners[1].scrollTop = (index + 1) * 9
