@@ -11345,13 +11345,15 @@ Counters you read off the renderer:
   recording could not be replayed or moved. A subtree a frame builds whole is
   recorded by that frame (the first build of a page, a build because it changed),
   so `builds` is the frame that made the recording and the frame after counts a
-  `hit` and a `replay`; an element with a motion running in it is not recorded.
+  `hit` and a `replay`; an element with a motion running in it is not recorded, except a patch
+  root that only a colour transition runs in (a hover or a commit that paints starts one): it is recorded
+  while the run goes on, and each tick of the run builds it again as a patch.
 - `getPatchCounters()`, also on the live `GpuixRenderer` so a window with the display
   link can tell a patched tick from one drawn whole: `patchedFrames` and
   `patchedUnits`, `emptyTicks` (ticks whose only changes are in content nobody sees, such as the
   content of a `content-visibility` host that skips: no frame is built and none is presented), `relayoutPatches` (scrollers a patch laid out again), `sceneRebuilds` (patches that had to make the scene's primitives again) and `inPlacePrimitives` (primitives a patch wrote over their place), and two JSON objects keyed by reason, `declines` (ticks GPUI drew
   whole after trying to patch them) and `unpatchable` (ticks Ghia did not try to
-  patch, such as `Sourced` for a focus or scroll change, `Hover` for a hover that only paints an element that no root of the last frame holds, and `Edited` for a commit). A hover that only changes how elements paint (a colour, a border colour, the colour of a shadow) is a patched tick when the roots that hold them can be repainted; one that lays out, or that a listener hears, is a frame built whole. While
+  patch, such as `Sourced` for a focus or scroll change, `Hover` for a hover that only paints an element that no root of the last frame holds, and `Edited` for a commit; and `RunningInScroller`, for a hover or a commit that would start a colour transition in a patch root inside a scroller, such as the row of a `<virtual-list>` (a unit inside a scroller is patched): a frame built whole records no run in a scroller, so the frame is built whole; and `RunInRelaidRoot`, for a commit that lays out a root again, a scroller or a box of a definite size, and starts a colour transition in it, which is built whole too). A hover that only changes how elements paint (a colour, a border colour, the colour of a shadow) is a patched tick when the roots that hold them can be repainted, and so is every tick of a transition that it starts when the transitions declared run only on colours; one that lays out, that a listener hears, or whose element declares a transition that can run on more than a colour (`all`, `opacity`), is a frame built whole. While
   something runs, every tick drawn whole is counted in one of the two, on a page with
   no patched unit too. A running element that is no unit is counted under the reason
   it is none: `LayoutAnimation` (what runs moves a box), `Escapes` (it holds a

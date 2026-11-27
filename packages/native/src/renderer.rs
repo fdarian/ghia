@@ -10064,6 +10064,7 @@ impl GpuixView {
         self.note_pass(window);
         let mut env = self.retain.unit(id)?.env.clone();
         env.start.now = now;
+        let in_scroller = env.start.scroller.is_some();
         let doc = env.start.doc_path();
         let effects = crate::tape::build_effects_len();
         let tree_arc = self.tree.clone();
@@ -10083,6 +10084,7 @@ impl GpuixView {
             build_element_in(id, &mut ctx, window, cx, None)
         };
         self.retain.resume(recording);
+        let dynamic = self.retain.take_unrecorded_dynamic();
         crate::tape::truncate_build_effects(effects);
         drop(pointer);
         debug_assert!(highlight_events.is_empty(), "a highlight is never inside a unit");
@@ -10094,6 +10096,8 @@ impl GpuixView {
             id: retained_id(id),
             element: crate::tape::Taped::new(element, tape.clone()).into_any_element(),
             tape,
+            dynamic,
+            in_scroller,
         })
     }
 
@@ -10586,6 +10590,11 @@ pub(crate) struct ScratchUnit {
     /// What the element writes into the registries when it is prepainted and painted, see
     /// `Tapes::same_as_recorded`.
     pub tape: crate::tape::SharedTape,
+    /// What running was found on the elements the build made (`Retain::take_unrecorded_dynamic`), for the patch that
+    /// draws it to hand to `Retain::land_patch`.
+    pub dynamic: Vec<(u64, u8)>,
+    /// Whether the root is inside a scroller a scroll can move.
+    pub in_scroller: bool,
 }
 
 /// Whether an element can be left alone while nobody sees it, see `retain::Sources::dormant`.
@@ -12309,7 +12318,7 @@ fn build_element_unpumped(
     let state_id = crate::layout::generated::state_owner(id);
     crate::perf_counters::element_built();
     if contents_dynamic != 0 {
-        ctx.retain.dynamic_bits(contents_dynamic | crate::retain::Dynamic::Spliced as u8);
+        ctx.retain.dynamic_bits(id, contents_dynamic | crate::retain::Dynamic::Spliced as u8);
     }
 
     // `@container` blocks fold into the declared style before anything reads it, so state
@@ -12393,7 +12402,7 @@ fn build_element_unpumped(
         },
     );
     ctx.retain.measurement(animated.measurement.as_ref());
-    ctx.retain.dynamic_bits(animated.dynamic);
+    ctx.retain.dynamic_bits(id, animated.dynamic);
     if animated.dynamic & crate::retain::Dynamic::OWN != 0 {
         let paints_only = runs_paint_only(
             tree,
@@ -12704,7 +12713,7 @@ fn build_element_unpumped(
                     ctx.now,
                 );
                 if running != 0 {
-                    ctx.retain.dynamic_bits(running);
+                    ctx.retain.dynamic_bits(id, running);
                     ctx.retain.paints_only(runs_paint_only(
                         ctx.tree,
                         element,
@@ -16391,12 +16400,18 @@ mod batch_tests {
         assert_eq!(tree.pending_structure(), [3]);
         // A background that appears where the element keeps no quad adds an operation: paint, not patchable.
         assert_eq!(dirty_after(&mut tree, &row(r##"{"height":10,"backgroundColor":"#112233"}"##)), Dirty::Paint);
-        // So does an opacity that crosses 1, a transition, and a group.
+        // A colour that a transition of colours runs on is a change a patch follows: it starts the run and builds it again.
+        dirty_after(&mut tree, &row(r##"{"height":10,"backgroundColor":"#112233","transition":"background-color 1s"}"##));
+        assert_eq!(
+            dirty_after(&mut tree, &row(r##"{"height":10,"backgroundColor":"#223344","transition":"background-color 1s"}"##)),
+            Dirty::PaintPatchable
+        );
+        // So does an opacity that crosses 1, a transition that can run on more than a colour, and a group.
         for (before, after) in [
             (r##"{"height":10,"backgroundColor":"#112233"}"##, r##"{"height":10,"backgroundColor":"#112233","opacity":0.5}"##),
             (
-                r##"{"height":10,"backgroundColor":"#112233","transition":"background-color 1s"}"##,
-                r##"{"height":10,"backgroundColor":"#223344","transition":"background-color 1s"}"##,
+                r##"{"height":10,"backgroundColor":"#112233","transition":"all 1s"}"##,
+                r##"{"height":10,"backgroundColor":"#223344","transition":"all 1s"}"##,
             ),
             (
                 r##"{"height":10,"backgroundColor":"#112233","group":true}"##,

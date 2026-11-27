@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use super::Unpatchable;
+use super::{Dynamic, Unpatchable};
 use crate::renderer::GpuixView;
 
 /// Whether ticks are patched, and why they were not.
@@ -35,6 +35,14 @@ struct Prepared {
 enum Declining {
     Tick,
     Read,
+}
+
+const TRANSITION: u8 = Dynamic::Transition as u8;
+
+impl Declining {
+    fn key(self, kind: String) -> String {
+        if self == Declining::Read { format!("Read:{kind}") } else { kind }
+    }
 }
 
 impl Patching {
@@ -92,6 +100,10 @@ pub(crate) struct Built {
     /// The scrollers among the units, which lay out again: what they write into the registries is
     /// taken as the patch made it, not compared with what the frame wrote.
     anchors: Vec<u64>,
+    /// What the patch roots among the units found running on the elements they built, and what the other units found
+    /// (`Retain::land_patch`).
+    dynamic: Vec<(u64, u8)>,
+    started: Vec<(u64, u8)>,
     stepped: Stepped,
 }
 
@@ -210,7 +222,7 @@ impl GpuixView {
                 let (handle, viewport, tree) = (window.window_handle(), window.viewport_size(), tree.clone());
                 app.defer(move |cx| crate::observers::sweep_after_translate(handle, viewport, &reports, &tree, &callback, cx));
             }
-            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &anchors, &rewritten, cx));
+            view.update(app, |view, cx| view.continue_after_patch(window, &built.stepped, &built.dynamic, &built.started, &anchors, &rewritten, cx));
             true
         };
         window.set_frame_patcher(Some(Rc::new(patcher)));
@@ -248,7 +260,7 @@ impl GpuixView {
     pub(crate) fn build_patch(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Option<Built> {
         let now = self.clock.now();
         let ids = self.plan_patch(window, now, Declining::Tick)?;
-        self.build_units(ids, now, window, cx)
+        self.build_units(ids, now, window, cx, Declining::Tick)
     }
 
     /// The units a patch at `now` builds, or none and why (counted as `declining` says). A unit gpui
@@ -257,7 +269,7 @@ impl GpuixView {
         if !self.patch.enabled {
             return None;
         }
-        let key = |kind: String| if declining == Declining::Read { format!("Read:{kind}") } else { kind };
+        let key = |kind: String| declining.key(kind);
         let ids = match self.preview_tick(window, now) {
             Ok(ids) => ids,
             Err(reason) => {
@@ -288,7 +300,14 @@ impl GpuixView {
     }
 
     /// Builds `ids`, which [`Self::plan_patch`] chose, at `now`.
-    fn build_units(&mut self, ids: Vec<u64>, now: web_time::Instant, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Option<Built> {
+    fn build_units(
+        &mut self,
+        ids: Vec<u64>,
+        now: web_time::Instant,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+        declining: Declining,
+    ) -> Option<Built> {
         let anchors: Vec<u64> = ids.iter().copied().filter(|id| self.relays_out(*id)).collect();
         if !anchors.is_empty() && !self.focus_follows_tree() {
             // What a frame built whole does before it builds: an anchor is built without the pass that gives
@@ -304,15 +323,45 @@ impl GpuixView {
         let stepped = self.step_clocks(window, now);
         let mut units = Vec::with_capacity(ids.len());
         let mut tapes = Vec::with_capacity(ids.len());
+        let mut dynamic = Vec::new();
+        let mut started = Vec::new();
         for id in ids {
             let Some(unit) = self.build_unit(id, now, window, cx) else {
-                self.patch.decline("NotAUnit".to_owned());
+                self.patch.decline(declining.key("NotAUnit".to_owned()));
                 return None;
             };
+            let patch_root = self.retain.is_patch_root(id);
+            // A frame built whole records no run in a scroller (`Node::holds_only_a_run_a_patch_follows`), so a patch root there
+            // that left one would be a frame the verifier finds no root to compare with, and its ticks would paint what a scroll
+            // moved from where the build left it. The frame is built whole instead. Only a patch root in a scroller: a patch root
+            // there never holds a run a frame found, so what it finds is what the patch started, where a unit in a scroller holds
+            // the run a frame found in it and its ticks patch it.
+            if patch_root && unit.in_scroller && unit.dynamic.iter().any(|&(_, bits)| bits & TRANSITION != 0) {
+                self.patch.decline(declining.key("RunningInScroller".to_owned()));
+                return None;
+            }
+            // An anchor or a box root is not among the roots the ticks of a run select (`Retain::root_holding`), and the frame
+            // built whole after the patch does not record one while a run is in it, so a run that a patch started in one
+            // would have no root to tick. The frame is built whole, which records it as the unit it is then.
+            if !patch_root && !self.retain.is_unit(id) {
+                let starts_a_run = unit.dynamic.iter().any(|&(element, bits)| bits & TRANSITION != 0 && !self.retain.runs_a_transition(element));
+                if starts_a_run {
+                    self.patch.decline(declining.key("RunInRelaidRoot".to_owned()));
+                    return None;
+                }
+            }
             tapes.push((id, unit.tape));
             units.push((unit.id, unit.element));
+            // A patch root holds the runs that a hover or a commit started in it and that no frame found, so what it finds is
+            // what runs. A unit was found by the frame that made it and is cleared by the frame that follows the end of a run: a
+            // patch only adds to it, and takes up the transitions it started itself (`Retain::land_patch`).
+            if patch_root {
+                dynamic.extend(unit.dynamic);
+            } else {
+                started.extend(unit.dynamic);
+            }
         }
-        Some(Built { units, tapes, anchors, stepped })
+        Some(Built { units, tapes, anchors, dynamic, started, stepped })
     }
 
     /// Lays out and prepaints the patch the tree is waiting for, ahead of the draw, so that a read of
@@ -332,7 +381,7 @@ impl GpuixView {
         let prepared = window.prepare_patch(app, {
             let (view, built, ids) = (view.clone(), built.clone(), ids.clone());
             move |window, app| {
-                let Some(mut made) = view.update(app, |view, cx| view.build_units(ids, now, window, cx)) else {
+                let Some(mut made) = view.update(app, |view, cx| view.build_units(ids, now, window, cx, Declining::Read)) else {
                     return Vec::new();
                 };
                 let units = std::mem::take(&mut made.units);
@@ -441,7 +490,18 @@ impl GpuixView {
     }
 
     /// Asks for the frames that what still runs after a patch needs, as the end of a frame does.
-    fn continue_after_patch(&mut self, window: &mut gpui::Window, stepped: &Stepped, anchors: &[u64], rewritten: &[u64], cx: &mut gpui::Context<Self>) {
+    fn continue_after_patch(
+        &mut self,
+        window: &mut gpui::Window,
+        stepped: &Stepped,
+        dynamic: &[(u64, u8)],
+        started: &[(u64, u8)],
+        anchors: &[u64],
+        rewritten: &[u64],
+        cx: &mut gpui::Context<Self>,
+    ) {
+        // A transition the patch started runs on in the ticks that follow, and one it ended does not.
+        self.retain.land_patch(dynamic, started);
         // The elements a hover restyled by paint are drawn: the roots that hold them are older than
         // what is shown, and the frame built whole after the patches builds them again.
         let hovered = self.pointer.borrow().take_paint_pending();

@@ -1029,6 +1029,10 @@ properties! {
 }
 
 impl AnimProp {
+    pub(super) fn is_colour(self) -> bool {
+        matches!(self.kind(), Kind::Color)
+    }
+
     /// Whether a change of this property can only change what a box paints and never a box or
     /// the size of a line of text, so a bounds or scroll read after it needs no layout pass
     /// (see `Window::draw_if_dirty`). This is the one list: a property is left out unless

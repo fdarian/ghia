@@ -720,9 +720,43 @@ against 8.7M.) `active`, the group states and the focus states are not kept: the
 quad per element for them would be paid for nothing.
 
 Everything else is compared whole, so a property this module does not list is not paint-only: layout, font, `transform`, `cursor`,
-`zIndex`, a gradient, a custom property. A `transition` declared on the element, in the refinement, or (when `color` changes, which
-descendants inherit and would start a transition from) below it, makes the hover whole, since a transition started by the hover
-is a build that a patch does not make. `whileHover` is never paint-only, and neither is a style with `@container` rules.
+`zIndex`, a gradient, a custom property, a `transition*` property the hover sets. `whileHover` is never paint-only, and neither is a
+style with `@container` rules.
+
+**A transition of colours is paint, any other is not** (`motion::transitions_only_colours`, one predicate for every site). A hover
+that paints starts a transition only on a property it changes, and when the element's `transition` names colours and nothing else
+(`background-color`, `color`, the border, outline and text-decoration colours, or none) the transition is one a patch runs: the
+patch builds the root, which starts it, and the ticks of the run build the root again. A list that can run on anything else is
+`Whole`: `all`, `opacity` (a run of an opacity or a transform starts as a frame that re-layers), a size, an SVG attribute, a
+`var()` in a `transition*` declaration. That is read of the element, of the refinement and, when `color` changes, of every element below
+(`Paints::UnlessTransitionBelow`), and an element whose list is colours only does not count as one a state restyles beyond a hover
+(`restyles_beyond_hover`, so it is no reason for a root to lift).
+
+**The ticks of the run.** The build of a patch's unit records nothing (`Retain::suspend`), so what it found running on each element
+it built is collected by `Retain::dynamic_bits(id, bits)` and handed to `Retain::land_patch` when the patch is drawn
+(`continue_after_patch`): for a patch root, the transition bit (and the `Spliced` bit a rebuild re-emits with the bits of the contents) of each built
+element is written into `Retain::dynamic`, or cleared where the build found none (a run that ended), as a frame built whole writes it
+at its end. A unit that a patch builds (a hover inside a focused editor host or a `MotionValues` element, or a restyle that a relaid
+root covers) only gains the transitions it started: its frame found what runs in it and clears a run after its end, and a patch that
+cleared one would drop what the records of that frame still follow. What it gained it keeps (`Retain::patch_started`, which a patch root's started runs join too) and treats as a
+patch root does from then on: a later patch that builds the element, a patch root or not, says when the run ends, which clears the bit, so a unit is not built
+by ticks for a run that is over. A frame that builds the element writes `dynamic` again and the element leaves the set. An anchor or a
+box root is no unit: its ticks cannot select it (`root_holding` looks among the units and the patch roots), and the frame built whole after
+does not record one while a run is in it (`end_anchor` refuses `own.dynamic`, `box_root` needs no running). A patch that finds a
+transition in one, on an element that had none in `dynamic` or asleep in `dormant`, is declined (`RunInRelaidRoot`) and the frame is built whole. A tick then finds the element among the dynamic ones and
+builds the root that holds it: `Retain::preview` looks for the innermost unit or patch root (`root_holding`), which is a patch root
+for what a hover started. A frame built whole that finds such a run does not give up the root: a patch root may hold running
+transitions that only paint (`Node::runs_a_paint_transition`, `Below::busy`; not a run of an opacity or a transform) and is still
+recorded as one while they run (`recording_as`), where any other motion in a root is a reason to build it again and record nothing.
+Not in a scroller (`Node::holds_only_a_run_a_patch_follows`): a scroll moves what a scroller holds without a build, so a patch root in a
+row of a list or a scroll container is not recorded while a run is in it. A patch does not leave a run where a frame built whole would
+not record one: a patch root inside a scroller (`ScratchUnit::in_scroller`, the row of a `<virtual-list>` or of a scroll container) whose
+build finds a transition running is declined (`RunningInScroller`, in `unpatchable`) and the frame is built whole, for a hover and a
+commit alike. The verifier has no recorded root to compare such a patch with, and a tick of the run would paint what a scroll moved from
+where the build left it. The decline is for patch roots only: a patch root in a scroller never holds a run a frame found, so a transition it finds was started by the
+patch, where a unit in a scroller holds the run that a frame found in it and its ticks are patches of it, as before. A patch root outside a scroller is not moved by one, so a patch of it
+needs no such rule. Where a root outside a scroller holds its run, a whole frame inside the run still records the root, so the
+run's ticks have a unit.
 
 - **`hasHover`.** An ancestor whose `:has(:hover)` state changed is named when its `hasHover` refinement paints only.
 - **A group is `Whole`.** An element that declares a group (`group`) restyles its followers, which may be anywhere below it, and
@@ -1481,8 +1515,8 @@ patch changes, and three pieces of it were the same question asked again of the 
 - **A restyle that only paints is judged once for its styles.** `RetainedTree::set_style` asks whether a restyle is one a patch can follow
   (`hover_paint::restyle_paints_strictly`): it resolves each style under every state either declares and compares the two, and the compare
   parses the border shorthands of every side again. The answer is a function of the two styles and of one thing below the element (a colour
-  that changes is inherited, and a transition below would start from the old one), so `restyle_paints_of` says what the styles say (`Paints`:
-  no, yes, or yes if no element below declares a transition) and `StyleMemo` (`style_memo.rs`) keeps that by the addresses of the two interned
+  that changes is inherited, and a transition below that can run on more than a colour would start from the old one), so `restyle_paints_of` says what the styles say (`Paints`:
+  no, yes, or yes if no element below declares a transition that is not colours only) and `StyleMemo` (`style_memo.rs`) keeps that by the addresses of the two interned
   styles. The address names the content because a shared style is not changed; the memo holds `Weak` references so the address is not given to
   another style while the entry lives and `StyleTable::sweep` still frees the styles, and it has 512 entries. The tree part is asked each time.
 - **The scan of a subtree for a patch root** (`Retain::scan_patch_root`, once per revision of a subtree) asked `declares_paint_hover` of every
@@ -1740,9 +1774,19 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   `cargo test -p gpui --lib --features test-support scene:: patch`: 92 passed.
 - `events/hover_paint.rs` unit tests: a colour, a shadow colour, an opacity that stays a layer, every border colour spelling and
   a background are paint; a border width or style, a layout property, a font, a transform, a cursor, a gradient, a custom
-  property, a shadow that moves or appears, an opacity that crosses 1 and a transition are not; a colour that appears or goes is not
-  (a background, a text, a border, a shadow, an outline); a colour a transition below inherits; what might lift. `events/dispatcher.rs`:
+  property, a shadow that moves or appears, an opacity that crosses 1, a transition that can run on more than a colour (`all`, `opacity`, a
+  size, a `var()`) and a `transition*` property the hover sets are not, and a transition of colours is; a colour that appears or goes is not
+  (a background, a text, a border, a shadow, an outline); a colour a transition below inherits (colours only or not); what might lift
+  (a list of colours does not, any other transition does); `motion::transitions_only_colours` and `Retain::land_patch` (what a patch found running
+  is what ticks build again, and only the transition bit is taken). `events/dispatcher.rs`:
   what a hover change names (a colour, an entered parent, `whileHover`, a group, `hasHover`), and what `dispatch` hands out as `paint` and as `restyle` (a listener, a layout hover, a press beside a paint one, an inline span).
+- react `hover-transition-patch.test.tsx`: a row with `transition: background-color 200ms` (and one with `color` and `background-color`) and a
+  hover background is a patched frame, none built whole and `sceneRebuilds` 0 (the test window draws the first tick of the run in the
+  step of the hover, so the hover is 1 or 2), 12 patched ticks for the 192 ms before the end, one for the tick that ends it, none after, and
+  the same on the leave; `transitionrun` fires with the hover and `transitionend` at 208 ms and not at 192; the picture at the hover, 6, 12 and
+  20 ticks into the run and into the leave is what patching off draws, and the picture at 6 is neither of the ends (also under the verifier,
+  with 0 mismatches); `all` and `opacity` leave the hover a frame built whole; a colour a child with a transition inherits is a patched hover
+  (the engine starts a colour transition from the element's own change, not from an inherited one) that shows what patching off shows.
 - react `hover-patch.test.tsx`: a paint-only hover, one that changes the padding and one that a `pointerenter` listener hears,
   over a virtual list and a plain column, cross the rows and back: the picture, the boxes, what is under the pointer and the cursor
   are what patching off draws (also under the verifier, with 0 mismatches), a tick is asked for only by the first, and the listener

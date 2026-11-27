@@ -226,6 +226,42 @@ const mount: Scenario = {
 /** `mount` as the first window of a process, which `cold-mount.test.tsx` measures once with no warm-up. */
 export const coldMount: Scenario = { ...mount, name: 'cold-mount' }
 
+/** The pointer crossing the rows, as `hover`: with `transition` styling each crossing starts a transition of the row's background. */
+function hover(name: string, styling: Styling): Scenario {
+  return {
+    name,
+    styling,
+    prepare(session) {
+      settle(session)
+      session.renderer.dispatchMouseMove(LIST_X, FIRST_ROW_Y)
+      for (let i = 0; i < 3; i++) session.frame()
+      const lastY = FIRST_ROW_Y + hoverRow(STEPS) * ROW_HEIGHT
+      const before = rowBackground(session, lastY)
+      session.frame()
+      return {
+        run() {
+          let previous = 0
+          for (let i = 1; i <= STEPS; i++) {
+            const row = hoverRow(i)
+            session.renderer.dispatchMouseMove(LIST_X, FIRST_ROW_Y + row * ROW_HEIGHT, undefined, {
+              x: 0,
+              y: (row - previous) * ROW_HEIGHT,
+            })
+            previous = row
+            session.frame()
+          }
+        },
+        verify() {
+          // The span ends in the frame that starts the row's transition, which is still at the colour it had.
+          if (styling === 'transition') for (let i = 0; i < 6; i++) session.frame()
+          const after = rowBackground(session, lastY)
+          if (after === before) throw new Error(`the hovered row's background did not change from ${before}`)
+        },
+      }
+    },
+  }
+}
+
 export const scenarios: Scenario[] = [
   mount,
   {
@@ -297,36 +333,8 @@ export const scenarios: Scenario[] = [
       }
     },
   },
-  {
-    name: 'hover',
-    styling: 'inline',
-    prepare(session) {
-      settle(session)
-      session.renderer.dispatchMouseMove(LIST_X, FIRST_ROW_Y)
-      for (let i = 0; i < 3; i++) session.frame()
-      const lastY = FIRST_ROW_Y + hoverRow(STEPS) * ROW_HEIGHT
-      const before = rowBackground(session, lastY)
-      session.frame()
-      return {
-        run() {
-          let previous = 0
-          for (let i = 1; i <= STEPS; i++) {
-            const row = hoverRow(i)
-            session.renderer.dispatchMouseMove(LIST_X, FIRST_ROW_Y + row * ROW_HEIGHT, undefined, {
-              x: 0,
-              y: (row - previous) * ROW_HEIGHT,
-            })
-            previous = row
-            session.frame()
-          }
-        },
-        verify() {
-          const after = rowBackground(session, lastY)
-          if (after === before) throw new Error(`the hovered row's background did not change from ${before}`)
-        },
-      }
-    },
-  },
+  hover('hover', 'inline'),
+  hover('hover-transition', 'transition'),
   {
     name: 'idle',
     styling: 'inline',

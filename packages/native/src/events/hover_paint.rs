@@ -6,7 +6,7 @@
 //! as the one before did, registers what it registered and paints the same operations with other
 //! values, and a patch frame can write it over the frame shown (`docs/fork/patch-frames.md`,
 //! "Hover patches"). Anything else, a size, a font, a transform, a cursor, a transition that
-//! would start, is for a frame built whole.
+//! can run on more than a colour, is for a frame built whole.
 //!
 //! The comparison is made on the styles the refinement resolves to, not on the refinement: it
 //! copies the paint properties of the style with the state onto the one without, and the two must
@@ -35,14 +35,15 @@ pub(crate) const PATCH_ROOT_MAX_ELEMENTS: u32 = 64;
 const WALK_LIMIT: usize = PATCH_ROOT_MAX_ELEMENTS as usize;
 
 /// What the styles alone say of whether a change only paints. A colour is inherited, and a transition below the
-/// element would start from the old one, so what the styles do not settle is left to the tree below the element:
+/// element that can run on more than a colour would start from the old one, so what the styles do not settle is left to
+/// the tree below the element:
 /// that is the one part of the answer that is not a function of the styles, and so not kept with them
 /// (`StyleMemo`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Paints {
     No,
     Yes,
-    /// Paints if no element below declares a transition.
+    /// Paints if no element below declares a transition that can run on more than a colour.
     UnlessTransitionBelow,
 }
 
@@ -115,10 +116,13 @@ pub(crate) fn may_lift(style: &StyleDesc) -> bool {
 }
 
 /// Whether the style the build lays out for an element may be other than the one it declares by anything but a
-/// hover that paints only: an animation, a transition, Motion (`motion`, `motionValues`, `layout`), a `var()`
+/// hover that paints only: an animation, a transition that can run on more than a colour (one of colours only is run
+/// by a patch, as a hover that paints starts it), Motion (`motion`, `motionValues`, `layout`), a `var()`
 /// (one in a state block too: `holds_var_declarations`, as the paint check of a hover does not see a `var()` a state
 /// holds), an `@container` block, a state variant other than `hover` and `hasHover`, or a `hover` or `hasHover` that is
-/// more than paint (`hover` is its `paint_hover_of`: an opacity that crosses 1, a transform, a size). It is taken from the caller's memo, not computed here: folding the states clones the style. Only a paint-only hover is ignored, since it never changes what an element lifts. A fold like the others can give the element an opacity, a
+/// more than paint (`hover` is its `paint_hover_of`: an opacity that crosses 1, a transform, a size). It is taken from the
+/// caller's memo, not computed here: folding the states clones the style. Only a paint-only hover is ignored, since it
+/// never changes what an element lifts. A fold like the others can give the element an opacity, a
 /// transform or a context that it does not declare, or take one away.
 fn restyles_beyond_hover(element: &RetainedElement, style: Option<&StyleDesc>, hover: Option<Paints>) -> bool {
     let props = element.custom_props();
@@ -131,7 +135,7 @@ fn restyles_beyond_hover(element: &RetainedElement, style: Option<&StyleDesc>, h
             || style.holds_var_declarations()
             || (declares_hover && hover == Some(Paints::No))
             || crate::motion::declares_animation(style)
-            || crate::motion::declares_transitions(style)
+            || !crate::motion::transitions_only_colours(style)
             || crate::css::var_substitution::state_blocks(style)
                 .into_iter()
                 .any(|(key, state)| state.is_some() && !matches!(key, "hover" | "hasHover"))
@@ -231,7 +235,7 @@ pub(crate) fn restyle_paints_of(old: &StyleDesc, new: &StyleDesc) -> Paints {
     let mut colour_changed = false;
     for states in declared_states(old, new) {
         let (off, on) = (resolve_pointer_states(old, states), resolve_pointer_states(new, states));
-        if declares_transition(&off) || declares_transition(&on) || !differs_by_paint_only(&off, &on) {
+        if !transitions_stay_colours(&off, &on) || !differs_by_paint_only(&off, &on) {
             return Paints::No;
         }
         colour_changed |= off.color != on.color;
@@ -273,22 +277,25 @@ fn declared_states(old: &StyleDesc, new: &StyleDesc) -> Vec<PointerStates> {
 fn paints_only(style: &StyleDesc, states: PointerStates) -> Paints {
     let off = resolve_pointer_states(style, PointerStates::default());
     let on = resolve_pointer_states(style, states);
-    if declares_transition(&off) || declares_transition(&on) || !differs_by_paint_only(&off, &on) {
+    if !transitions_stay_colours(&off, &on) || !differs_by_paint_only(&off, &on) {
         return Paints::No;
     }
     if off.color == on.color { Paints::Yes } else { Paints::UnlessTransitionBelow }
 }
 
-fn declares_transition(style: &StyleDesc) -> bool {
-    style.transition.is_some()
-        || style.transition_property.is_some()
-        || style.transition_duration.is_some()
-        || style.transition_timing_function.is_some()
-        || style.transition_delay.is_some()
-        || style.transition_behavior.is_some()
+/// Whether the transitions of the two styles can only run on colours. A hover that paints only changes what
+/// `differs_by_paint_only` lets it, so a transition that runs on a colour is the one such a hover may start, and
+/// a patch frame draws it: the patch builds the root, which starts the transition, and the ticks that follow
+/// build it again while it runs (`Retain::land_patch`). A transition that can run on anything
+/// else (`all`, an opacity, a transform, a size) is a frame built whole: a run of an opacity or a transform
+/// starts as a frame that re-layers, and a size or a position is no paint.
+fn transitions_stay_colours(off: &StyleDesc, on: &StyleDesc) -> bool {
+    crate::motion::transitions_only_colours(off) && crate::motion::transitions_only_colours(on)
 }
 
-/// Whether no element below `id` declares a transition. More elements than a unit holds say no.
+/// Whether no element below `id` declares a transition that can run on more than a colour: what a changed `color`
+/// reaches below is colours (the text, `currentColor`), and a transition of those is drawn by a patch as the element's
+/// own is. More elements than a unit holds say no.
 fn reaches_no_transition(tree: &RetainedTree, id: u64) -> bool {
     let mut seen = 0;
     let mut pending: Vec<u64> = tree.elements.get(&id).map(|element| element.children.to_vec()).unwrap_or_default();
@@ -300,12 +307,7 @@ fn reaches_no_transition(tree: &RetainedTree, id: u64) -> bool {
         let Some(element) = tree.elements.get(&below) else {
             continue;
         };
-        if element.style.as_deref().is_some_and(|style| {
-            declares_transition(style)
-                || style.hover.as_deref().is_some_and(declares_transition)
-                || style.group_hover.as_deref().is_some_and(declares_transition)
-                || style.has_hover.as_deref().is_some_and(declares_transition)
-        }) {
+        if element.style.as_deref().is_some_and(|style| !crate::motion::transitions_only_colours(style)) {
             return false;
         }
         pending.extend(element.children.iter().copied());
@@ -560,9 +562,35 @@ mod tests {
     }
 
     #[test]
-    fn a_transition_declared_on_the_element_or_in_the_refinement_is_not() {
-        assert!(!hover_paints(r##"{"backgroundColor":"#fff","transition":"background-color 150ms","hover":{"backgroundColor":"#eee"}}"##));
-        assert!(!hover_paints(r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee","transitionDuration":"1s"}}"##));
+    fn a_transition_of_colours_is_paint_because_a_patch_runs_it() {
+        assert!(hover_paints(r##"{"backgroundColor":"#fff","transition":"background-color 150ms","hover":{"backgroundColor":"#eee"}}"##));
+        assert!(hover_paints(r##"{"backgroundColor":"#fff","transition":"color 1s, background-color 1s, border-color 1s","hover":{"backgroundColor":"#eee","color":"red"}}"##));
+        assert!(hover_paints(r##"{"backgroundColor":"#fff","transition":"none","hover":{"backgroundColor":"#eee"}}"##));
+        // A hover that sets a transition of its own differs in more than paint, as any property this module does not list.
+        assert!(!hover_paints(
+            r##"{"backgroundColor":"#fff","transitionProperty":"background-color","hover":{"backgroundColor":"#eee","transitionDuration":"1s"}}"##
+        ));
+        assert!(!hover_paints(r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee","transition":"background-color 1s"}}"##));
+        assert!(hover_paints(r##"{"hasHover":{"backgroundColor":"#eee"},"backgroundColor":"#fff","transition":"background-color 1s"}"##));
+    }
+
+    #[test]
+    fn a_transition_that_can_run_on_more_than_a_colour_is_not() {
+        for transition in [
+            r##""transition":"all 150ms""##,
+            r##""transition":"opacity 150ms""##,
+            r##""transition":"background-color 150ms, transform 1s""##,
+            r##""transition":"width 1s""##,
+            r##""transitionDuration":"1s""##,
+            r##""transition":"var(--t)""##,
+        ] {
+            assert!(!hover_paints(&format!(r##"{{"backgroundColor":"#fff",{transition},"hover":{{"backgroundColor":"#eee"}}}}"##)), "{transition}");
+            assert!(
+                !hover_paints(&format!(r##"{{"backgroundColor":"#fff","hover":{{"backgroundColor":"#eee",{transition}}}}}"##)),
+                "in the refinement: {transition}"
+            );
+        }
+        assert!(!hover_paints(r##"{"opacity":0.5,"transition":"opacity 1s","hover":{"opacity":0.8}}"##), "an opacity that a transition runs");
     }
 
     #[test]
@@ -582,15 +610,34 @@ mod tests {
     }
 
     #[test]
-    fn a_colour_that_a_transition_below_inherits_is_not_paint() {
+    fn a_colour_that_a_transition_below_inherits_is_paint_only_if_it_runs_on_colours() {
         let parent = style(r##"{"color":"blue","hover":{"color":"red"}}"##);
         let (tree, id) = with_child(parent.clone(), style(r##"{"transition":"color 1s"}"##));
-        assert!(!hover_paints_only(&tree, id, &parent));
+        assert!(hover_paints_only(&tree, id, &parent), "a transition of the colour runs in the patch");
+        for below in [r##"{"transition":"all 1s"}"##, r##"{"transition":"color 1s, transform 1s"}"##, r##"{"hover":{"transition":"width 1s"}}"##] {
+            let (tree, id) = with_child(parent.clone(), style(below));
+            assert!(!hover_paints_only(&tree, id, &parent), "{below}");
+        }
         let (tree, id) = with_child(parent.clone(), style(r##"{"color":"blue"}"##));
         assert!(hover_paints_only(&tree, id, &parent));
         let shadow = style(r##"{"backgroundColor":"blue","hover":{"backgroundColor":"red"}}"##);
-        let (tree, id) = with_child(shadow.clone(), style(r##"{"transition":"color 1s"}"##));
+        let (tree, id) = with_child(shadow.clone(), style(r##"{"transition":"all 1s"}"##));
         assert!(hover_paints_only(&tree, id, &shadow), "a background is not inherited");
+    }
+
+    #[test]
+    fn a_transition_of_colours_does_not_make_an_element_restyle_beyond_a_hover() {
+        let lifts = |json: &str| {
+            let (tree, id) = tree_of(style(json));
+            let element = &tree.elements[&id];
+            let hover = element.style.as_deref().map(paint_hover_of);
+            let (colors, lengths) = (ColorContext::root(Scheme::Light), LengthContext::initial(0.0, 0.0));
+            may_lift_in_any_state(element, hover, &colors, &lengths)
+        };
+        assert!(!lifts(r##"{"backgroundColor":"#fff","transition":"background-color 1s","hover":{"backgroundColor":"#eee"}}"##));
+        assert!(lifts(r##"{"backgroundColor":"#fff","transition":"all 1s","hover":{"backgroundColor":"#eee"}}"##));
+        assert!(lifts(r##"{"backgroundColor":"#fff","transition":"opacity 1s","hover":{"backgroundColor":"#eee"}}"##));
+        assert!(lifts(r##"{"backgroundColor":"#fff","transition":"background-color 1s, transform 1s","hover":{"backgroundColor":"#eee"}}"##));
     }
 
     #[test]
