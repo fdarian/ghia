@@ -40,6 +40,7 @@ import type {
   KeyframesInput,
   Node,
   NodeBinding,
+  NodeRoot,
   ParentBinding,
   StyleDesc,
   TextBinding,
@@ -305,7 +306,7 @@ class ElementDomBinding implements ElementBinding {
     return isConnected(this.instance)
   }
 
-  get root(): object | null {
+  get root(): NodeRoot | null {
     return this.state.container
   }
 
@@ -377,7 +378,7 @@ class FragmentDomBinding implements ParentBinding {
     return this.state.children
   }
 
-  get root(): object | null {
+  get root(): NodeRoot | null {
     return this.state.container
   }
 
@@ -425,7 +426,7 @@ class TextDomBinding implements TextBinding {
     return parent !== null && "elementType" in parent && isConnected(parent)
   }
 
-  get root(): object | null {
+  get root(): NodeRoot | null {
     return this.state.container
   }
 

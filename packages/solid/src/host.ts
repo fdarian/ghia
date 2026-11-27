@@ -87,6 +87,7 @@ import type {
   NativeRenderer,
   Node,
   NodeBinding,
+  NodeRoot,
   ParentBinding,
   SelectionDirection,
   ScrollableElement,
@@ -661,7 +662,7 @@ class ElementDomBinding implements ElementBinding {
     return isConnected(this.element)
   }
 
-  get root(): object | null {
+  get root(): NodeRoot | null {
     return this.element.root
   }
 
@@ -777,7 +778,7 @@ class TextDomBinding implements TextBinding {
     return isConnected(this.text)
   }
 
-  get root(): object | null {
+  get root(): NodeRoot | null {
     return this.text.root
   }
 
