@@ -1294,12 +1294,17 @@ fn paint(
     for track in &empty_tracks {
         paint_rect(window, *track, 0.0, scaled(track_color, 1.0));
     }
-    let mut thumb_noted = [false; 2];
     {
         let st = state.borrow();
         let now = now();
+        // The thumbs are noted x then y every frame, shown or not: gpui finds one by its place among the thumbs the scroller noted.
         for (index, vertical) in [(0, false), (1, true)] {
-            let Some(axis) = layout[index] else { continue };
+            let Some(axis) = layout[index] else {
+                if noted_axes.contains(&index) {
+                    note_thumb(window, index, None);
+                }
+                continue;
+            };
             let grown = st.grow[index].value(now);
             let thickness = rest + (hover - rest) * grown;
             let rect = |start: f32, len: f32, thickness: f32| bar_rect(&axis, vertical, start, len, thickness);
@@ -1320,15 +1325,9 @@ fn paint(
             );
             if noted_axes.contains(&index) {
                 note_thumb(window, index, Some(thumb));
-                thumb_noted[index] = true;
             } else {
                 window.paint_quad(thumb);
             }
-        }
-    }
-    for axis in noted_axes {
-        if !thumb_noted[*axis] {
-            note_thumb(window, *axis, None);
         }
     }
 
