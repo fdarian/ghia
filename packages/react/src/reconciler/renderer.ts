@@ -344,7 +344,12 @@ function showRuntimeError(slot: RenderSlot, error: Error | string, componentStac
 /** Process-level errors (a throw nobody caught, the frame loop's) go to the app's own window, or to the one window there is. */
 function scheduleRuntimeError(error: Error | string, componentStack?: string): void {
   const target = ownRenderSlot<RenderSlot>() ?? renderSlots<RenderSlot>()[0]
-  target?.scheduleError?.(error, componentStack)
+  if (target === undefined) {
+    // Every window's slot is gone (the first window closed, a popup's error after it): no overlay to show, but the error is not dropped.
+    console.error("[gpuix] runtime error:", formatRuntimeError(thrownToError(error), componentStack).stack)
+    return
+  }
+  target.scheduleError?.(error, componentStack)
 }
 
 function scheduleOwnRuntimeError(slot: RenderSlot): (error: Error | string, componentStack?: string) => void {

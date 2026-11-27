@@ -3,7 +3,7 @@
  * window factory), `createRoot(w.document.body)` mounts there, and `createPortal(children, w.document.body)` reaches it.
  */
 import { useEffect, useState, useSyncExternalStore } from "react"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { renderSlots } from "@ghia/native/host"
 import { createRoot, flushSync, render, resetRender } from "../reconciler/renderer.js"
 import { createPortal } from "../reconciler/portal.js"
@@ -175,6 +175,24 @@ describeNative("React in another window", () => {
     expect(renderer.getAllText()).toEqual(["popup"])
     // `afterEach` unmounts what the test leaves in `app`.
     app = createTestRoot({ width: 400, height: 300 })
+  })
+
+  it("logs a runtime error when no window's render slot is left to show it", async () => {
+    // What `render()` installs, and what an uncaught throw of a popup reaches once the first window is gone.
+    const target = new TestRenderer({ width: 200, height: 100 })
+    render(<div>first</div>, { renderer: target })
+    expect(renderSlots()).toHaveLength(1)
+    target.dispose()
+    expect(renderSlots()).toHaveLength(0)
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const handlers = Reflect.get(globalThis, "__gpuixRuntimeErrorHandlers") as { uncaughtException: (error: Error) => void }
+      handlers.uncaughtException(new Error("popup boom"))
+      expect(errors).toHaveBeenCalledWith("[gpuix] runtime error:", expect.stringContaining("popup boom"))
+    } finally {
+      errors.mockRestore()
+      resetRender()
+    }
   })
 
   it("mounts a portal from the main tree into the popup, following the owner's state", async () => {

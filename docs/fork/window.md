@@ -387,7 +387,10 @@ the factory makes a root of its own kind on the renderer `window.open` made (`cr
   container inside the portal, so the nodes of `createPortal(children, w.document.body)` take the other window's ids and queue
   with no reconciler change. `resetAfterCommit` flushes the committing root's queue only, so a portal into another window is sent
   by the queue's scheduled microtask. `render()` keeps a `RenderSlot` for each renderer in `renderHosts` (the `own` slot has the
-  frame loop and the process-level error handlers' overlay).
+  frame loop and the process-level error handlers' overlay). A process-level error (an uncaught throw, the frame loop's) goes to the
+  overlay of the own slot, else of the first slot left; with no slot left (the first window closed and a popup that stays open
+  threw) it is logged with `console.error` and its stack, not dropped. Solid has no process-level handler: an error of a root
+  goes to that root's `onUncaughtError` or `console.error`, whichever windows are open.
 
 The frame loop is the app's: `window.open` joins the new renderer to the opener's loop (above), and neither adapter starts one
 or an `onTerminated` for a window it did not open itself. The test renderer opens several windows at once:
