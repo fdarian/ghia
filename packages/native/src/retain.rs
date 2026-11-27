@@ -799,6 +799,16 @@ impl Node {
         self.vol.dynamic & !(Dynamic::Transition as u8) == 0 && self.paints_only && !self.lift_run
     }
 
+    /// Whether what runs in the element and below it, if anything does, is what a patch of the element as a root follows: transitions
+    /// that only paint ([`Self::runs_a_paint_transition`]). Not in a scroller: a scroll moves what a scroller holds without a build,
+    /// and a run in a root that is recorded is left at the instant it was recorded, or painted by a patch where the clip culls it.
+    fn holds_only_a_run_a_patch_follows(&self, below: &Below) -> bool {
+        if self.vol.dynamic == 0 && !below.dynamic {
+            return true;
+        }
+        self.scroller.is_none() && !below.busy && (self.vol.dynamic == 0 || self.runs_a_paint_transition())
+    }
+
     /// Whether something below is handed to a stacking context around the element, which a patch of the element
     /// as one piece does not repeat (gpui declines it, `PatchDecline::Lifts`). The element's own lift is not this:
     /// gpui patches a lifted root in the place its context orders it, and what is lifted below a root that forms a
@@ -2839,6 +2849,24 @@ impl Retain {
         }
     }
 
+    pub(crate) fn dynamic_is_empty(&self) -> bool {
+        self.dynamic.is_empty()
+    }
+
+    /// Whether something runs in the patch root `root`: an element below it, or it, among the dynamic ones.
+    pub(crate) fn runs_in_root(&self, tree: &crate::retained_tree::RetainedTree, root: u64) -> bool {
+        self.dynamic.keys().any(|&id| {
+            let mut at = Some(id);
+            while let Some(up) = at {
+                if up == root {
+                    return true;
+                }
+                at = tree.elements.get(&up).and_then(|element| element.parent);
+            }
+            false
+        })
+    }
+
     /// Whether a tick that finds `sources` can be drawn by building again the units that hold what
     /// changed, and which they are (by element id, in the order the last frame built them). It
     /// can when, since the last frame that was built whole, nothing but time changed (the animations
@@ -3346,10 +3374,9 @@ impl Retain {
         // What runs in the element is a reason to build it again, and so to record nothing, but for the transitions that only
         // paint in a root that a patch repaints: the ticks of the run are patches of it (`Record::patch_root`).
         let running = own.dynamic || node.vol.dynamic != 0;
-        let holds_only_paint_transitions = !own.busy && (node.vol.dynamic == 0 || node.runs_a_paint_transition());
         let patch_root_runs = running
             && node.patch_root
-            && holds_only_paint_transitions
+            && node.holds_only_a_run_a_patch_follows(own)
             && !node.hands_lifts_out(own)
             && own.size <= PATCH_ROOT_MAX_ELEMENTS;
         if !(node.records || candidate) || node.absent || moved || (running && !patch_root_runs) {
@@ -3371,7 +3398,8 @@ impl Retain {
         let lifts = node.lift_z.is_some() || lifts_out;
         let overscan = node
             .scroller
-            .filter(|scroller| !blocks_move && scroller.fits(node.id) != Some(false))
+            // A scroll moves a recording without building what it holds, which leaves a run at the instant it was recorded.
+            .filter(|scroller| !blocks_move && !running && scroller.fits(node.id) != Some(false))
             .map(|scroller| scroller.overscan);
         Some(Recording {
             token: own.token,
@@ -4007,8 +4035,7 @@ impl Retain {
                         && eligible
                         && !node.hands_lifts_out(&own)
                         && own.size <= PATCH_ROOT_MAX_ELEMENTS
-                        && (node.vol.dynamic == 0 || node.runs_a_paint_transition())
-                        && !own.busy,
+                        && node.holds_only_a_run_a_patch_follows(&own),
                     box_root: node.box_root && eligible && !lifts && own.size <= UNIT_MAX_ELEMENTS && node.vol.dynamic == 0 && !own.dynamic,
                     reads_colors: node.reads_colors,
                     reads_custom: node.reads_custom,

@@ -252,6 +252,8 @@ function hover(name: string, styling: Styling): Scenario {
           }
         },
         verify() {
+          // The span ends in the frame that starts the row's transition, which is still at the colour it had.
+          if (styling === 'transition') for (let i = 0; i < 6; i++) session.frame()
           const after = rowBackground(session, lastY)
           if (after === before) throw new Error(`the hovered row's background did not change from ${before}`)
         },

@@ -286,6 +286,17 @@ impl GpuixView {
                 return None;
             }
         }
+        // A root that a scroll moved since it was built, with a run in it: the patch paints the root where the scroll put it,
+        // and what the scroll took out of the clip is painted by a patch and left out by a frame built whole. The frame built
+        // whole finds the root culled, and what runs in it dormant.
+        if !self.retain.dynamic_is_empty() {
+            let tree = self.tree.lock().unwrap();
+            let moved = |id: &u64| self.retain.is_patch_root(*id) && self.retain.runs_in_root(&tree, *id) && self.moved_since_built_in(&tree, *id) != gpui::Point::default();
+            if ids.iter().any(moved) {
+                self.patch.decline(key("RunningMoved".to_owned()));
+                return None;
+            }
+        }
         Some(ids)
     }
 
@@ -314,7 +325,11 @@ impl GpuixView {
             };
             tapes.push((id, unit.tape));
             units.push((unit.id, unit.element));
-            dynamic.extend(unit.dynamic);
+            // A unit's transitions were found by the frame that made it a unit and are cleared by the frame that follows
+            // their end; a root that a hover started a run in has no frame behind it that found them.
+            if self.retain.is_patch_root(id) {
+                dynamic.extend(unit.dynamic);
+            }
         }
         Some(Built { units, tapes, anchors, dynamic, stepped })
     }
@@ -381,6 +396,10 @@ impl GpuixView {
     /// moved the row and not the root's own recording.
     fn moved_since_built(&self, id: u64) -> gpui::Point<gpui::Pixels> {
         let tree = self.tree.lock().unwrap();
+        self.moved_since_built_in(&tree, id)
+    }
+
+    fn moved_since_built_in(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> gpui::Point<gpui::Pixels> {
         let mut at = Some(id);
         while let Some(up) = at {
             let moved = self.tapes.moved(up);
