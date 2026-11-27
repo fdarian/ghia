@@ -45,6 +45,7 @@ import type {
 import { bindClipboard } from "./clipboard.js"
 import { bindLinkOpener } from "./shell/open-link.js"
 import { bindWindowOpener } from "./window-open.js"
+import { windowGone } from "./window-lifecycle.js"
 import { runEditingComposition, runEditingInput, type EditingCompositionStep } from "./editing/input.js"
 import { documentOf, forgetElementSource, windowOf } from "./events/window-target.js"
 import type { GpuixDocument } from "./events/window-target.js"
@@ -921,6 +922,8 @@ export class TestRenderer implements NativeRenderer {
    *  disposed does not fail the test that made it. */
   #release(): void {
     if (!liveRenderers.delete(this)) return
+    // The window closes as a user's does: it hears `pagehide` and `unload`, and the adapter's root is let go while the window is whole.
+    windowGone(this)
     forgetElementSource(this)
     unregisterKeyframesHost(this.native)
     closeWebAnimations(this)

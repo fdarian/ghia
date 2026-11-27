@@ -8,7 +8,8 @@ import "../dom-globals.js"
 import type { GpuixWindow } from "../events/window-targets.js"
 import { document as globalDocument, documentOf, globalWindow, windowOf } from "../events/window-target.js"
 import { TestRenderer, hasNativeTestRenderer } from "../testing.js"
-import { windowGone } from "../window-lifecycle.js"
+import { unmountAllRoots } from "../roots.js"
+import { registerWindowDisposer, windowGone } from "../window-lifecycle.js"
 import { featureOptions, registerWindowFactory, tokenizeFeatures } from "../window-open.js"
 import { mountEmptyRoot, Piece } from "./fixtures/piece-nodes.js"
 
@@ -40,6 +41,13 @@ describe("the features string", () => {
       ["height", "240"],
       ["popup", ""],
       ["noopener", ""],
+    ])
+  })
+
+  it("lowercases the values too, so NOOPENER=YES is set as noopener=yes is", () => {
+    expect([...tokenizeFeatures("NoOpener=YES,Popup=TRUE")]).toEqual([
+      ["noopener", "yes"],
+      ["popup", "true"],
     ])
   })
 
@@ -119,6 +127,66 @@ describe.skipIf(!hasNativeTestRenderer)("window.open", () => {
     expect(before).toBe(globalWindow())
   })
 
+  it("returns null for noopener and noreferrer when it finds the window of that name, and still focuses it", () => {
+    openFirst()
+    const named = opened(window.open("", "tools"))
+    const other = opened(window.open("", "other"))
+    expect(window.open("", "tools", "noopener")).toBeNull()
+    expect(window.open("", "Tools", "NOREFERRER=YES")).toBeNull()
+    expect(window.open("", "tools", "width=10")).toBe(named)
+    expect((named.renderer as TestRenderer).isWindowKey()).toBe(true)
+    expect((other.renderer as TestRenderer).isWindowKey()).toBe(false)
+    expect(named.opener).toBe(window)
+  })
+
+  it("gives a named window whose root is gone a fresh one from the opener's factory, instead of throwing on focus", () => {
+    const renderer = new TestRenderer({ width: 300, height: 300 })
+    cleanups.push(mountEmptyRoot(renderer))
+    const unmounts: Array<() => void> = []
+    const made: TestRenderer[] = []
+    cleanups.push(
+      registerWindowFactory(renderer, (target) => {
+        made.push(target as TestRenderer)
+        const unmount = mountEmptyRoot(target as TestRenderer)
+        unmounts.push(unmount)
+        return unmount
+      })
+    )
+    const popup = opened(window.open("", "inspector"))
+    expect(popup.mountedRenderer).toBeDefined()
+    // `ghia dev` unmounting every root before it runs the entry again leaves the native window open.
+    unmounts[0]()
+    expect(popup.mountedRenderer).toBeUndefined()
+    expect(popup.closed).toBe(false)
+    const again = opened(window.open("", "inspector"))
+    expect(again).toBe(popup)
+    expect(made).toEqual([popup.renderer, popup.renderer])
+    expect(popup.mountedRenderer).toBeDefined()
+    expect(() => popup.document.body.appendChild(popup.document.createElement("div"))).not.toThrow()
+  })
+
+  it("does not find a named window whose renderer was disposed", () => {
+    openFirst()
+    const popup = opened(window.open("", "inspector"))
+    ;(popup.renderer as TestRenderer).dispose()
+    expect(popup.closed).toBe(true)
+    const fresh = opened(window.open("", "inspector"))
+    expect(fresh).not.toBe(popup)
+    expect(fresh.mountedRenderer).toBeDefined()
+  })
+
+  it("closes the windows a script opened when every root is unmounted, as ghia dev does before it runs the entry again", async () => {
+    openFirst()
+    const popup = opened(window.open("", "inspector"))
+    const unnamed = opened(window.open())
+    unmountAllRoots()
+    expect(popup.closed).toBe(true)
+    expect(unnamed.closed).toBe(true)
+    await tick()
+    expect((popup.renderer as TestRenderer | undefined)?.isWindowClosed()).toBe(true)
+    expect(window.open("", "inspector")).not.toBe(popup)
+  })
+
   it("hands a link to another origin to the system and returns null", () => {
     const renderer = openFirst()
     expect(window.open("https://example.org/docs")).toBeNull()
@@ -162,7 +230,7 @@ describe.skipIf(!hasNativeTestRenderer)("window.open", () => {
 })
 
 describe.skipIf(!hasNativeTestRenderer)("closing a window", () => {
-  it("fires beforeunload, pagehide and unload on that window, then it is closed and its document is empty", () => {
+  it("sets closed at once, then fires beforeunload, pagehide and unload on that window in a later task", async () => {
     openFirst()
     const child = opened(window.open("", "_blank", "width=200,height=200"))
     const log: string[] = []
@@ -171,12 +239,43 @@ describe.skipIf(!hasNativeTestRenderer)("closing a window", () => {
     }
     window.addEventListener("unload", () => log.push("the opener heard it"), { once: true })
     child.close()
-    expect(log).toEqual(["beforeunload:true:-", "pagehide:true:false", "unload:true:-"])
     expect(child.closed).toBe(true)
+    expect(log).toEqual([])
+    expect(child.document.body).toBeDefined()
+    await tick()
+    expect(log).toEqual(["beforeunload:true:-", "pagehide:true:false", "unload:true:-"])
     expect(window.closed).toBe(false)
+    expect((child.renderer as TestRenderer).isWindowClosed()).toBe(true)
     child.close()
+    await tick()
     expect(log).toHaveLength(3)
     expect(() => child.document.body).not.toThrow()
+  })
+
+  it("does not unmount the root under the handler of the window that closes itself", async () => {
+    const renderer = new TestRenderer({ width: 300, height: 300 })
+    cleanups.push(mountEmptyRoot(renderer))
+    let unmounted = 0
+    cleanups.push(
+      registerWindowFactory(renderer, (target) => {
+        const unmount = mountEmptyRoot(target as TestRenderer)
+        return () => {
+          unmounted += 1
+          unmount()
+        }
+      })
+    )
+    const child = opened(window.open())
+    const seen: Array<[number, boolean]> = []
+    child.addEventListener("ping", () => {
+      child.close()
+      seen.push([unmounted, child.mountedRenderer !== undefined])
+    })
+    child.dispatchEvent(new Event("ping"))
+    expect(seen).toEqual([[0, true]])
+    expect(child.closed).toBe(true)
+    await tick()
+    expect(unmounted).toBe(1)
   })
 
   it("fires pagehide and unload, but not beforeunload, when the user closed the window", () => {
@@ -192,15 +291,66 @@ describe.skipIf(!hasNativeTestRenderer)("closing a window", () => {
     expect(log).toHaveLength(2)
   })
 
-  it("lets the cancelable beforeunload of a script close go", () => {
+  it("lets the cancelable beforeunload of a script close go", async () => {
     openFirst()
     const child = opened(window.open())
     child.addEventListener("beforeunload", (event) => event.preventDefault())
     child.close()
+    await tick()
     expect(child.closed).toBe(true)
+    expect((child.renderer as TestRenderer).isWindowClosed()).toBe(true)
   })
 
-  it("runs what the adapter's factory returned, once, and keeps the opened windows open when the opener closes", () => {
+  it("does not close the platform window a second time when the user closed it before the task ran", async () => {
+    openFirst()
+    const child = opened(window.open())
+    const log: string[] = []
+    for (const type of ["beforeunload", "pagehide", "unload"]) child.addEventListener(type, () => log.push(type))
+    child.close()
+    windowGone(child.renderer as TestRenderer)
+    expect(log).toEqual(["pagehide", "unload"])
+    await tick()
+    expect(log).toEqual(["pagehide", "unload"])
+  })
+
+  it("lets go of the first window's root when that window goes, and its window hears pagehide and unload", () => {
+    const renderer = new TestRenderer({ width: 300, height: 300 })
+    cleanups.push(mountEmptyRoot(renderer))
+    const log: string[] = []
+    const stopDisposer = registerWindowDisposer(renderer, () => log.push("root unmounted"))
+    cleanups.push(stopDisposer)
+    for (const type of ["pagehide", "unload"]) window.addEventListener(type, () => log.push(type), { once: true })
+    windowGone(renderer)
+    expect(log).toEqual(["pagehide", "unload", "root unmounted"])
+    windowGone(renderer)
+    expect(log).toHaveLength(3)
+  })
+
+  it("does not run the disposer of a root that unmounted on its own", () => {
+    const renderer = new TestRenderer({ width: 300, height: 300 })
+    cleanups.push(mountEmptyRoot(renderer))
+    let calls = 0
+    registerWindowDisposer(renderer, () => (calls += 1))()
+    windowGone(renderer)
+    expect(calls).toBe(0)
+  })
+
+  it("lets go of the roots of a test window that is disposed, while its window is whole, and again for a later window under the same global window", () => {
+    const first = new TestRenderer({ width: 300, height: 300 })
+    cleanups.push(mountEmptyRoot(first))
+    const heard: string[] = []
+    registerWindowDisposer(first, () => heard.push(`disposed:${globalWindow().renderer === first}`))
+    window.addEventListener("pagehide", () => heard.push("pagehide"), { once: true })
+    first.dispose()
+    expect(heard).toEqual(["pagehide", "disposed:true"])
+    const second = new TestRenderer({ width: 300, height: 300 })
+    cleanups.push(mountEmptyRoot(second))
+    window.addEventListener("pagehide", () => heard.push("pagehide again"), { once: true })
+    second.dispose()
+    expect(heard).toEqual(["pagehide", "disposed:true", "pagehide again"])
+  })
+
+  it("runs what the adapter's factory returned, once, and keeps the opened windows open when the opener closes", async () => {
     const renderer = new TestRenderer({ width: 300, height: 300 })
     cleanups.push(mountEmptyRoot(renderer))
     let unmounted = 0
@@ -217,14 +367,16 @@ describe.skipIf(!hasNativeTestRenderer)("closing a window", () => {
     expect(child.opener).toBe(window)
     const grandchild = opened(child.open())
     child.close()
+    await tick()
     expect(unmounted).toBe(1)
     expect(grandchild.closed).toBe(false)
     expect(grandchild.opener).toBe(child)
     grandchild.close()
+    await tick()
     expect(unmounted).toBe(2)
   })
 
-  it("sets on<event> handler properties that run once per event, with the window as this", () => {
+  it("sets on<event> handler properties that run once per event, with the window as this", async () => {
     openFirst()
     const child = opened(window.open())
     const heard: unknown[] = []
@@ -234,6 +386,7 @@ describe.skipIf(!hasNativeTestRenderer)("closing a window", () => {
     child.onunload = child.onunload
     expect(typeof child.onunload).toBe("function")
     child.close()
+    await tick()
     expect(heard).toEqual([[true, "unload"]])
   })
 })

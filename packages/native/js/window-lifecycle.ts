@@ -59,7 +59,8 @@ function incumbentWindow(): GpuixWindow {
   return incumbent ?? globalWindow()
 }
 
-const unloaded = new WeakSet<GpuixWindow>()
+/** The renderers whose window already heard `pagehide` and `unload`: the global window object outlives its renderer, so it cannot be the key. */
+const unloaded = new WeakSet<object>()
 
 /** The windows a script opened by name, for a later `window.open(url, name)` to find. */
 const opened = new Set<GpuixWindow>()
@@ -69,30 +70,47 @@ export function trackOpenedWindow(window: GpuixWindow): void {
   opened.add(window)
 }
 
-/** The open window called `name` (ASCII case-insensitively, as the HTML spec matches target names), the first window included. */
+/**
+ * The open window called `name` (ASCII case-insensitively, as the HTML spec matches target names), the first window included.
+ * A window that has no native window yet, or has closed, is not found.
+ */
 export function findNamedWindow(name: string): GpuixWindow | undefined {
   const wanted = name.toLowerCase()
   for (const window of [globalWindow(), ...opened]) {
-    if (!window.closed && window.name.toLowerCase() === wanted) return window
+    if (window.renderer === undefined || window.closed) continue
+    if (window.name.toLowerCase() === wanted) return window
   }
   return undefined
 }
 
-/** What an adapter's root of a window needs done once the window is gone: see `registerWindowFactory`. */
-const disposers = new WeakMap<object, () => void>()
+/** What an adapter's root of a window needs done once the window is gone: see `registerWindowDisposer`. */
+const disposers = new WeakMap<object, Set<() => void>>()
 
-/** @internal Called by `window-open.ts` with what the adapter's factory returned. */
-export function setWindowDisposer(renderer: object, dispose: () => void): void {
-  disposers.set(renderer, dispose)
+/**
+ * The root an adapter mounted in `renderer`'s window asks to be let go of when the window is gone: the user closed it, a
+ * script did, or the app ended. It runs once, while the window's document is still the root's (an unmount sends its
+ * batch to a window the platform has closed, and that is applied to the tree only). The returned function takes it back,
+ * as the root unmounts on its own.
+ */
+export function registerWindowDisposer(renderer: object, dispose: () => void): () => void {
+  let held = disposers.get(renderer)
+  if (held === undefined) {
+    held = new Set()
+    disposers.set(renderer, held)
+  }
+  held.add(dispose)
+  return () => {
+    disposers.get(renderer)?.delete(dispose)
+  }
 }
 
 /**
  * Fires the events a window sends as it goes (`pagehide`, then `unload`), once. A close a script asks for
  * first sends `beforeunload`, whose result a script close ignores, as a browser's does.
  */
-function sendUnload(window: GpuixWindow, scripted: boolean): void {
-  if (unloaded.has(window)) return
-  unloaded.add(window)
+function sendUnload(window: GpuixWindow, renderer: NativeRenderer, scripted: boolean): void {
+  if (unloaded.has(renderer)) return
+  unloaded.add(renderer)
   if (scripted) fireWindowEvent(window, "beforeunload")
   fireWindowEvent(window, "pagehide", { persisted: false })
   fireWindowEvent(window, "unload")
@@ -101,42 +119,61 @@ function sendUnload(window: GpuixWindow, scripted: boolean): void {
 /**
  * The renderer's window is gone, because the user closed it, a script did, or the app ended: its
  * window hears `pagehide` and `unload` (unless a script's `close()` sent them already), its document
- * is empty from then on, and the root the adapter mounted in it is let go.
+ * is empty from then on, and the root the adapter mounted in it, the first window's included, is let go.
  *
- * @internal Called by the frame loop when a window leaves it, and by `close()`.
+ * @internal Called by the frame loop when a window leaves it, by a disposed test window, and by `close()`.
  */
 export function windowGone(renderer: NativeRenderer): void {
   const window = knownWindowOf(renderer)
-  if (window === undefined) return
-  sendUnload(window, false)
-  opened.delete(window)
-  forgetWindowSource(renderer)
+  if (window !== undefined) {
+    sendUnload(window, renderer, false)
+    opened.delete(window)
+    forgetWindowSource(renderer)
+  }
   releaseAdapterRoot(renderer)
 }
 
-/** Lets go of the root the adapter mounted in the window, once. */
+/** Lets go of the roots the adapter mounted in the window, once. */
 function releaseAdapterRoot(renderer: NativeRenderer): void {
-  const dispose = disposers.get(renderer)
+  const held = disposers.get(renderer)
   disposers.delete(renderer)
-  if (dispose === undefined) return
-  try {
-    dispose()
-  } catch (error) {
-    reportUncaught(error)
+  if (held === undefined) return
+  for (const dispose of held) {
+    try {
+      dispose()
+    } catch (error) {
+      reportUncaught(error)
+    }
   }
 }
 
+/**
+ * `window.close()`: `closed` is true at once, and the rest happens in a later task, as a browser queues it: `beforeunload`,
+ * `pagehide` and `unload`, then the root goes and the platform closes the window. The window's own handler that called
+ * `close()` therefore never has its root unmounted under it.
+ */
 export function closeWindowObject(window: GpuixWindow): void {
   const renderer = window.renderer
   if (window.closed || renderer === undefined) return
   if (renderer.closeWindow === undefined) {
     throw new Error("This renderer cannot close its window, so window.close() is unavailable")
   }
-  sendUnload(window, true)
-  // The root goes while the window is still there to take what unmounting it sends.
-  releaseAdapterRoot(renderer)
-  renderer.closeWindow()
-  windowGone(renderer)
+  window.closed = true
+  setTimeout(() => finishClose(window, renderer), 0)
+}
+
+function finishClose(window: GpuixWindow, renderer: NativeRenderer): void {
+  try {
+    sendUnload(window, renderer, true)
+    // The root goes while the window is still there to take what unmounting it sends.
+    releaseAdapterRoot(renderer)
+    // The user may have closed it between the call and this task.
+    if (!renderer.isWindowClosed?.()) renderer.closeWindow?.()
+  } catch (error) {
+    reportUncaught(error)
+  } finally {
+    windowGone(renderer)
+  }
 }
 
 export function focusWindowObject(window: GpuixWindow): void {

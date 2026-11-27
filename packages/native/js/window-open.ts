@@ -5,7 +5,15 @@ import { namedError } from "./named-error.js"
 import { location } from "./shell/location.js"
 import { opensInSystem, openLinkExternally } from "./shell/open-link.js"
 import { session } from "./shell/session.js"
-import { findNamedWindow, focusWindowObject, setWindowDisposer, trackOpenedWindow, windowGone } from "./window-lifecycle.js"
+import { registerRoot } from "./roots.js"
+import {
+  closeWindowObject,
+  findNamedWindow,
+  focusWindowObject,
+  registerWindowDisposer,
+  trackOpenedWindow,
+  windowGone,
+} from "./window-lifecycle.js"
 
 /**
  * What an adapter does to give a window `window.open` made a root: it mounts an empty one on
@@ -57,7 +65,7 @@ export function bindWindowOpener(renderer: object, opener: WindowOpener): void {
 
 const FEATURE_SEPARATORS = new Set(["\t", "\n", "\f", "\r", " ", "=", ","])
 
-/** HTML's "tokenize the features string": names lowercased, and the aliases of the sizes and the position normalized. */
+/** HTML's "tokenize the features string": names and values lowercased, and the aliases of the sizes and the position normalized. */
 export function tokenizeFeatures(features: string): Map<string, string> {
   const tokens = new Map<string, string>()
   const end = features.length
@@ -80,7 +88,7 @@ export function tokenizeFeatures(features: string): Map<string, string> {
         if (features[position] === ",") break
         position += 1
       }
-      value = collect((char) => !FEATURE_SEPARATORS.has(char))
+      value = collect((char) => !FEATURE_SEPARATORS.has(char)).toLowerCase()
     }
     name = NORMALIZED_NAMES[name] ?? name
     if (name !== "") tokens.set(name, value)
@@ -178,24 +186,24 @@ export function openWindow(opener: GpuixWindow, urlArgument: string | URL, targe
     throw notSupported(url)
   }
 
-  if (lowered !== "_blank") {
-    const existing = findNamedWindow(targetName)
-    if (existing !== undefined) {
-      focusWindowObject(existing)
-      return existing.view
-    }
-  }
-
   const tokens = tokenizeFeatures(featuresArgument)
   const detached = featureIsSet(tokens, "noopener") || featureIsSet(tokens, "noreferrer")
   const openerRenderer = opener.renderer
   if (openerRenderer === undefined) throw missing("a window", opener)
+
+  if (lowered !== "_blank") {
+    const existing = findNamedWindow(targetName)
+    if (existing !== undefined) {
+      if (existing.mountedRenderer === undefined) mountRoot(opener, openerRenderer, existing)
+      focusWindowObject(existing)
+      return detached ? null : existing.view
+    }
+  }
+
   const windowOpener = openers.get(openerRenderer)
   if (windowOpener === undefined) throw missing("a renderer that can open a sibling window", opener)
-  const factory = factories.get(openerRenderer)
-  if (factory === undefined) {
-    throw missing("a root that can make an empty root for the new window (render() of @ghia/solid or @ghia/react registers one)", opener)
-  }
+  // Checked before the window opens, so that a missing factory leaves no window behind.
+  factoryOf(opener, openerRenderer)
 
   const options = featureOptions(tokens)
   const title = windowOpener.title()
@@ -203,9 +211,7 @@ export function openWindow(opener: GpuixWindow, urlArgument: string | URL, targe
   const created = windowOpener.create(options)
   const opened = windowOf(created)
   try {
-    const dispose = factory(created)
-    factories.set(created, factory)
-    if (dispose !== undefined) setWindowDisposer(created, dispose)
+    mountRoot(opener, openerRenderer, opened)
   } catch (error) {
     created.closeWindow?.()
     windowGone(created)
@@ -215,4 +221,31 @@ export function openWindow(opener: GpuixWindow, urlArgument: string | URL, targe
   opened.openerLink = detached ? null : opener
   trackOpenedWindow(opened)
   return detached ? null : opened.view
+}
+
+function factoryOf(opener: GpuixWindow, openerRenderer: NativeRenderer): WindowFactory {
+  const factory = factories.get(openerRenderer)
+  if (factory === undefined) {
+    throw missing("a root that can make an empty root for the new window (render() of @ghia/solid or @ghia/react registers one)", opener)
+  }
+  return factory
+}
+
+/**
+ * Gives `target`'s window a root made by the factory of the opener's: a window `window.open` just made, or a named one whose
+ * root is gone (the app unmounted it, a test renderer was disposed) and that a script finds again. Closing the window, and
+ * `unmountAllRoots` (`ghia dev` running the entry again), end the root and the window with it, so a reload does not leave the
+ * old popups open for the new run to open again.
+ */
+function mountRoot(opener: GpuixWindow, openerRenderer: NativeRenderer, target: GpuixWindow): void {
+  const factory = factoryOf(opener, openerRenderer)
+  const renderer = target.renderer
+  if (renderer === undefined) throw missing("a window that has a renderer", target)
+  const dispose = factory(renderer)
+  factories.set(renderer, factory)
+  const unregisterReload = registerRoot(() => closeWindowObject(target))
+  registerWindowDisposer(renderer, () => {
+    unregisterReload()
+    dispose?.()
+  })
 }
