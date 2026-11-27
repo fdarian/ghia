@@ -228,15 +228,16 @@ fn quoted(text: &str) -> Option<&str> {
     text.strip_prefix(quote)?.strip_suffix(quote)
 }
 
-/// `auto`, or one or two of `normal`, `bold` and numbers from 1 to 1000 (a range for a variable font).
+/// `auto` alone, or one or two of `normal`, `bold` and numbers from 1 to 1000 (a range for a variable font).
 fn weight_range(text: &str) -> Option<(f32, f32)> {
     let words = split_whitespace(text);
     let value = |word: &str| match word.to_ascii_lowercase().as_str() {
-        "normal" | "auto" => Some(400.0),
+        "normal" => Some(400.0),
         "bold" => Some(700.0),
         number => number.parse::<f32>().ok().filter(|number| (1.0..=1000.0).contains(number)),
     };
     match words.as_slice() {
+        [one] if one.eq_ignore_ascii_case("auto") => Some((400.0, 400.0)),
         [one] => value(one).map(|weight| (weight, weight)),
         [from, to] => {
             let (from, to) = (value(from)?, value(to)?);
@@ -266,11 +267,11 @@ fn is_angle(word: &str) -> bool {
         .is_some_and(|number| number.parse::<f32>().is_ok())
 }
 
-/// A keyword, or one or two percentages, in percent.
+/// `auto` alone, or one or two keywords or percentages, in percent.
 fn stretch_range(text: &str) -> Option<(f32, f32)> {
     let words = split_whitespace(text);
     let value = |word: &str| match word.to_ascii_lowercase().as_str() {
-        "auto" | "normal" => Some(100.0),
+        "normal" => Some(100.0),
         "ultra-condensed" => Some(50.0),
         "extra-condensed" => Some(62.5),
         "condensed" => Some(75.0),
@@ -282,6 +283,7 @@ fn stretch_range(text: &str) -> Option<(f32, f32)> {
         percentage => percentage.strip_suffix('%')?.parse::<f32>().ok().filter(|percent| *percent >= 0.0),
     };
     match words.as_slice() {
+        [one] if one.eq_ignore_ascii_case("auto") => Some((100.0, 100.0)),
         [one] => value(one).map(|stretch| (stretch, stretch)),
         [from, to] => {
             let (from, to) = (value(from)?, value(to)?);
@@ -436,7 +438,21 @@ mod tests {
     fn weight_ranges_take_the_keywords() {
         assert_eq!(only("@font-face { font-family: A; src: url(a); font-weight: normal bold }").weight, (400.0, 700.0));
         assert_eq!(only("@font-face { font-family: A; src: url(a); font-weight: bold 300 }").weight, (300.0, 700.0));
-        assert_eq!(only("@font-face { font-family: A; src: url(a); font-weight: auto auto }").weight, (400.0, 400.0));
+        assert_eq!(only("@font-face { font-family: A; src: url(a); font-weight: auto }").weight, (400.0, 400.0));
+    }
+
+    #[test]
+    fn auto_is_valid_alone_and_not_in_a_range() {
+        // `auto` in a range is invalid, so the descriptor keeps its initial value; the numbers show the range was not taken.
+        for text in ["auto 900", "700 auto", "auto auto", "normal auto"] {
+            assert_eq!(only(&format!("@font-face {{ font-family: A; src: url(a); font-weight: {text} }}")).weight, (400.0, 400.0), "{text}");
+        }
+        assert_eq!(only("@font-face { font-family: A; src: url(a); font-weight: 700 900 }").weight, (700.0, 900.0));
+        for text in ["auto 200%", "50% auto", "auto auto"] {
+            assert_eq!(only(&format!("@font-face {{ font-family: A; src: url(a); font-stretch: {text} }}")).stretch, (100.0, 100.0), "{text}");
+        }
+        assert_eq!(only("@font-face { font-family: A; src: url(a); font-stretch: auto }").stretch, (100.0, 100.0));
+        assert_eq!(only("@font-face { font-family: A; src: url(a); font-stretch: 50% 150% }").stretch, (50.0, 150.0));
     }
 
     #[test]
