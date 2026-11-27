@@ -17,10 +17,10 @@ import { normalizedInputType } from "../dom/input-type.js"
 import { parseHtmlDocument } from "../dom/html/parse.js"
 import { Node, type Element, type Text } from "../dom/nodes.js"
 import { createTextFor, Range, StaticRange } from "../dom/range.js"
-import { getSelection, holdsNodeSelection } from "../dom/selection.js"
+import { holdsNodeSelection } from "../dom/selection.js"
 import { crossesBlock, stepPoint } from "../dom/selection-movement.js"
 import { CompositionEvent, InputEvent } from "../events/classes.js"
-import { document } from "../events/window-target.js"
+import type { GpuixDocument } from "../events/window-target.js"
 import { editingHostOf } from "./host.js"
 import { moveToLineBoundary } from "./line-movement.js"
 
@@ -58,7 +58,7 @@ interface EditingTarget {
 }
 
 /** `document.activeElement` as a DOM node. */
-export function focusedNode(): Node {
+export function focusedNode(document: GpuixDocument): Node {
   const active: unknown = document.activeElement
   if (!(active instanceof Node)) throw new Error("document.activeElement is not a DOM node")
   return active
@@ -76,8 +76,8 @@ export function isTextControl(node: Node): boolean {
 }
 
 /** The editing host that has focus, or `null` when focus is elsewhere or on an `<input>` or `<textarea>` (which edit themselves). */
-export function focusedEditingHost(): Element | null {
-  const focused = focusedNode()
+export function focusedEditingHost(document: GpuixDocument): Element | null {
+  const focused = focusedNode(document)
   const host = editingHostOf(focused)
   if (host === null) return null
   if (isTextControl(focused)) return null
@@ -85,21 +85,21 @@ export function focusedEditingHost(): Element | null {
 }
 
 /** Whether an editing host that has focus holds the selection, and if so whether it is a caret or a range. */
-export function editingSelectionKind(): "none" | "caret" | "range" {
-  const target = editingTarget()
+export function editingSelectionKind(document: GpuixDocument): "none" | "caret" | "range" {
+  const target = editingTarget(document)
   if (target === null) return "none"
   return target.range.collapsed ? "caret" : "range"
 }
 
-function editingTarget(): EditingTarget | null {
-  if (!holdsNodeSelection()) return null
-  const selection = getSelection()
+function editingTarget(document: GpuixDocument): EditingTarget | null {
+  const selection = document.getSelection()
+  if (!holdsNodeSelection(selection)) return null
   const focus = selection.focusNode
   const anchor = selection.anchorNode
   if (focus === null || anchor === null) return null
   const host = editingHostOf(focus)
   if (host === null || editingHostOf(anchor) !== host) return null
-  if (editingHostOf(focusedNode()) !== host) return null
+  if (editingHostOf(focusedNode(document)) !== host) return null
   return { host, range: selection.getRangeAt(0).cloneRange() }
 }
 
@@ -217,7 +217,7 @@ export function pastedText(data: DataTransfer): string | null {
 }
 
 /** A `<br>` at the point, which goes after it: a Text there is split when the point is inside it. */
-function insertBreak(at: Point): Point {
+function insertBreak(document: GpuixDocument, at: Point): Point {
   let parent: Node
   let reference: Node | null
   if (isText(at.node)) {
@@ -235,10 +235,10 @@ function insertBreak(at: Point): Point {
 }
 
 /** `text` at the point, a `<br>` for each line break; the end of what went in. */
-function insertLines(at: Point, text: string): Point {
+function insertLines(document: GpuixDocument, at: Point, text: string): Point {
   let end = at
   text.split(/\r\n|\r|\n/).forEach((line, index) => {
-    if (index > 0) end = insertBreak(end)
+    if (index > 0) end = insertBreak(document, end)
     if (line !== "") end = insertAt(end.node, end.offset, line).end
   })
   return end
@@ -264,8 +264,8 @@ function dispatchInput(
  * One edit of the editing host that holds the selection and focus: `beforeinput`, then the change to
  * the DOM if no listener canceled, then `input`. `data` is the text of an insertion.
  */
-export function runEditingInput(inputType: string, data: string | null, options: EditingInputOptions = {}): EditingInputResult {
-  const target = editingTarget()
+export function runEditingInput(document: GpuixDocument, inputType: string, data: string | null, options: EditingInputOptions = {}): EditingInputResult {
+  const target = editingTarget(document)
   if (target === null) return NOT_HANDLED
   const host = target.host
   const isComposing = options.isComposing ?? false
@@ -333,7 +333,7 @@ export function runEditingInput(inputType: string, data: string | null, options:
       const at = isText(startNode) ? { node: startNode, offset: startOffset } : { node: range.startContainer, offset: range.startOffset }
       const text = pastedText(dataTransfer)
       if (text === null) throw new Error("insertFromPaste needs a clipboard with text; the caller checks with pastedText first")
-      caret = insertLines(at, text)
+      caret = insertLines(document, at, text)
       break
     }
     case "deleteByCut":
@@ -354,7 +354,7 @@ export function runEditingInput(inputType: string, data: string | null, options:
     default:
       return { handled: true, canceled: false, changed: false }
   }
-  getSelection().collapse(caret.node, caret.offset)
+  document.getSelection().collapse(caret.node, caret.offset)
   dispatchInput(host, "input", inputType, data, isComposing, [], dataTransfer)
   return { handled: true, canceled: false, changed: true }
 }
@@ -377,6 +377,7 @@ export interface EditingCompositionOptions {
 }
 
 interface Composition {
+  document: GpuixDocument
   host: Element
   marked: Range
 }
@@ -388,15 +389,15 @@ function dispatchComposition(host: Element, type: string, data: string): void {
   host.dispatchEvent(new CompositionEvent(type, { bubbles: true, composed: true, data }))
 }
 
-function startComposition(target: EditingTarget): Composition {
+function startComposition(document: GpuixDocument, target: EditingTarget): Composition {
   dispatchComposition(target.host, "compositionstart", target.range.toString())
-  const started = { host: target.host, marked: target.range }
+  const started = { document, host: target.host, marked: target.range }
   compositions.set(target.host, started)
   return started
 }
 
 function replaceMarked(active: Composition, text: string): EditingInputResult {
-  return runEditingInput("insertCompositionText", text, {
+  return runEditingInput(active.document, "insertCompositionText", text, {
     isComposing: true,
     replacing: active.marked,
     beforeChange: () => dispatchComposition(active.host, "compositionupdate", text),
@@ -409,11 +410,11 @@ function endComposition(active: Composition, data: string): void {
 }
 
 /** The text of `marked` is `offset` units in: the selection goes there, in the text the composition put in. */
-function selectInMarked(marked: Range, selected: readonly [number, number]): void {
+function selectInMarked(document: GpuixDocument, marked: Range, selected: readonly [number, number]): void {
   const node = marked.startContainer
   if (!isText(node)) return
   const at = (offset: number) => Math.min(marked.startOffset + offset, node.data.length)
-  getSelection().setBaseAndExtent(node, at(selected[0]), node, at(selected[1]))
+  document.getSelection().setBaseAndExtent(node, at(selected[0]), node, at(selected[1]))
 }
 
 /**
@@ -431,8 +432,8 @@ export function endEditingComposition(host: Element): void {
  * input method canceling the composition: the marked text goes, and `compositionend` has no data.
  * Returns false when no editing host holds the selection and focus, or when an `unmark` finds no composition.
  */
-export function runEditingComposition(step: EditingCompositionStep, options: EditingCompositionOptions = {}): boolean {
-  let target = editingTarget()
+export function runEditingComposition(document: GpuixDocument, step: EditingCompositionStep, options: EditingCompositionOptions = {}): boolean {
+  let target = editingTarget(document)
   if (target === null) return false
   const running = compositions.get(target.host)
   if (step.action === "unmark") {
@@ -446,8 +447,8 @@ export function runEditingComposition(step: EditingCompositionStep, options: Edi
       running.marked.setStart(replacing.startContainer, replacing.startOffset)
       running.marked.setEnd(replacing.endContainer, replacing.endOffset)
     } else {
-      getSelection().setBaseAndExtent(replacing.startContainer, replacing.startOffset, replacing.endContainer, replacing.endOffset)
-      target = editingTarget()
+      document.getSelection().setBaseAndExtent(replacing.startContainer, replacing.startOffset, replacing.endContainer, replacing.endOffset)
+      target = editingTarget(document)
       if (target === null) return false
     }
   }
@@ -458,15 +459,15 @@ export function runEditingComposition(step: EditingCompositionStep, options: Edi
     }
     return true
   }
-  const active = running ?? startComposition(target)
+  const active = running ?? startComposition(document, target)
   if (step.action === "mark") {
     const result = replaceMarked(active, step.text)
-    if (result.changed && options.selected !== undefined) selectInMarked(active.marked, options.selected)
+    if (result.changed && options.selected !== undefined) selectInMarked(document, active.marked, options.selected)
     return true
   }
   if (active.marked.toString() !== step.text) replaceMarked(active, step.text)
   // The caret is after what was committed, wherever in the marked text the input method had put it.
-  if (active.marked.endContainer.isConnected) getSelection().collapse(active.marked.endContainer, active.marked.endOffset)
+  if (active.marked.endContainer.isConnected) document.getSelection().collapse(active.marked.endContainer, active.marked.endOffset)
   endComposition(active, step.text)
   return true
 }

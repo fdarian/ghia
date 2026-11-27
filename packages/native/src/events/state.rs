@@ -356,6 +356,11 @@ impl PointerState {
         }
     }
 
+    /// Whether JS listens for `event_type` on `window` or `document`.
+    pub(crate) fn window_listens(&self, event_type: &str) -> bool {
+        self.requests.window_listens(event_type)
+    }
+
     /// A handle for the paint pass: the chain the last input saw, so a frame
     /// whose layout moved under a still pointer can tell the dispatcher.
     pub fn observed(&self) -> ObservedChain {

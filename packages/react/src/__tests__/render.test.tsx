@@ -185,15 +185,19 @@ describeNative("render()", () => {
     renderer = new TestRenderer()
   })
 
-  it("reuses the injected renderer on the second call", () => {
-    // The window is per thread: the renderer made last owns it, and an earlier one reaches nothing.
-    const ignored = new TestRenderer()
-    renderer = new TestRenderer()
+  it("remounts on the same injected renderer, and a second renderer gets a root of its own", () => {
+    const other = new TestRenderer()
     render(<div>one</div>, { renderer })
-    render(<div>two</div>, { renderer: ignored })
-
+    render(<div>two</div>, { renderer: other })
     renderer.flush()
-    expect(renderer.getAllText()).toEqual(["two"])
+    other.flush()
+    expect(renderer.getAllText()).toEqual(["one"])
+    expect(other.getAllText()).toEqual(["two"])
+
+    render(<div>three</div>, { renderer })
+    renderer.flush()
+    expect(renderer.getAllText()).toEqual(["three"])
+    expect(other.getAllText()).toEqual(["two"])
   })
 
   it("carries what is written to document after unmountAllRoots, a full reload's stop, to the next render() once", () => {

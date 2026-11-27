@@ -1,5 +1,4 @@
 import type { EventPayload } from "../index.js"
-import { addFrameSource, runAnimationFrame } from "./animation-frame.js"
 import { reportUncaught, type DomDispatchResult } from "./events/dispatch.js"
 import { createDragDispatcher } from "./events/drag.js"
 import { focusElementById, placeCaretOnFocusIn } from "./focus.js"
@@ -9,8 +8,8 @@ import { EDIT_INPUT_EVENT, endCompositionOnBlur, runNativeEditInput } from "./ed
 import { EDIT_POINTER_EVENT, runEditingPointer } from "./editing/pointer-selection.js"
 import { handlesEvent, normalizeEventType, runRootEvent } from "./events/keyboard-defaults.js"
 import { popoversOfRendererGone } from "./dom/popover.js"
-import { elementOf, GpuixEventTarget, noteFocusEvent, trackFocusedElement } from "./events/window-target.js"
-import { mountedRenderers, notifyMountedRenderer } from "./mounted-renderer.js"
+import { elementOf, GpuixEventTarget, knownWindowOf, trackFocusedElement, windowOf } from "./events/window-target.js"
+import type { GpuixWindow } from "./events/window-targets.js"
 import { deliverObservation } from "./observers.js"
 import type {
   ElementIdAllocator,
@@ -22,6 +21,7 @@ import type {
   WindowKeyEventHandler,
 } from "./host.js"
 import { shapeScrollEvent } from "./scroll.js"
+import { deliverWindowActivity, runAsIncumbent } from "./window-lifecycle.js"
 import { deliverWebAnimationEvent, isWebAnimationEvent } from "./web-animations.js"
 
 export interface RendererRootHandlers {
@@ -180,12 +180,17 @@ export type ActiveRoot = RendererRootBinding & {
   elementById(id: number): object | undefined
   /** Listens at the window level for this root only: the `onKeyDown` / `onKeyUp` options. */
   scoped: GpuixEventTarget
+  /** The window of the root: the top of the event path of every event of its tree. */
+  window: GpuixWindow
+  /** The window object its events have as `view`: only a window other than the first has one of its own. */
+  view: object | undefined
 }
 
 /** What native sends in the frame steps of a window that was asked for `requestAnimationFrame`. */
 const ANIMATION_FRAME_EVENT = "animationframe"
 
-export { mountedRenderer } from "./mounted-renderer.js"
+/** What native sends when the window becomes or stops being the key one, while `window` listens for `focus` or `blur`: `value` is `"true"` or `"false"`. */
+const WINDOW_ACTIVE_EVENT = "windowActive"
 
 const STATE_KEY = Symbol.for("@ghia/native/renderer-states")
 
@@ -305,7 +310,7 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       throw new Error("An animationframe event arrived without its timelineTime")
     }
     const time = event.timelineTime
-    const run = () => runAnimationFrame(renderer, time, (error) => state.reportError(error))
+    const run = () => windowOf(renderer).animationFrames.run(time, (error) => state.reportError(error))
     if (active?.handlers.schedule) active.handlers.schedule(run)
     else run()
   }
@@ -336,6 +341,11 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         reportError: (error) => state.reportError(error),
         elementById: (id) => elementOf(renderer, id),
         scoped,
+        window: windowOf(renderer),
+        get view() {
+          const view = this.window.view
+          return view === globalThis ? undefined : view
+        },
         windowKeyEventId: generation,
         windowSelectionEventId: generation,
         windowAppearanceEventId: generation,
@@ -345,16 +355,15 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
           popoversOfRendererGone(renderer)
           removeFrameSource?.()
           removeFrameSource = undefined
-          const mounted = mountedRenderers()
-          mounted.splice(mounted.indexOf(renderer), 1)
-          notifyMountedRenderer()
+          binding.window.attached = false
+          binding.window.syncResize()
           return true
         },
       }
       active = binding
-      mountedRenderers().push(renderer)
-      notifyMountedRenderer()
-      removeFrameSource = addFrameSource(renderer)
+      binding.window.attached = true
+      binding.window.syncResize()
+      removeFrameSource = binding.window.animationFrames.attach(renderer)
       return binding
     },
     dispatch(received) {
@@ -366,6 +375,12 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
       if (received.eventType === "mediaChange") {
         for (const listener of [...mediaListeners]) listener()
         return mediaListeners.size > 0
+      }
+      if (received.eventType === WINDOW_ACTIVE_EVENT) {
+        const run = () => deliverWindowActivity(windowOf(renderer), received.value === "true")
+        if (active?.handlers.schedule) active.handlers.schedule(run)
+        else run()
+        return false
       }
       if (received.eventType.startsWith("motionValue")) {
         const sink = motionValueSinks.get(received.elementId)
@@ -405,7 +420,6 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         return true
       }
       if (received.eventType === "focusin") {
-        noteFocusEvent(renderer)
         const focused = elementOf(renderer, received.elementId)
         trackFocusedElement(renderer, "focusin", focused)
         placeCaretOnFocusIn(focused)
@@ -448,7 +462,6 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         return { defaultPrevented: false, propagationStopped: false, handled }
       }
       if (received.eventType === "focusin") {
-        noteFocusEvent(renderer)
         const focused = elementOf(renderer, received.elementId)
         trackFocusedElement(renderer, "focusin", focused)
         placeCaretOnFocusIn(focused)
@@ -544,6 +557,17 @@ export function createRendererState(renderer: NativeRenderer): RendererState {
         if (target !== null) focusElementById(renderer, target)
       }
     },
+  }
+  // The handlers of an event run as the window it happened in: `postMessage` names it as the sender.
+  const dispatchEvent = state.dispatch
+  const dispatchSyncEvent = state.dispatchSync
+  state.dispatch = (received) => {
+    const window = knownWindowOf(renderer)
+    return window === undefined ? dispatchEvent(received) : runAsIncumbent(window, () => dispatchEvent(received))
+  }
+  state.dispatchSync = (received) => {
+    const window = knownWindowOf(renderer)
+    return window === undefined ? dispatchSyncEvent(received) : runAsIncumbent(window, () => dispatchSyncEvent(received))
   }
   allStates().set(renderer, state)
   return state

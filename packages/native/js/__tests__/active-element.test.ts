@@ -2,15 +2,16 @@ import { describe, expect, it } from "vitest"
 import "../dom-globals.js"
 import {
   document,
+  documentOf,
   elementOf,
+  forgetElementSource,
   forgetWindowSource,
   installElementSource,
-  noteFocusEvent,
 } from "../events/window-target.js"
 
 function root(elements: Record<number, object>) {
-  const state = { focused: null as number | null }
-  const renderer = { getFocusedElementId: () => state.focused }
+  const state = { focused: null as number | null, key: false }
+  const renderer = { getFocusedElementId: () => state.focused, isWindowKey: () => state.key }
   const remove = installElementSource(renderer, (id) => elements[id])
   return { renderer, state, remove }
 }
@@ -32,22 +33,48 @@ describe("document.activeElement across roots", () => {
     expect(document.activeElement).toBe(document.body)
   })
 
-  it("is the element of the root that heard a focus event last, among roots that have one", () => {
+  it("is the element of the window's own root: a window never answers with another's focus", () => {
     const a = {}
     const b = {}
     const first = root({ 1: a })
     const second = root({ 1: b })
+    const firstDocument = documentOf(first.renderer as never)
+    const secondDocument = documentOf(second.renderer as never)
+    expect(firstDocument).toBe(document)
+    expect(secondDocument).not.toBe(document)
     first.state.focused = 1
-    noteFocusEvent(first.renderer)
     second.state.focused = 1
-    noteFocusEvent(second.renderer)
-    expect(document.activeElement).toBe(b)
-    noteFocusEvent(first.renderer)
-    expect(document.activeElement).toBe(a)
+    expect(firstDocument.activeElement).toBe(a)
+    expect(secondDocument.activeElement).toBe(b)
     first.state.focused = null
-    expect(document.activeElement).toBe(b)
+    expect(firstDocument.activeElement).toBe(firstDocument.body)
+    expect(secondDocument.activeElement).toBe(b)
     first.remove()
     second.remove()
+  })
+
+  it("has the focus in the window the platform says is the key window", () => {
+    const first = root({ 1: {} })
+    const second = root({ 1: {} })
+    const firstDocument = documentOf(first.renderer as never)
+    const secondDocument = documentOf(second.renderer as never)
+    first.state.key = true
+    expect([firstDocument.hasFocus(), secondDocument.hasFocus()]).toEqual([true, false])
+    first.state.key = false
+    second.state.key = true
+    expect([firstDocument.hasFocus(), secondDocument.hasFocus()]).toEqual([false, true])
+    // A closed window has no focus, whatever the platform last said.
+    forgetWindowSource(second.renderer)
+    expect([firstDocument.hasFocus(), secondDocument.hasFocus()]).toEqual([false, false])
+    first.remove()
+    second.remove()
+    forgetElementSource(first.renderer)
+  })
+
+  it("throws when the renderer cannot report the key window", () => {
+    const remove = installElementSource({ getFocusedElementId: () => null }, () => ({}))
+    expect(() => document.hasFocus()).toThrow("key window")
+    remove()
   })
 
   it("throws when the root has no element for the focused id", () => {
@@ -71,6 +98,7 @@ describe("document.activeElement across roots", () => {
     expect(document.activeElement).toBe(document.body)
     expect(elementOf(only.renderer, 1)).toBe(element)
     only.remove()
+    forgetElementSource(only.renderer)
     expect(() => elementOf(only.renderer, 1)).toThrow("No element source")
   })
 })

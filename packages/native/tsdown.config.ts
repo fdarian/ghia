@@ -14,5 +14,6 @@ export default defineConfig({
 	outDir: "dist",
 	tsconfig: "tsconfig.json",
 	// `../index.js` is the napi loader beside the .node; bundling a copy into dist/ breaks its relative .node lookup.
-	external: ["@ghia/native", /^\.\.\/index\.js$/],
+	// `vitest` is a devDependency that `testing-setup.ts` imports; bundling it copies the pnpm store into dist/.
+	external: ["@ghia/native", "vitest", /^\.\.\/index\.js$/],
 });

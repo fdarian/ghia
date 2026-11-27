@@ -180,7 +180,7 @@ impl Page {
 
     fn surface_events(&self, cx: &mut gpui::TestAppContext) -> Vec<String> {
         let events: Vec<NativeSurfaceEventReading> =
-            cx.update(|cx| super::test_api::native_surface_events(cx));
+            cx.update(|cx| super::test_api::native_surface_events(cx, self.window.window_id()));
         events.into_iter().map(|event| format!("{} {}", event.kind, event.handle)).collect()
     }
 

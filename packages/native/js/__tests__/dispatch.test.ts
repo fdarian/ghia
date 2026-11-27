@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { EventPayload } from "../../index.js"
 import type { EventHandlerMap } from "../host.js"
-import { captureHandlerKey, dispatchDomEvent, type DomEvent } from "../events/dispatch.js"
-import { dispatchPropagating, document, window } from "../events/window-target.js"
+import { captureHandlerKey, dispatchDomEvent, type DomEvent, type DomEventRoot } from "../events/dispatch.js"
+import { dispatchPropagating as dispatchAt, document, globalWindow, window } from "../events/window-target.js"
+
+/** The global window is the top of these events: the first window's. */
+const dispatchPropagating = (root: DomEventRoot, payload: EventPayload) => dispatchAt(root, payload, globalWindow())
 
 const ROOT = 1
 const MIDDLE = 2

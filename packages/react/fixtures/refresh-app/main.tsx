@@ -3,8 +3,10 @@ import { Counter } from "./counter.tsx"
 
 console.log("ENTRY_RUN entry v1")
 
-// A full reload does not tear the old run down, and the test renderer holds the old run's callbacks.
-const slot = globalThis as typeof globalThis & { previousRoot?: TestRoot }
+// A full reload does not tear the old run down, and the test renderer holds the old run's callbacks. Its timer
+// goes with it: it flushes a window that is closed once the old root unmounted.
+const slot = globalThis as typeof globalThis & { previousRoot?: TestRoot; previousTimer?: ReturnType<typeof setInterval> }
+clearInterval(slot.previousTimer)
 slot.previousRoot?.unmount()
 const app = createTestRoot()
 slot.previousRoot = app
@@ -17,7 +19,7 @@ console.log(`RENDERED ${text()}`)
 if (import.meta.hot) {
   // Reports the tree after a hot update; the interval also keeps `ghia dev` alive.
   let last = text()
-  setInterval(() => {
+  slot.previousTimer = setInterval(() => {
     app.renderer.flush()
     if (text() === last) return
     last = text()

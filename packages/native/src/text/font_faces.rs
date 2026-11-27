@@ -9,7 +9,7 @@
 //! that changes nothing about the faces (`SheetFontFaces` keeps its `Arc`) costs a pointer compare.
 //!
 //! Loading is synchronous, as the `fonts` option is: a file is read in the frame that first builds
-//! with the rule, and only `.ttf`, `.otf` and `.ttc` files, `data:` URLs and `local()` fonts are
+//! with the rule, and only `.ttf`, `.otf`, `.ttc`, `.woff` and `.woff2` files, `data:` URLs and `local()` fonts are
 //! sources. A face none of whose sources loads is left out, with one warning, and the family stays as
 //! it was.
 
@@ -29,8 +29,8 @@ struct Face {
 
 /// What loading a face needs of the text system, which `Fonts` answers.
 pub(crate) trait Host {
-    /// Registers the fonts in a file, as the `fonts` option does.
-    fn add(&mut self, bytes: Vec<u8>) -> anyhow::Result<()>;
+    /// Registers the fonts in a file, as the `fonts` option does, and answers the family it is filed under.
+    fn register(&mut self, bytes: Vec<u8>) -> Result<String, String>;
     /// Whether the system has a family of this name.
     fn is_installed(&mut self, name: &str) -> bool;
 }
@@ -102,7 +102,7 @@ impl FaceState {
             };
             if !self.sources.contains_key(&key) {
                 let loaded = match source {
-                    FaceSource::Url { address, .. } => read_font(address).and_then(|bytes| register(bytes, host)),
+                    FaceSource::Url { address, .. } => read_font(address).and_then(|bytes| host.register(bytes)),
                     FaceSource::Local(name) => host.is_installed(name).then(|| name.clone()).ok_or_else(|| "no such font is installed".to_owned()),
                 };
                 self.sources.insert(key.clone(), loaded);
@@ -143,43 +143,34 @@ fn read_font(address: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-fn register(bytes: Vec<u8>, host: &mut dyn Host) -> Result<String, String> {
-    if bytes.starts_with(b"wOFF") || bytes.starts_with(b"wOF2") {
-        return Err("WOFF and WOFF2 are not supported, list a TrueType or OpenType file".to_owned());
-    }
-    crate::text::font_check::check_font(&bytes)?;
-    let family = family_of(&bytes)?;
-    host.add(bytes).map_err(|error| error.to_string())?;
-    Ok(family)
-}
-
-/// The family GPUI files the font under: the typographic family of the name table if it has one, else the family.
-fn family_of(bytes: &[u8]) -> Result<String, String> {
-    use ttf_parser::name_id::{FAMILY, TYPOGRAPHIC_FAMILY};
-
-    let face = ttf_parser::Face::parse(bytes, 0).map_err(|error| error.to_string())?;
-    let named = |id: u16| face.names().into_iter().filter(|name| name.name_id == id).find_map(|name| name.to_string());
-    named(TYPOGRAPHIC_FAMILY).or_else(|| named(FAMILY)).ok_or_else(|| "font has no family name".to_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::css::sheet::faces_for_tests as faces;
 
     const SQUARE: &[u8] = include_bytes!("../../../react/src/__tests__/fixtures/gpuix-test-square.ttf");
+    const SQUARE_WOFF: &[u8] = include_bytes!("../../../react/src/__tests__/fixtures/gpuix-test-square.woff");
+    const SQUARE_WOFF2: &[u8] = include_bytes!("../../../react/src/__tests__/fixtures/gpuix-test-square.woff2");
     const NAMELESS: &[u8] = include_bytes!("../../../react/src/__tests__/fixtures/gpuix-test-nameless.ttf");
+    const NAMELESS_WOFF2: &[u8] = include_bytes!("../../../react/src/__tests__/fixtures/gpuix-test-nameless.woff2");
 
-    #[derive(Default)]
     struct Recording {
         added: usize,
         installed: Vec<&'static str>,
+        text_system: Arc<gpui::TextSystem>,
+    }
+
+    impl Default for Recording {
+        fn default() -> Self {
+            Recording { added: 0, installed: Vec::new(), text_system: crate::text::font_check::platform_text_system_for_tests() }
+        }
     }
 
     impl Host for Recording {
-        fn add(&mut self, _: Vec<u8>) -> anyhow::Result<()> {
+        fn register(&mut self, bytes: Vec<u8>) -> Result<String, String> {
+            let family = crate::text::font_check::check_font(&bytes, &self.text_system)?;
             self.added += 1;
-            Ok(())
+            Ok(family)
         }
 
         fn is_installed(&mut self, name: &str) -> bool {
@@ -225,7 +216,7 @@ mod tests {
     fn a_source_that_cannot_load_gives_way_to_the_next() {
         let mut state = FaceState::default();
         let mut host = Recording { installed: vec!["Helvetica"], ..Recording::default() };
-        let woff = format!("{}", data_url(b"wOFF0000"));
+        let woff = data_url(b"wOFF0000");
         let css = format!(
             "@font-face {{ font-family: A; src: url(x.woff2) format(\"woff2\"), url({woff}), url(/no/such/file.ttf), url({nameless}), local(Missing), local(Helvetica), url({good}) }}",
             nameless = data_url(NAMELESS),
@@ -247,9 +238,33 @@ mod tests {
     }
 
     #[test]
-    fn woff_and_woff2_files_are_refused_with_a_reason() {
-        assert!(register(b"wOFF....".to_vec(), &mut Recording::default()).unwrap_err().contains("WOFF"));
-        assert!(register(b"wOF2....".to_vec(), &mut Recording::default()).unwrap_err().contains("WOFF"));
+    fn woff_and_woff2_sources_load_and_name_the_face_after_the_family_the_file_declares() {
+        for (bytes, mime) in [(SQUARE_WOFF, "font/woff"), (SQUARE_WOFF2, "font/woff2")] {
+            let mut state = FaceState::default();
+            let mut host = Recording::default();
+            let url = data_url(bytes).replace("font/ttf", mime);
+            let css = format!("@font-face {{ font-family: Brand; src: url({url}) format(\"woff\") }}");
+            assert!(state.sync(&faces(&css, 1), &mut host), "{mime}");
+            assert_eq!((host.added, state.family("brand").as_deref()), (1, Some("GpuixTestSquare")), "{mime}");
+        }
+    }
+
+    #[test]
+    fn a_broken_or_nameless_woff_gives_way_to_the_next_source_with_a_reason() {
+        let mut state = FaceState::default();
+        let mut host = Recording::default();
+        let css = format!(
+            "@font-face {{ font-family: A; src: url({}), url({}), url({}), url({}) }}",
+            data_url(b"wOFF"),
+            data_url(&SQUARE_WOFF2[..40]),
+            data_url(NAMELESS_WOFF2),
+            data_url(SQUARE)
+        );
+        assert!(state.sync(&faces(&css, 1), &mut host));
+        assert_eq!((host.added, state.family("a").as_deref()), (1, Some("GpuixTestSquare")));
+        let reasons: Vec<_> = state.sources.values().filter_map(|source| source.as_ref().err()).collect();
+        assert_eq!(reasons.len(), 3, "{reasons:?}");
+        assert!(reasons.iter().all(|reason| reason.contains("WOFF") || reason.contains("name")), "{reasons:?}");
     }
 
     #[test]

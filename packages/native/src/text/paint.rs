@@ -265,6 +265,16 @@ fn frame_reset(window: WindowId) {
     FRAMES.with(|frames| frames.borrow_mut().insert(window, Frame::default()));
 }
 
+/// The window closed: its frame goes, and a later window with the same id starts from none.
+pub(crate) fn forget_window(window: WindowId) {
+    FRAMES.with(|frames| frames.borrow_mut().remove(&window));
+}
+
+#[cfg(test)]
+pub(crate) fn holds_frame(window: WindowId) -> bool {
+    FRAMES.with(|frames| frames.borrow().contains_key(&window))
+}
+
 /// A zero-size canvas that clears the per-frame registries and installs the
 /// frame's mouse listeners. Paint it FIRST in the root, before
 /// any text, so each frame holds exactly that frame's visible text elements

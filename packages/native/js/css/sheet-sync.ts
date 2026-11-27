@@ -41,7 +41,8 @@ interface RendererSheets {
 
 const renderers = new Set<WeakRef<object>>()
 const states = new WeakMap<object, RendererSheets>()
-let adopted: readonly SyncedSheet[] = []
+/** The sheets each renderer's window adopts: its document's `adoptedStyleSheets`. */
+const adoptedBy = new WeakMap<object, readonly SyncedSheet[]>()
 let nextSheetId = 1
 
 export function allocateSheetId(): number {
@@ -53,7 +54,8 @@ function liveSink(state: RendererSheets): SheetSink | undefined {
 }
 
 /** The ids of the sheets that apply, each at the place of its last appearance: a repeated sheet counts once. */
-function effectiveSheets(): SyncedSheet[] {
+function effectiveSheets(renderer: object): SyncedSheet[] {
+  const adopted = adoptedBy.get(renderer) ?? []
   const result: SyncedSheet[] = []
   for (let index = 0; index < adopted.length; index++) {
     const sheet = adopted[index]!
@@ -68,13 +70,13 @@ function sameIds(left: readonly number[], right: readonly number[]): boolean {
   return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
-function syncRenderer(state: RendererSheets): void {
+function syncRenderer(renderer: object, state: RendererSheets): void {
   const sink = liveSink(state)
   if (!sink) {
     state.stale = true
     return
   }
-  const sheets = effectiveSheets()
+  const sheets = effectiveSheets(renderer)
   const wanted = new Set<number>()
   for (const sheet of sheets) {
     wanted.add(sheet.id)
@@ -96,12 +98,12 @@ function syncRenderer(state: RendererSheets): void {
   state.stale = false
 }
 
-function eachRenderer(visit: (state: RendererSheets) => void): void {
+function eachRenderer(visit: (renderer: object, state: RendererSheets) => void): void {
   for (const ref of [...renderers]) {
     const renderer = ref.deref()
     const state = renderer === undefined ? undefined : states.get(renderer)
-    if (state === undefined) renderers.delete(ref)
-    else visit(state)
+    if (renderer === undefined || state === undefined) renderers.delete(ref)
+    else visit(renderer, state)
   }
 }
 
@@ -117,13 +119,14 @@ export function registerSheetSink(renderer: object, sink: SheetSink): void {
     renderers.add(new WeakRef(renderer))
   }
   state.sinks.add(new WeakRef(sink))
-  syncRenderer(state)
+  syncRenderer(renderer, state)
 }
 
-/** `document.adoptedStyleSheets` changed. */
-export function setAdoptedSheets(sheets: readonly SyncedSheet[]): void {
-  adopted = [...sheets]
-  eachRenderer(syncRenderer)
+/** `document.adoptedStyleSheets` of the window of `renderer` changed. */
+export function setAdoptedSheets(renderer: object, sheets: readonly SyncedSheet[]): void {
+  adoptedBy.set(renderer, [...sheets])
+  const state = states.get(renderer)
+  if (state !== undefined) syncRenderer(renderer, state)
 }
 
 /**
@@ -131,14 +134,14 @@ export function setAdoptedSheets(sheets: readonly SyncedSheet[]): void {
  * when its queue next flushes, once however many changes came before.
  */
 export function sheetChanged(sheet: SyncedSheet): void {
-  if (!adopted.includes(sheet)) return
-  eachRenderer((state) => {
+  eachRenderer((renderer, state) => {
+    if (!adoptedBy.get(renderer)?.includes(sheet)) return
     const sink = liveSink(state)
     if (sink && !state.stale && state.known.has(sheet.id) && !sheet.disabled) {
       state.dirty.add(sheet)
       sink.sheetsDirty()
     } else {
-      syncRenderer(state)
+      syncRenderer(renderer, state)
     }
   })
 }

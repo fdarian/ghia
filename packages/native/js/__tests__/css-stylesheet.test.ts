@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createMutationQueue, type MutationHost } from "../host.js"
-import { document } from "../events/window-target.js"
+import { document, documentOf, forgetElementSource, installElementSource } from "../events/window-target.js"
 import { CSSMediaRule, CSSRule, CSSRuleList, CSSStyleRule, CSSStyleSheet, CSSSupportsRule } from "../css/index.js"
 import { splitRules } from "../css/rules.js"
 import { registerSheetSink, type SheetSink } from "../css/sheet-sync.js"
@@ -16,8 +16,11 @@ function recordingRenderer() {
     },
   }
   const queue = createMutationQueue(renderer)
+  // The newest renderer no root holds is the global window's, which `document` is the document of.
+  documentOf(renderer as never)
   return {
     queue,
+    renderer,
     /** The sheet ops sent since the last call, in order. */
     sent() {
       queue.flushMutations()
@@ -496,6 +499,7 @@ describe("document.adoptedStyleSheets", () => {
         sheetsDirty: () => {},
       })
       const renderer = {}
+      documentOf(renderer as never)
       const first = sinkFor()
       const sheet = new CSSStyleSheet()
       sheet.replaceSync(".a { top: 0 }")
@@ -530,6 +534,7 @@ describe("document.adoptedStyleSheets", () => {
     }
     const first = createMutationQueue(renderer)
     const second = createMutationQueue(renderer)
+    documentOf(renderer as never)
     const sheet = new CSSStyleSheet()
     document.adoptedStyleSheets = [sheet]
     first.flushMutations()
@@ -537,13 +542,25 @@ describe("document.adoptedStyleSheets", () => {
     expect(batches.flat().filter((op) => op[0] === "setAdoptedStyleSheets")).toHaveLength(1)
   })
 
-  it("reaches every renderer", () => {
+  it("reaches the renderer of the window whose document adopted it, and no other", () => {
     const left = recordingRenderer()
+    const stop = installElementSource(left.renderer as never, () => undefined)
     const right = recordingRenderer()
-    const sheet = new CSSStyleSheet()
-    document.adoptedStyleSheets = [sheet]
-    expect(left.sent().at(-1)).toEqual(["setAdoptedStyleSheets", [sheet.id]])
-    expect(right.sent().at(-1)).toEqual(["setAdoptedStyleSheets", [sheet.id]])
+    try {
+      expect(documentOf(left.renderer as never)).toBe(document)
+      expect(documentOf(right.renderer as never)).not.toBe(document)
+      const sheet = new CSSStyleSheet()
+      const other = new CSSStyleSheet()
+      document.adoptedStyleSheets = [sheet]
+      documentOf(right.renderer as never).adoptedStyleSheets = [other]
+      expect(left.sent().at(-1)).toEqual(["setAdoptedStyleSheets", [sheet.id]])
+      expect(right.sent().at(-1)).toEqual(["setAdoptedStyleSheets", [other.id]])
+      expect(documentOf(right.renderer as never).adoptedStyleSheets).toEqual([other])
+      expect(document.adoptedStyleSheets).toEqual([sheet])
+    } finally {
+      stop()
+      forgetElementSource(left.renderer)
+    }
   })
 
   it("counts a sheet listed twice once, at its last place", () => {

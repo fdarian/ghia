@@ -1,5 +1,5 @@
-export { getAdoptedStyleSheets, replaceAdoptedStyleSheets } from "./adopted.js"
-export { flushDirtySheets, registerSheetSink, type SheetSink } from "./sheet-sync.js"
+export { createAdoptedStyleSheets } from "./adopted.js"
+export { flushDirtySheets, registerSheetSink, setAdoptedSheets, type SheetSink } from "./sheet-sync.js"
 export {
   CSSMediaRule,
   CSSRule,

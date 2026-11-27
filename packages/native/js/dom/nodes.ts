@@ -44,9 +44,15 @@ export type NodeBinding = {
   readonly children: readonly Node[]
   /** In the tree of a mounted root. */
   readonly connected: boolean
-  /** The root or renderer that owns it, or `null` when it has none. */
-  readonly root: object | null
+  /**
+   * The root that owns it, whose `nativeRenderer` is the window it belongs to, or `null` when it has
+   * none yet: a node made by code is rooted when it is inserted into a window's tree.
+   */
+  readonly root: NodeRoot | null
 }
+
+/** What `ownerDocument` and `getRootNode` read of a root: the renderer of its window. */
+export type NodeRoot = { readonly nativeRenderer: object }
 
 /**
  * What an adapter does for a node that can hold children. Each goes through the adapter's own
@@ -118,8 +124,20 @@ function illegalConstructor(): never {
   throw new TypeError("Illegal constructor")
 }
 
-/** The document the nodes belong to, set by the one `Document` the runtime creates. */
-const documentState: { document: DocumentClass | null } = { document: null }
+/**
+ * The document of a node that no window owns: the global `document`, the first window's. `ownerOf`
+ * answers for any other node, from the window of its root or the document that made it.
+ */
+const documentState: {
+  document: DocumentClass | null
+  ownerOf: ((node: Node) => DocumentClass) | null
+  /** The document that made a node, or adopted it, for a node that is in no window's tree. */
+  makers: WeakMap<object, DocumentClass>
+} = {
+  document: null,
+  ownerOf: null,
+  makers: new WeakMap(),
+}
 
 /** Order given to the trees that are not in one document, so a comparison between them is stable. */
 const treeOrder = new WeakMap<object, number>()
@@ -133,16 +151,35 @@ function orderOfTree(top: Node): number {
   return created
 }
 
-/** @internal The document every node belongs to; throws before the runtime created it. */
+/** @internal The global `document` (the first window's); throws before the runtime created it. */
 export function runtimeDocument(): Document {
   const document = documentState.document
   if (document === null) throw new Error("The document has not been created yet")
   return document
 }
 
-/** @internal Whether `node` is in the app's document: a node of a `DOMParser` document, or a detached tree, is not. */
-export function inRuntimeDocument(node: Node): boolean {
-  return node.getRootNode() === documentState.document
+/** @internal The document that made `node` or adopted it, for a node that no window's tree holds: `undefined` for a node nothing claimed. */
+export function makerDocumentOf(node: Node): Document | undefined {
+  return documentState.makers.get(node)
+}
+
+/**
+ * @internal Makes `document` the owner of `node` and of every node under it that no window's tree
+ * holds: a node `document.createElement` made, or one `adoptNode` or an insertion adopted.
+ */
+export function adoptSubtree(node: Node, document: Document): void {
+  documentState.makers.set(node, document as DocumentClass)
+  for (const child of node[DOM_BINDING]().children) adoptSubtree(child, document)
+}
+
+/**
+ * @internal The document `node` belongs to: its window's once it is in one, else the one whose
+ * factory made it, else the global `document`.
+ */
+export function ownerDocumentOf(node: Node): Document {
+  const ownerOf = documentState.ownerOf
+  if (ownerOf === null) throw new Error("The document has not been created yet")
+  return ownerOf(node)
 }
 
 /** @internal Where `node` is among its parent's children: the "index" of the DOM standard. The node has a parent. */
@@ -280,7 +317,7 @@ abstract class NodeClass {
   /** The document for a mounted node, else the top of the tree it is in. */
   getRootNode(): Node {
     if (this.nodeType === DOCUMENT_NODE) return this as unknown as Node
-    if (this[DOM_BINDING]().connected && documentState.document !== null) return documentState.document
+    if (this[DOM_BINDING]().connected && documentState.ownerOf !== null) return documentState.ownerOf(this as unknown as Node)
     let top = this as unknown as Node
     for (let parent = top.parentNode; parent !== null; parent = top.parentNode) top = parent
     return top
@@ -327,7 +364,9 @@ abstract class NodeClass {
 
 Object.defineProperty(NodeClass.prototype, "ownerDocument", {
   configurable: true,
-  get: () => documentState.document,
+  get(this: Node) {
+    return ownerDocumentOf(this)
+  },
 })
 
 defineConstants(NodeClass.prototype, {
@@ -988,7 +1027,11 @@ export type DocumentFragment = DocumentFragmentClass
 export const ShadowRoot = shared.ShadowRoot
 export type ShadowRoot = ShadowRootClass
 
-/** @internal Makes `document` the owner of every node. Called once, by the module that creates it. */
-export function registerDocument(document: Document): void {
+/**
+ * @internal Makes `document` the owner of the nodes no window owns, and `ownerOf` the answer for the
+ * rest. Called once, by the module that creates the global `document`.
+ */
+export function registerDocument(document: Document, ownerOf: (node: Node) => Document): void {
   shared.state.document = document
+  shared.state.ownerOf = ownerOf
 }

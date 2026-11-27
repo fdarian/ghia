@@ -106,13 +106,22 @@ fn forward(command: Command, cx: &mut App) {
     });
 }
 
-/// The main window, or the one window the app has when macOS names none (the app is not active, or
-/// the window is offscreen).
+/// The window a menu command is for: the key window, else the window that was key last. The
+/// Edit menu also runs while the app is inactive (a menu opened from another app, the Dock menu),
+/// when GPUI names no active window, and with two windows open the answer must not be whichever
+/// is first in the list. `window_stack` is AppKit's front-to-back order of the app's windows,
+/// whose first is the key window and, while none is, the one that was key last.
 fn command_window(cx: &App) -> Option<gpui::AnyWindowHandle> {
     cx.active_window().or_else(|| {
-        let mut windows = cx.windows().into_iter();
-        let only = windows.next()?;
-        windows.next().is_none().then_some(only)
+        let windows = cx.windows();
+        let frontmost = cx
+            .window_stack()
+            .and_then(|stack| stack.into_iter().find(|handle| windows.contains(handle)));
+        frontmost.or_else(|| {
+            let mut all = windows.into_iter();
+            let only = all.next()?;
+            all.next().is_none().then_some(only)
+        })
     })
 }
 

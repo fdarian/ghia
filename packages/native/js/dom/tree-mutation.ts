@@ -8,7 +8,7 @@
  */
 
 import { inertDocumentOf } from "./html/inert-marker.js"
-import { DOM_BINDING, Element, Node, type NodeBinding, type ParentBinding } from "./nodes.js"
+import { adoptSubtree, DOM_BINDING, Element, Node, ownerDocumentOf, type NodeBinding, type ParentBinding } from "./nodes.js"
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
@@ -23,7 +23,7 @@ function hierarchyRequestError(message: string): DOMException {
 /** What a thrown error of this DOM name looks like, for an adapter that has to refuse a move. */
 export function crossRootError(): DOMException {
   return hierarchyRequestError(
-    "A node cannot be moved into a tree of another window: each window's tree is its own root"
+    "A node that a window mounted cannot be moved into another window's tree: build the node with the other window's document, or import a copy (document.importNode). A node no window mounted is adopted by the tree it is inserted into."
   )
 }
 
@@ -106,8 +106,21 @@ function takeNodes(parent: Node, nodes: readonly Node[]): void {
   for (const node of nodes) assertCanInsert(parent, node, null)
 }
 
+/**
+ * A browser adopts a node into the document it is inserted in. A node no window mounted joins the
+ * document of the tree it goes into; one a window mounted was already checked (`assertSameWindow`).
+ */
+function adoptInto(parent: Node, node: Node): void {
+  const members = node.nodeType === DOCUMENT_FRAGMENT_NODE ? node[DOM_BINDING]().children : [node]
+  const owner = ownerDocumentOf(parent)
+  for (const member of members) {
+    if (member[DOM_BINDING]().root === null && ownerDocumentOf(member) !== owner) adoptSubtree(member, owner)
+  }
+}
+
 function insertNode(parent: Node, node: Node, before: Node | null): void {
   const binding = assertCanInsert(parent, node, before)
+  adoptInto(parent, node)
   if (node.nodeType === DOCUMENT_FRAGMENT_NODE) {
     // A fragment is replaced by its children, moved in order: each leaves the fragment through the
     // adapter's own removal, so ranges and observers hear ordinary moves.

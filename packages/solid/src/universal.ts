@@ -1,4 +1,4 @@
-import { createRoot as createSolidRoot, type JSX, type Owner } from "solid-js"
+import { createRoot as createSolidRoot, getOwner, type JSX, type Owner } from "solid-js"
 import { createRenderer } from "solid-js/universal"
 import {
   createHostElement,
@@ -84,6 +84,35 @@ function setProperty(node: HostNode | HostParent, name: string, value: unknown, 
   }
 }
 
+/** A render into an element that wants to know which nodes it put there: the root owner of its code, and the nodes so far. */
+type RenderTracker = { readonly owner: Owner; readonly nodes: Set<HostNode> }
+
+/** The renders in each element they render into, which `insertNode` reports to. Empty for every element no render targets. */
+const renderTrackers = new WeakMap<object, Set<RenderTracker>>()
+
+/**
+ * A node an effect of a render put directly in the element it renders into belongs to that render, found by the owner chain of
+ * the running effect: another render into the same element, a portal of another tree, or the app's own code adds nodes the
+ * render does not own, and disposing it must leave those.
+ */
+function noteInsertedNode(parent: object, node: HostNode): void {
+  const trackers = renderTrackers.get(parent)
+  if (trackers === undefined) return
+  for (let owner = getOwner(); owner !== null; owner = owner.owner) {
+    for (const tracker of trackers) {
+      if (tracker.owner !== owner) continue
+      tracker.nodes.add(node)
+      return
+    }
+  }
+}
+
+function noteRemovedNode(parent: object, node: HostNode): void {
+  const trackers = renderTrackers.get(parent)
+  if (trackers === undefined) return
+  for (const tracker of trackers) tracker.nodes.delete(node)
+}
+
 const runtime = createRenderer<HostNode | HostParent>({
   createElement: createHostElement,
   createTextNode: createHostText,
@@ -97,7 +126,9 @@ const runtime = createRenderer<HostNode | HostParent>({
   insertNode(parent, node, anchor) {
     if (parent.kind === "text") throw new TypeError("Expected GPUIX host nodes")
     // Universal passes `null` as the anchor to append (`cleanChildren(parent, current, null, node)`).
-    insertHostNode(parent, hostNodeFor(node), anchor === undefined || anchor === null ? anchor : anchorNodeFor(anchor))
+    const inserted = hostNodeFor(node)
+    insertHostNode(parent, inserted, anchor === undefined || anchor === null ? anchor : anchorNodeFor(anchor))
+    noteInsertedNode(parent, inserted)
   },
   isTextNode(node) {
     return isHostNode(node) && isHostText(node)
@@ -105,7 +136,9 @@ const runtime = createRenderer<HostNode | HostParent>({
   removeNode(parent, node) {
     if (parent.kind === "text") throw new TypeError("Expected GPUIX host nodes")
     const known = insertedNodeFor(node)
-    if (known) removeHostNode(parent, known)
+    if (!known) return
+    removeHostNode(parent, known)
+    noteRemovedNode(parent, known)
   },
   getParentNode(node) {
     const known = insertedNodeFor(node)
@@ -127,6 +160,8 @@ export type UniversalRenderOptions = {
   /** What `body` is taken to hold already, as `insert`'s last argument. */
   initial?: JSX.Element
   owner?: Owner | null
+  /** Collects the nodes the render puts directly in `body`, the ones it adds later included. */
+  owned?: Set<HostNode>
 }
 
 // `body` is the parent, not the HostRoot: Solid's `cleanChildren` removes a node only when
@@ -137,8 +172,21 @@ export function universalRender(
   options: UniversalRenderOptions = {}
 ): () => void {
   return createSolidRoot((dispose) => {
+    const owned = options.owned
+    const owner = getOwner()
+    if (owned === undefined || owner === null) {
+      runtime.insert(body, code(), options.marker, options.initial)
+      return dispose
+    }
+    const tracker: RenderTracker = { owner, nodes: owned }
+    const trackers = renderTrackers.get(body) ?? new Set<RenderTracker>()
+    renderTrackers.set(body, trackers)
+    trackers.add(tracker)
     runtime.insert(body, code(), options.marker, options.initial)
-    return dispose
+    return () => {
+      trackers.delete(tracker)
+      dispose()
+    }
   }, options.owner ?? undefined)
 }
 

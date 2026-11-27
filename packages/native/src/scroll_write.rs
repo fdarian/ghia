@@ -21,14 +21,21 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::scroll;
+use crate::window_map::WindowMap;
 
 thread_local! {
     /// The offsets written to a container while its layout was behind the tree, whole device pixels.
-    static PENDING_CONTAINER_WRITES: RefCell<HashMap<u64, gpui::Point<gpui::Pixels>>> =
-        RefCell::new(HashMap::new());
+    static PENDING_CONTAINER_WRITES: RefCell<WindowMap<gpui::Point<gpui::Pixels>>> =
+        RefCell::new(WindowMap::default());
     /// The offsets written to a list while its layout was behind the tree, whole device pixels.
-    static PENDING_LIST_WRITES: RefCell<HashMap<u64, gpui::Point<gpui::Pixels>>> =
-        RefCell::new(HashMap::new());
+    static PENDING_LIST_WRITES: RefCell<WindowMap<gpui::Point<gpui::Pixels>>> =
+        RefCell::new(WindowMap::default());
+}
+
+/// Drops the writes still pending in a window that closed.
+pub(crate) fn forget_window(window: gpui::WindowId) {
+    PENDING_CONTAINER_WRITES.with(|pending| pending.borrow_mut().forget(window));
+    PENDING_LIST_WRITES.with(|pending| pending.borrow_mut().forget(window));
 }
 
 /// Whether the extent every scroller of the window clamps to is the tree's: gpui says no layout
@@ -36,7 +43,7 @@ thread_local! {
 /// no commit is waiting for its patch to be prepared (a commit inside an anchor counts as no
 /// invalidation, but moves the extents).
 pub(crate) fn metrics_current(window: &gpui::Window) -> bool {
-    window.scroll_metrics_are_current() && !crate::renderer::layout_awaits_a_read()
+    window.scroll_metrics_are_current() && !crate::renderer::layout_awaits_a_read(window.window_handle().window_id())
 }
 
 /// What the renderer holds for the element a write is aimed at.
@@ -59,13 +66,14 @@ pub(crate) enum ScrollerState<'a> {
 /// anchor is picked at 0), or one that leaves the vertical position, is the same either way. A list
 /// has no anchoring and is written again once its rows are spliced.
 pub(crate) fn lays_out_first(
+    window: gpui::WindowId,
     metrics_current: bool,
     id: u64,
     scroller: ScrollerState<'_>,
     top: Option<f64>,
     behavior: scroll::Behavior,
 ) -> bool {
-    if scroll::is_smooth(id, behavior) {
+    if scroll::is_smooth(window, id, behavior) {
         return true;
     }
     if metrics_current {
@@ -80,7 +88,7 @@ pub(crate) fn lays_out_first(
         return false;
     };
     let held = PENDING_CONTAINER_WRITES
-        .with(|pending| pending.borrow().get(&id).copied())
+        .with(|pending| pending.borrow().get(window, id).copied())
         .unwrap_or_else(|| handle.offset());
     let held = scroll::dom_position(held, handle.scale_factor())[1];
     let target = scroll::dom_position(scroll::gpui_offset(0.0, top), handle.scale_factor())[1];
@@ -90,7 +98,7 @@ pub(crate) fn lays_out_first(
 /// Invalidates the window for a write that moved the scroller `id`. The invalidation moves no
 /// extent (`Window::scroll_metrics_are_current` keeps its answer through it).
 pub(crate) fn finish_write(window: &mut gpui::Window, cx: &mut gpui::App, view: gpui::EntityId, id: u64) {
-    crate::renderer::invalidate_after_scroll(window, cx, view, crate::renderer::is_virtual_list(id));
+    crate::renderer::invalidate_after_scroll(window, cx, view, crate::renderer::is_virtual_list(window.window_handle().window_id(), id));
 }
 
 /// Writes a scroll container. An axis left out keeps the offset the handle holds, or the one an
@@ -104,33 +112,33 @@ pub(crate) fn write_container(
     top: Option<f64>,
     behavior: scroll::Behavior,
 ) -> bool {
-    let recorded = PENDING_CONTAINER_WRITES.with(|pending| pending.borrow().get(&id).copied());
+    let recorded = PENDING_CONTAINER_WRITES.with(|pending| pending.borrow().get(window, id).copied());
     let held = recorded.unwrap_or_else(|| handle.offset());
     let position = scroll::dom_position(held, handle.scale_factor());
     let offset = scroll::gpui_offset(left.unwrap_or(position[0]), top.unwrap_or(position[1]));
-    if metrics_current || scroll::is_smooth(id, behavior) {
-        PENDING_CONTAINER_WRITES.with(|pending| pending.borrow_mut().remove(&id));
+    if metrics_current || scroll::is_smooth(window, id, behavior) {
+        PENDING_CONTAINER_WRITES.with(|pending| pending.borrow_mut().remove(window, id));
         return scroll::scroll_to(window, id, handle, offset, behavior);
     }
-    scroll::end_smooth_scroll(id);
+    scroll::end_smooth_scroll(window, id);
     let target = scroll::snapped_offset(offset, handle.scale_factor());
     if target == held {
         return false;
     }
-    PENDING_CONTAINER_WRITES.with(|pending| pending.borrow_mut().insert(id, target));
+    PENDING_CONTAINER_WRITES.with(|pending| pending.borrow_mut().insert(window, id, target));
     true
 }
 
 /// Whether a write to the container `id` waits for the next layout, which a read of its offset
 /// has to lay out for, as a read of `scrollTop` does.
-pub(crate) fn has_pending_container(id: u64) -> bool {
-    PENDING_CONTAINER_WRITES.with(|pending| pending.borrow().contains_key(&id))
+pub(crate) fn has_pending_container(window: gpui::WindowId, id: u64) -> bool {
+    PENDING_CONTAINER_WRITES.with(|pending| pending.borrow().contains(window, id))
 }
 
 /// Called when a render starts, before it builds anything and before the layout it is followed by
 /// clamps the offset: the writes recorded since the last render are made.
 pub(crate) fn settle_containers(window: gpui::WindowId, handles: &HashMap<u64, gpui::ScrollHandle>) {
-    let pending = PENDING_CONTAINER_WRITES.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
+    let pending = PENDING_CONTAINER_WRITES.with(|pending| pending.borrow_mut().take(window));
     for (id, offset) in pending {
         if let Some(handle) = handles.get(&id) {
             handle.set_offset(offset);
@@ -154,7 +162,7 @@ pub(crate) fn write_list(
     let Some(top) = top else {
         return false;
     };
-    crate::renderer::cancel_queued_list_scroll(id);
+    crate::renderer::cancel_queued_list_scroll(window, id);
     let target = scroll::gpui_offset(0.0, top);
     let before = state.scroll_px_offset_for_scrollbar();
     let moved = scroll::scroll_list_to(window, state, target);
@@ -164,11 +172,11 @@ pub(crate) fn write_list(
     let snapped = scroll::snapped_offset(target, state.scale_factor());
     PENDING_LIST_WRITES.with(|pending| {
         let mut pending = pending.borrow_mut();
-        let settles = !metrics_current && (snapped != before || pending.contains_key(&id));
+        let settles = !metrics_current && (snapped != before || pending.contains(window, id));
         if settles {
-            pending.insert(id, snapped);
+            pending.insert(window, id, snapped);
         } else {
-            pending.remove(&id);
+            pending.remove(window, id);
         }
         moved || settles
     })
@@ -182,7 +190,7 @@ pub(crate) fn settle_lists(
     states: &HashMap<u64, gpui::ListState>,
     reporters: &HashMap<u64, std::rc::Rc<crate::visible_range::RangeReporter>>,
 ) {
-    let pending = PENDING_LIST_WRITES.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
+    let pending = PENDING_LIST_WRITES.with(|pending| pending.borrow_mut().take(window));
     for (id, offset) in pending {
         if let Some(state) = states.get(&id) {
             scroll::scroll_list_to(window, state, offset);
@@ -194,6 +202,6 @@ pub(crate) fn settle_lists(
 }
 
 /// A scroll to a row queued for the list supersedes a pixel write made before it.
-pub(crate) fn forget_list_write(id: u64) {
-    PENDING_LIST_WRITES.with(|pending| pending.borrow_mut().remove(&id));
+pub(crate) fn forget_list_write(window: gpui::WindowId, id: u64) {
+    PENDING_LIST_WRITES.with(|pending| pending.borrow_mut().remove(window, id));
 }

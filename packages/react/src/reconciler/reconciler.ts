@@ -5,8 +5,12 @@ import type { OpaqueRoot } from "react-reconciler"
 import { ConcurrentRoot } from "react-reconciler/constants.js"
 import {
   createMutationQueue,
+  Element as RuntimeElement,
   installElementSource,
   registerRoot,
+  registerWindowDisposer,
+  registerWindowFactory,
+  runAll,
   runSteps,
   syncWindowEventListeners,
   syncWindowSelectionChange,
@@ -14,7 +18,9 @@ import {
 import { GpuixContext, type GpuixContextValue } from "../hooks/use-gpuix.js"
 import type {
   Container,
+  Instance,
   NativeRenderer,
+  PublicInstance,
   RootEventHandlers,
 } from "../types/host.js"
 import {
@@ -25,7 +31,7 @@ import {
   unregisterEventHandlers,
 } from "./event-registry.js"
 import { createDomFactory, releaseDetachedNodes } from "./dom-mutation.js"
-import { livePropEntries } from "./host-nodes.js"
+import { containerFor, isHostInstance, livePropEntries, stateFor } from "./host-nodes.js"
 import {
   destroyDocumentElements,
   hostConfig,
@@ -76,9 +82,80 @@ export interface Root {
   unmount: () => void
 }
 
+/**
+ * A root on a window, as `render()` makes for the first one: `createRoot(renderer)` is the window `renderer`
+ * owns, and `createRoot(container)` is React DOM's, a root in an element of a mounted window (`w.document.body`
+ * of the window `window.open('')` gave) that renders beside what the element holds.
+ */
+export function createRoot(renderer: NativeRenderer, rootEventHandlers?: RootEventHandlers): Root
+export function createRoot(container: PublicInstance, options?: Pick<RootEventHandlers, "onUncaughtError">): Root
 export function createRoot(
-  renderer: NativeRenderer,
+  target: NativeRenderer | PublicInstance,
   rootEventHandlers: RootEventHandlers = {}
+): Root {
+  // Any element goes to `createElementRoot`, which throws for one that is in no mounted window: a closed window's body must not become a window root.
+  if (target instanceof RuntimeElement) return createElementRoot(target as unknown as Instance, rootEventHandlers)
+  return createWindowRoot(target as NativeRenderer, rootEventHandlers)
+}
+
+function createElementRoot(
+  element: Instance,
+  options: Pick<RootEventHandlers, "onUncaughtError">
+): Root {
+  // A stand-in element (the body of a closed window) or another adapter's element is no host instance: it has no window to mount in.
+  if (!isHostInstance(element) || !stateFor(element).mounted || !element.isConnected) {
+    throw new TypeError("createRoot(container) needs an element in the tree of a window with a mounted root")
+  }
+  const windowContainer = containerFor(element)
+  // A container of its own: the portal into `element` has `containerInfo` by identity, and a root must not share it.
+  const rootContainer = Object.assign(Object.create(windowContainer) as Container, { portalTarget: element })
+  const onUncaughtError = options.onUncaughtError ?? windowContainer.onUncaughtError
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let opaque: OpaqueRoot | null = (reconciler.createContainer as any)(
+    rootContainer,
+    ConcurrentRoot,
+    null,
+    false,
+    null,
+    "",
+    onUncaughtError,
+    console.error,
+    console.error,
+    null
+  )
+  // One object for the life of the root, as in a window's root.
+  const contextValue: GpuixContextValue = {
+    renderer: windowContainer.nativeRenderer,
+    mutations: windowContainer.renderer,
+  }
+  const unmount = (): void => {
+    windowContainer.elementRoots.delete(unmount)
+    const active = opaque
+    if (!active) return
+    opaque = null
+    // Sync, like a window's root: a late unmount destroys remounted ids.
+    flushSync(() => {
+      reconciler.updateContainer(null, active, null, () => {})
+    })
+  }
+  windowContainer.elementRoots.add(unmount)
+  return {
+    render: (node): void => {
+      if (!opaque) throw new Error("Cannot render an unmounted GPUIX root")
+      reconciler.updateContainer(
+        React.createElement(GpuixContext.Provider, { value: contextValue }, node),
+        opaque,
+        null,
+        () => {}
+      )
+    },
+    unmount,
+  }
+}
+
+function createWindowRoot(
+  renderer: NativeRenderer,
+  rootEventHandlers: RootEventHandlers
 ): Root {
   let container: OpaqueRoot | null = null
   const ids = idAllocatorFor(renderer)
@@ -121,6 +198,7 @@ export function createRoot(
     motionBindings: new Map(),
     motionReleases: [],
     instances: new Map(),
+    elementRoots: new Set(),
     windowKeyEventHandlers: rootEventHandlers,
     windowKeyEventId: 0,
     windowSelectionEventId: 0,
@@ -188,11 +266,21 @@ export function createRoot(
   }
 
   const unregister = registerRoot(() => cleanup())
+  // What `window.open` gives an app: the window gets a root of its own, and the app renders into its `document.body`.
+  // `createWindowRoot` registers the window disposer of the popup's root itself, so the factory returns none.
+  const unregisterWindowFactory = registerWindowFactory(renderer, (opened) => {
+    createWindowRoot(opened, { onUncaughtError: rootEventHandlers.onUncaughtError })
+  })
+  // The window going away (the user closed it, `close()`, the app ending) unmounts the root, the first window's included.
+  const unregisterWindowDisposer = registerWindowDisposer(renderer, () => cleanup())
 
   // Every step runs even when one throws: a failed unmount must still release `<html>`, the root and the listeners.
   const cleanup = (): void => {
     unregister()
+    unregisterWindowFactory()
+    unregisterWindowDisposer()
     runSteps([
+      () => runAll([...gpuixContainer.elementRoots], (unmountElementRoot) => unmountElementRoot(), "Unmounting the roots in elements failed"),
       () => {
         const activeContainer = container
         if (!activeContainer) return

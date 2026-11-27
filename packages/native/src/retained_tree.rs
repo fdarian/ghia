@@ -128,6 +128,9 @@ pub struct RetainedElement {
     pub container_order: std::cell::RefCell<Option<Option<f64>>>,
     /// The children plan of the last build, with what it was made from, see `text::plan_cache`.
     pub(crate) kept_plan: crate::text::plan_cache::Slot,
+    /// A `display` transition keeps the element rendered although its style says `display: none`,
+    /// see `layout::box_generation::hold_display`.
+    pub(crate) display_held: std::cell::Cell<bool>,
     /// Counts the times the effective style of the element was replaced: all that a build of
     /// the child of a `display: contents` element reads of it is its style, and not the
     /// revisions that its descendants move. Not zero once the element has a style.
@@ -351,6 +354,7 @@ impl RetainedElement {
             container_display: Default::default(),
             container_order: Default::default(),
             kept_plan: Default::default(),
+            display_held: std::cell::Cell::new(false),
             style_serial: 0,
             subtree_revision: revision,
             search_revision: revision,
@@ -928,6 +932,8 @@ pub struct RetainedTree {
     /// Every `<img>`, so a frame can find the ones that `display: none` kept out
     /// of the build without walking the tree.
     pub image_ids: FxHashSet<u64>,
+    /// The elements flagged `display_held`, to clear the flags of the ones a frame no longer holds.
+    pub(crate) display_held: std::cell::RefCell<HashSet<u64>>,
     /// Elements that bind motion values to style properties.
     pub motion_value_ids: FxHashSet<u64>,
     /// Every form control, which `ControlStyles` walks up from, so a frame does not scan
@@ -1056,6 +1062,7 @@ impl RetainedTree {
             elements: ElementMap::default(),
             motion_ids: FxHashSet::default(),
             image_ids: FxHashSet::default(),
+            display_held: Default::default(),
             motion_value_ids: FxHashSet::default(),
             control_ids: FxHashSet::default(),
             choices: Default::default(),

@@ -74,6 +74,23 @@ fn note_anchor(window: WindowId, anchor: Option<Instant>) {
     });
 }
 
+/// The window closed: what its caret last painted goes.
+pub(crate) fn forget_window(window: WindowId) {
+    ANCHOR.with(|all| all.borrow_mut().remove(&window));
+    EMPTY_LINE.with(|painted| painted.borrow_mut().remove(&window));
+}
+
+#[cfg(test)]
+pub(crate) fn hold_for_test(window: WindowId) {
+    note_anchor(window, Some(Instant::now()));
+    EMPTY_LINE.with(|painted| painted.borrow_mut().insert(window, Bounds::default()));
+}
+
+#[cfg(test)]
+pub(crate) fn holds_caret_state(window: WindowId) -> bool {
+    ANCHOR.with(|all| all.borrow().contains_key(&window)) || EMPTY_LINE.with(|painted| painted.borrow().contains_key(&window))
+}
+
 impl EditingCaret {
     pub fn new(color: Hsla) -> Rc<Self> {
         Rc::new(Self {

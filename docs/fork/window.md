@@ -30,7 +30,7 @@ the renderer is created, so `fontFamily` resolves to them. It has no Rust (`js/f
 `js/testing.ts`). If upstream grows its own font option, drop the fonts commit. How a registered font is held in memory is
 in [frames-and-wakes.md](frames-and-wakes.md#memory-footprint-of-a-window-79).
 
-A sheet's `@font-face` is the second way to add a face, and both end in `Fonts::add` (`TextSystem::add_fonts`). They differ in who names the family and when the bytes are read: the option registers every file under the family it declares, before the first frame, and a path that cannot be read fails the window; a sheet rule names the family itself, can sit under `@media`, `@supports` and `@layer`, and is read in the frame that first builds with it, where a source that cannot load is logged and skipped (see [stylesheets.md](stylesheets.md#definitions-keyframes-property-and-font-face)). Neither loads WOFF or WOFF2.
+A sheet's `@font-face` is the second way to add a face, and both end in `Fonts::register` (`check_font`, then `TextSystem::add_fonts`). They differ in who names the family and when the bytes are read: the option registers every file under the family it declares, before the first frame, and a path that cannot be read fails the window; a sheet rule names the family itself, can sit under `@media`, `@supports` and `@layer`, and is read in the frame that first builds with it, where a source that cannot load is logged and skipped (see [stylesheets.md](stylesheets.md#definitions-keyframes-property-and-font-face)). Both take TrueType, OpenType, WOFF and WOFF2 files.
 
 ## Window drag regions (`appRegion`)
 
@@ -168,7 +168,7 @@ be created as the right class: `kind: 'panel'` is `WindowKind::Panel` in zed.
   offscreen and opened with `focus` false, so it is never key and nothing observable differs.
 
 `active_window()` and `ordered_windows()` in `gpui_macos` still test `isKindOfClass: GPUIWindow`, so a panel is not in them,
-as before for `PopUp`, `Floating` and `Dialog`. gpuix has one window and does not read either.
+as before for `PopUp`, `Floating` and `Dialog`. gpuix does not read either.
 
 ### Proving it
 
@@ -248,6 +248,159 @@ within the same call, handling no queued event, source or display-link step. The
 A quit from another thread (the Apple Event) wakes an idle host through the run-loop watch:
 [frames-and-wakes.md](frames-and-wakes.md#off-thread-wakes-an-apple-event-quit). The paths are checked by
 [the quit e2e](testing.md#the-quit-e2e). The blocking `run()` mode is unchanged.
+
+## Several windows
+
+An app makes a window the way the first one is made: a `GpuixRenderer` and its `init()`. The thread has one GPUI App, which
+the first renderer's `init` creates (`MAC_PLATFORM`, `GPUI_APP`, the quit mode, the menu bar); a renderer whose `init` finds it
+opens another window on it with `cx.open_window` and the same `to_gpui_window_options` mapping (`open_gpuix_window` in
+`renderer.rs`, called by `window_set::open_another`), and never throws "a GPUI application already exists". `app_menu::init` and `window_set::observe_closes` run
+once, with the App.
+
+**A window handle per renderer.** `GpuixRenderer::window` holds the `WindowHandle<GpuixView>` that `init` opened, and every
+native call goes through it (`update_window`, `update_window_or_defer`, `update_window_without_view` and `invalidate_window`
+are methods on the renderer, and the helpers they call live in `window_set.rs`): the `GPUI_WINDOW` thread-local is gone. The same call made while a sync handler is running has
+two cases (`events/sync_dispatch.rs`): for the window being dispatched it uses the stashed window as before, and for another
+window (a handler of one window that reads or writes another renderer) it updates that window through the app the dispatch
+holds, which the window being dispatched is out of and every other is in (`update_view_of`, `update_window_of`). The sync
+handler of each renderer is bound to its own `WindowId` (`bind_window`), so input on a window reaches that renderer's JS.
+
+**State keyed by host element id is per window.** Host ids are allocated by each renderer, so the second window's `div` can
+have the first window's id. What outlives a frame under an element id is kept in `WindowMap` (`window_map.rs`, per `WindowId`,
+dropped when the window closes): the scroll handles, list states and `visibleRange` reporters that napi reads without an App,
+their kept copies for a forced read, the virtual-list scrolls queued for the next render, the pixel writes pending a layout
+(`scroll_write`), the smooth scrolls and `scrollBehavior` (`scroll`), the scrollbar states and their frame counter
+(`scrollbar`: another window's frames in between do not age a bar) and the `anchor-size()` records (`layout/anchor_size`).
+The a11y links are kept per `RetainedTree::id` (`accessibility/links`), and a `display` transition's hold is a flag on the
+elements of the tree (`RetainedElement::display_held`), since `is_display_none(element)` has no window to ask. Bounds,
+host nodes, the hit registry, painted text, carets and search ordinals were keyed by window before, and they are dropped
+with the window too (`text::paint`'s frames, `text::inline_hit`'s paragraphs, `text::search`'s ordinals, `editing::caret`'s
+blink anchor and empty-line box, `text::inline_focus`'s press focus: each has a `forget_window`). Still ambient, and fine
+because the draws of two windows never interleave: the scrollbar's per-frame clock, scroller style and draw counter, and
+the per-frame scratch of `tape` and `text`. The layout a window owes a read (`LAYOUT_PENDING`) and its quiet list writes (`LIST_WRITTEN`) are keyed by
+window: a read settles the reading window's own entry (`settle_pending_layout`, `layout_awaits_a_read(window)`), so a read in one window
+neither discards the patch another window prepared nor notifies its view, and a window that closes drops its entry.
+
+**Closing.** A window closes when the user closes it, when `closeWindow()` does, or when the App quits. In each case GPUI
+removes the window and calls `App::on_window_closed`, which `window_set` listens to: the window is no longer open
+(`isWindowClosed()` says so), what is kept under its id is dropped and its sync handler route is unbound. The root view drops
+with the window. The App goes on for the windows that are left, and the last window closing ends it as before
+(`QuitMode::LastWindowClosed`, the quit path in [frames-and-wakes.md](frames-and-wakes.md#a-quit-ends-the-frame-loop): the Dock's
+Quit, `⌘Q` and a logout still end the whole app through `onTerminated`, once). `tick()` keeps its meaning, false once the
+platform quit, and pumps the whole platform whichever renderer calls it; a renderer is told its own window is gone by
+`isWindowClosed()`, which the shared frame loop asks of every renderer and answers with the `onWindowClosed` option of
+`startFrameLoop`.
+
+**Thread-local order.** `init` decides whether an App exists from `MAC_PLATFORM` and touches `GPUI_APP` only once the first
+window is open. Thread-locals are destroyed in the order they were first used, and the App in `GPUI_APP` drops its windows,
+which write to GPUI's profiler journal (its own thread-local): a `GPUI_APP` registered before the journal makes
+`process.exit()` abort with "thread local panicked on drop".
+
+**One pump.** The platform is pumped once per iteration and the run-loop wake hook is shared:
+[frames-and-wakes.md](frames-and-wakes.md#several-windows-one-loop).
+
+**A JS `document` and `window` per window.** Each renderer's window has its own `GpuixDocument` and `GpuixWindow` in JS
+(`documentOf(renderer)`, `windowOf(renderer)` in `@ghia/native/host`; `events/window-target.ts` and `events/window-targets.ts`):
+the roots (`<html>`, `<head>`, `<body>`), `activeElement`, selection, `adoptedStyleSheets`, `elementFromPoint`, node makers,
+and the window's size, `matchMedia`, `resize`, `requestAnimationFrame` list and the top of the event path.
+`mountedRenderer()` is gone: nothing is answered from "the last window that mounted". The global `document` and `window` are
+the first window's while its root is mounted, and a closed first window leaves them its own, empty. An event bubbles through
+its own window's document and window target only. The model and the rules for nodes are in
+[the reference](../reference.md#a-document-per-window); how it is built is in [events-and-input.md](events-and-input.md#the-event-path-of-each-window)
+and [web-renderer.md](web-renderer.md#several-windows).
+
+**`window.open`** (`js/window-open.ts`, `js/window-lifecycle.ts`; the behaviour is in
+[the reference](../reference.md#windowopen-and-the-window-object)). A renderer knows how to open a sibling of itself
+(`bindWindowOpener`): `createNativeRenderer` makes another `createNativeRenderer`, calls its `init` with the title, `fonts` and
+`focus` of the opener's and the size and place of the features, and joins it to the frame loop with the opener's `onTerminated`,
+`onError` and `frameMs` (only when the opener is in a loop; an app that ticks itself keeps ticking itself); the test
+renderer makes another `TestRenderer` and activates it. The new window's root is the adapter's: `registerWindowFactory(renderer,
+factory)` (`@ghia/native/host`) says how to mount an empty root (`html`, `head`, `body` and the node factory through
+`installElementSource`) on a renderer, and what it returns is called once when the window closes. `window.open` checks that the
+opener has an opener binding and a factory before it makes anything, and closes the window it made if the factory throws.
+The Window object is the `GpuixWindow` of the renderer, which extends `Window` (`events/window-targets.ts`: the
+members, the `on<event>` properties, and a prototype chain that falls through to the global object, so one realm's `fetch`,
+`HTMLElement` and `localStorage` are a window's too); its calls that reach outside go through `installWindowHooks`, as `matchMedia`
+does, because `window-lifecycle.ts` imports the registry that imports the window classes.
+
+**`init` from an event handler.** A window opened by `window.open` in a click or key handler is made while GPUI holds the App for
+the input. `init_macos` then opens the window on the App the dispatch holds (`with_active_window`, as `update_window_of` does for a
+read of another window), and fails with a clear error when a native call holds none; outside a handler it uses `GPUI_APP`.
+
+**Closing and the key window.** A window ends when `close()`, the user or the app's end closes it. The frame loop reports a
+window that left it (`releaseClosedWindows`, or `terminate` for all) to `windowGone(renderer)`, which fires `pagehide` and
+`unload` once (a script's `close()` already sent them with `beforeunload`), marks the window closed (`forgetWindowSource`)
+and calls the disposer the adapter's factory returned. `windowGone` acts once for a renderer: a `close()` task that outlives the window's release (a test's `dispose()`, the frame
+loop) finds it done and returns, so it cannot mark the global window closed again after a later window took it over. `close()` calls the disposer before `closeWindow()`, while the native
+window is still there; for a window the user closed the disposer runs after, which is when a window is gone to native (below).
+The first window is no exception: its root unmounts when it closes, as a later window's does, and a popup that stays open keeps
+the app and the global `window` (`pagehide` and `unload` fire on it). Window disposers (`registerWindowDisposer`, from
+`@ghia/native/host`) are how an adapter's root asks for that: a disposer runs once, from `windowGone`, with the window's document still the
+root's, and `renderSlotFor` registers one for each slot so that a closed window's slot is dropped and a later `render()` opens a new
+window (`ownRenderer()` is the renderer of the window `render()` opened itself, `undefined` once it is gone). `close()` is
+asynchronous like a browser's: `closed` is `true` at once, and `beforeunload`, `pagehide`, `unload`, the root's unmount and the
+platform close run in a later task, so the handler that called it never has its root unmounted under it.
+
+**A window that is gone to native.** The disposers run after the platform removed the window, so a renderer whose GPUI window is
+gone behaves as closed whichever way it went (the user, `closeWindow()`, the App quitting). `isWindowClosed()` is true as soon as
+GPUI no longer has the window: `window_set::closed` runs from `on_window_closed`, `note_app_ended` runs it for every window left
+when `tick()` sees the quit (GPUI's shutdown drops the windows without telling the observer), and an update that GPUI answers with
+"window not found" marks the window closed too, but only when `App::windows()` no longer lists it: GPUI answers the same for a window
+that is in the middle of its own update (it is taken out of its slot, its id stays listed), which is what a `focus` listener of
+window B finds when it reads window A whose click focused B. That window is open, stays open, and the call throws "The window is being
+updated by an input that is being dispatched ..." (`window_set::update_error`). From then on `applyBatch` only updates the tree (no invalidation, no focus), so
+unmounting a root does not throw; a setter that only means something for a window that is there (the title, size, `activate`,
+`minimize`, `zoom`, fullscreen, appearance, the `selectionChange`, `appearanceChange`, `mediaChange` and window key listeners, focus
+stepping, `blur`, `blurElement`) does nothing and answers success, and a frame request or deferred update does nothing; a native call that needs the window
+to answer (bounds reads, the window's size, scroll metrics, `captureScreenshot`, simulated input) throws "The window is closed",
+not GPUI's "window not found". `closeWindow()` on a window that is gone does nothing. The key window is native's: a view
+observes `observe_window_activation` and, while JS listens for `focus` or `blur` on `window` or `document` (the
+`setWindowEventListeners` set), sends the `windowActive` event (`window_activity.rs`, `value` "true" or "false"), which
+`renderer-state` turns into the `focus` or `blur` event of `windowOf(renderer)`. `document.hasFocus()` reads `isWindowKey()`.
+A test window is active when it opens and `setWindowActive` changes it; `TestRenderer.activateWindow()` makes it the key window
+and every other test window not. The Edit menu's command (`events/clipboard.rs`) goes to the active window, else the front window
+of the app (`window_stack`), else the only window.
+
+**Reads for the Window object.** `getScaleFactor()` (`devicePixelRatio`), `getWindowPosition()` (`screenX`, `screenY`: GPUI's
+bounds are relative to the window's display, so the display's global origin from `screen.rs` is added) and `setWindowSize(width,
+height)` (`resizeTo`, `Window::resize`, which `setContentSize`s the window) are live napi methods; the test renderer has
+`getScaleFactor` and `isWindowKey` and its own `setWindowSize`. GPUI has no call to move a window after it opens, so `moveTo`
+and `moveBy` do nothing.
+
+**The adapters render into windows.** Each registers a window factory in its `createRoot(renderer)` (so `render()` has it too):
+the factory makes a root of its own kind on the renderer `window.open` made (`createRoot(opened)`, which attaches an empty
+`<html>`, `<head>` and `<body>` and the node makers) and returns its `unmount`. The rest is per adapter:
+
+- **Solid** (`packages/solid/src/root.ts`, `renderer.ts`). `render(code, container)` is `renderIntoElement(code, element)`: the
+  element's `root` (a `HostRoot`) is the window's; `elementMounters` maps it to the function its `createRoot` closure made, which
+  runs `universalRender` into the element with `marker: null` and the window's `GpuixContext` around it, and tracks the dispose
+  in `elementRenders`. The root's `clear` runs those first, so a closing window disposes what was rendered into it (cleanups
+  run, nodes are removed). A dispose removes the children that appeared in the element while it was mounted. Solid binds a node to
+  a root when it is mounted, so a `Portal` whose `mount` is another window's body needs nothing more. `render(code, options)`
+  keeps one `RenderSlot` for each renderer (`slotFor` in `renderer.ts`; the window it opens itself is `own`), where it kept one
+  global.
+- **React** (`packages/react/src/reconciler/reconciler.ts`, `renderer.ts`). `createRoot(container)` is `createElementRoot`: a
+  reconciler root whose container is a derived `Container` with `portalTarget` set to the element, the mechanism a portal uses,
+  so it takes the window's ids, mutation queue and event map from the element's own container; its unmount is in the window
+  container's `elementRoots`, which the window root's cleanup runs first. A portal gets the same: `portalContainerFor(target)`
+  derives from the container that `target`'s state names, and React hands that container to `createInstance` as the root
+  container inside the portal, so the nodes of `createPortal(children, w.document.body)` take the other window's ids and queue
+  with no reconciler change. `resetAfterCommit` flushes the committing root's queue only, so a portal into another window is sent
+  by the queue's scheduled microtask. `render()` keeps a `RenderSlot` for each renderer in `renderHosts` (the `own` slot has the
+  frame loop and the process-level error handlers' overlay). A process-level error (an uncaught throw, the frame loop's) goes to the
+  overlay of the own slot, else of the first slot left; with no slot left (the first window closed and a popup that stays open
+  threw) it is logged with `console.error` and its stack, not dropped. Solid has no process-level handler: an error of a root
+  goes to that root's `onUncaughtError` or `console.error`, whichever windows are open.
+
+The frame loop is the app's: `window.open` joins the new renderer to the opener's loop (above), and neither adapter starts one
+or an `onTerminated` for a window it did not open itself. The test renderer opens several windows at once:
+[testing.md](testing.md#several-test-windows).
+The
+`appearance` option of a window after the first is the App's (`set_window_appearance` is the App's), and the menu bar is the
+App's; both are the platform's single-App model, not a choice here.
+
+Checked by `window_map`, `window_set` and `shared_wake` unit tests, `frame-loop.test.ts`, and
+[the multi-window e2e](testing.md#the-multi-window-e2e).
 
 ## Window placement and displays
 

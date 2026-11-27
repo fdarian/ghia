@@ -14,10 +14,10 @@ import type { EventPayload } from "../../index.js"
 import { flushPendingMutations } from "../bounds.js"
 import { DOM_BINDING, type Element, type Node, type Text, type TextBinding } from "../dom/nodes.js"
 import { Range } from "../dom/range.js"
-import { getSelection } from "../dom/selection.js"
 import type { NativeRenderer } from "../host.js"
 import { textById } from "./geometry.js"
 import { isEditingHost } from "./host.js"
+import { documentOf } from "../events/window-target.js"
 import { endEditingComposition, runEditingComposition, runEditingInput } from "./input.js"
 
 export const EDIT_INPUT_EVENT = "editinput"
@@ -73,6 +73,7 @@ function selectedRange(event: EventPayload): [number, number] | undefined {
  * - `unmark` ends the composition with the text it has marked.
  */
 export function runNativeEditInput(event: EventPayload, host: Element, renderer: NativeRenderer): void {
+  const document = documentOf(renderer)
   const range = replacementRange(host, event)
   const composing = event.isComposing === true
   if (!composing) endEditingComposition(host)
@@ -80,22 +81,22 @@ export function runNativeEditInput(event: EventPayload, host: Element, renderer:
     case "insert": {
       if (event.data == null) throw new Error("An editinput insert arrived without its text")
       if (composing) {
-        runEditingComposition({ action: "commit", text: event.data }, { replacing: range && rangeBetween(range) })
+        runEditingComposition(document, { action: "commit", text: event.data }, { replacing: range && rangeBetween(range) })
       } else {
         if (range !== undefined) {
-          getSelection().setBaseAndExtent(range[0].node, range[0].offset, range[1].node, range[1].offset)
+          document.getSelection().setBaseAndExtent(range[0].node, range[0].offset, range[1].node, range[1].offset)
         }
         const replaces = range !== undefined && (range[0].node !== range[1].node || range[0].offset !== range[1].offset)
-        runEditingInput(replaces ? "insertReplacementText" : "insertText", event.data)
+        runEditingInput(document, replaces ? "insertReplacementText" : "insertText", event.data)
       }
       break
     }
     case "mark":
       if (event.data == null) throw new Error("An editinput mark arrived without its text")
-      runEditingComposition({ action: "mark", text: event.data }, { replacing: range && rangeBetween(range), selected: selectedRange(event) })
+      runEditingComposition(document, { action: "mark", text: event.data }, { replacing: range && rangeBetween(range), selected: selectedRange(event) })
       break
     case "unmark":
-      runEditingComposition({ action: "unmark" })
+      runEditingComposition(document, { action: "unmark" })
       break
     default:
       throw new Error(`An editinput of kind ${String(event.inputType)} is not one this version knows`)

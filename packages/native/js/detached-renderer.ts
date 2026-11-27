@@ -1,6 +1,6 @@
 /**
- * What a renderer answers once its window is gone: the test renderer after `dispose()` (or after
- * the next test renderer replaced it), a live renderer once its window closed.
+ * What a renderer answers once its window is gone: the test renderer after `dispose()`, a live
+ * renderer once its window closed.
  *
  * A library keeps references to elements past the unmount of the root that made them: Base UI
  * returns focus from a timer, floating-ui measures in a microtask, a drag library reads a rect in

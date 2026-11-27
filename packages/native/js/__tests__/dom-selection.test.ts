@@ -165,9 +165,11 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 describe("node Selection", () => {
   const mounted: Array<{ detach(): boolean }> = []
   const selection = document.getSelection()
+  /** The window `beforeEach` mounted: the first, so the one `document` is the document of. */
+  let current: ReturnType<typeof mountWindow>
 
   beforeEach(() => {
-    mountWindow()
+    current = mountWindow()
   })
 
   afterEach(() => {
@@ -214,7 +216,6 @@ describe("node Selection", () => {
     })
 
     it("answers null, 0 and none with nothing selected", () => {
-      mountWindow()
       expect([selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset]).toEqual([null, 0, null, 0])
       expect([selection.type, selection.direction, selection.rangeCount]).toEqual(["None", "none", 0])
       expect(selection.getComposedRanges()).toEqual([])
@@ -449,7 +450,6 @@ describe("node Selection", () => {
 
   describe("errors", () => {
     it("getRangeAt: IndexSizeError for no range and for an index but 0", () => {
-      mountWindow()
       expect(errorName(() => selection.getRangeAt(0))).toBe("IndexSizeError")
       const a = tx("hello")
       el("div", a)
@@ -475,7 +475,6 @@ describe("node Selection", () => {
     })
 
     it("collapseToStart, collapseToEnd and extend: InvalidStateError with no range", () => {
-      mountWindow()
       const a = tx("hello")
       el("div", a)
       expect(errorName(() => selection.collapseToStart())).toBe("InvalidStateError")
@@ -607,7 +606,7 @@ describe("node Selection", () => {
 
   describe("with painted text", () => {
     it("a node selection clears the painted one", () => {
-      const { fake } = mountWindow()
+      const { fake } = current
       const a = tx("hello")
       el("div", a)
       fake.selected = "painted"
@@ -618,7 +617,7 @@ describe("node Selection", () => {
     })
 
     it("a node selection leaves a window with no painted text alone", () => {
-      const { fake } = mountWindow()
+      const { fake } = current
       const a = tx("hello")
       el("div", a)
       selection.collapse(n(a), 1)
@@ -626,7 +625,7 @@ describe("node Selection", () => {
     })
 
     it("painted text that native reports replaces the node range, and a clear does not", () => {
-      const { fake, eventId, state } = mountWindow()
+      const { fake, eventId, state } = current
       const a = tx("hello")
       el("div", a)
       selection.setBaseAndExtent(n(a), 0, n(a), 2)
@@ -643,13 +642,13 @@ describe("node Selection", () => {
       } finally {
         document.removeEventListener("selectionchange", listener)
       }
-      expect(holdsNodeSelection()).toBe(false)
+      expect(holdsNodeSelection(selection)).toBe(false)
       expect(seen).toEqual(["selectionchange", "selectionchange"])
       expect([selection.anchorNode, selection.rangeCount, selection.type, selection.toString()]).toEqual([null, 1, "Range", "painted"])
     })
 
     it("asks native for selectionChange while a node range is held", () => {
-      const { fake, eventId } = mountWindow()
+      const { fake, eventId } = current
       const sync = syncWindowSelectionChange(fake, eventId, () => false)
       const a = tx("hello")
       el("div", a)
@@ -665,7 +664,7 @@ describe("node Selection", () => {
     })
 
     it("removeAllRanges clears both", () => {
-      const { fake } = mountWindow()
+      const { fake } = current
       const a = tx("hello")
       el("div", a)
       selection.collapse(n(a), 1)
@@ -676,7 +675,7 @@ describe("node Selection", () => {
     })
 
     it("getRangeAt on painted text is a NotSupportedError", () => {
-      const { fake } = mountWindow()
+      const { fake } = current
       fake.selected = "painted"
       expect(errorName(() => selection.getRangeAt(0))).toBe("NotSupportedError")
     })

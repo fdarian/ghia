@@ -1,33 +1,25 @@
+import { getComputedStyle } from "./computed-style.js"
 import { createDomEvent, EVENT_PHASE_AT_TARGET, EVENT_PHASE_NONE, reportHandlerErrors } from "./events/dispatch.js"
-import { GpuixEventTarget, subscribeWindowEventTypes, window as ghiaWindow } from "./events/window-target.js"
-import type { AddEventListenerOptions, WindowEventListener } from "./events/window-target.js"
-import { mountedRenderer, subscribeMountedRenderer } from "./mounted-renderer.js"
-import { createRendererState } from "./renderer-state.js"
+import type { GpuixEventTarget } from "./events/event-target.js"
+import { globalWindow } from "./events/window-target.js"
+import { installWindowHooks, WINDOW_HANDLER_TYPES, type GpuixWindow } from "./events/window-targets.js"
 import type { NativeRenderer } from "./host.js"
-
-type WindowSize = { width: number; height: number }
-
-/** The window every member below reads is the one that mounted last, as for `matchMedia` and `document.body`. */
-function currentRenderer(member: string): NativeRenderer {
-  const renderer = mountedRenderer()
-  if (renderer === undefined) {
-    throw new Error(`${member} needs a mounted GPUIX root. Read it after render().`)
-  }
-  return renderer
-}
-
-function windowSizeOf(renderer: NativeRenderer, member: string): WindowSize {
-  if (renderer.getWindowSize === undefined) {
-    throw new Error(`This renderer does not report the window size, so ${member} cannot be read`)
-  }
-  return renderer.getWindowSize()
-}
-
-function currentWindowSize(member: string): WindowSize {
-  return windowSizeOf(currentRenderer(member), member)
-}
+import { matchMediaFor } from "./match-media.js"
+import { createRendererState } from "./renderer-state.js"
+import {
+  closeWindowObject,
+  dispatchOnWindow,
+  focusWindowObject,
+  positionOf,
+  postMessageToWindow,
+  resizeWindowObject,
+  scaleFactorOf,
+} from "./window-lifecycle.js"
+import { openWindow } from "./window-open.js"
 
 const NO_ROOT = { eventHandlers: new Map(), elementById: () => undefined }
+
+type WindowSize = { width: number; height: number }
 
 /** Runs the `resize` listeners of `listeners` with `target` as the event's target. */
 function sendResize(listeners: GpuixEventTarget, target: object): void {
@@ -42,129 +34,125 @@ function sendResize(listeners: GpuixEventTarget, target: object): void {
   reportHandlerErrors(NO_ROOT, errors)
 }
 
-/**
- * Sends `resize` to `visualViewport` and `window` when the size of the window that mounted last
- * changes. A window's size changes arrive as its `mediaChange` event, which also carries OS
- * preference changes, so the event goes out only when the size is not the one last seen. One
- * subscription serves both targets, and it exists only while one of them has a `resize` listener
- * and a root is mounted; it follows the mounted window when that changes.
- */
-class ResizeWatch {
-  private watched:
-    | { renderer: NativeRenderer; size: WindowSize; stop: () => void }
-    | undefined
+/** The renderer each window is watched through, with the size last seen, while it has a `resize` listener and a root. */
+const watched = new WeakMap<GpuixWindow, { renderer: NativeRenderer; size: WindowSize; stop: () => void }>()
 
-  constructor(
-    private readonly listening: () => boolean,
-    private readonly targets: () => Array<[GpuixEventTarget, object]>
-  ) {}
+function onMediaChange(window: GpuixWindow, renderer: NativeRenderer): void {
+  const watch = watched.get(window)
+  if (watch === undefined || watch.renderer !== renderer) return
+  const size = window.size("resize")
+  const last = watch.size
+  watch.size = size
+  if (last.width === size.width && last.height === size.height) return
+  // The visual viewport goes first: it is the one whose size a library measures a keyboard or a zoom by.
+  sendResize(window.visualViewport.listeners, window.visualViewport)
+  syncResize(window)
+  sendResize(window.events, window.view)
+  syncResize(window)
+}
 
-  /** Follows the listeners and the mounted window: call it when either may have changed. */
-  sync(): void {
-    const mounted = mountedRenderer()
-    const wanted =
-      this.listening() && mounted !== undefined && mounted.getWindowSize !== undefined ? mounted : undefined
-    if (this.watched?.renderer === wanted) return
-    this.watched?.stop()
-    this.watched = undefined
-    if (wanted === undefined) return
-    const renderer = wanted
-    this.watched = {
-      renderer,
-      size: windowSizeOf(renderer, "resize"),
-      stop: createRendererState(renderer).subscribeMedia(() => this.onMediaChange(renderer)),
-    }
-  }
-
-  private onMediaChange(renderer: NativeRenderer): void {
-    const watched = this.watched
-    if (watched === undefined || watched.renderer !== renderer) return
-    const size = windowSizeOf(renderer, "resize")
-    const last = watched.size
-    watched.size = size
-    if (last.width === size.width && last.height === size.height) return
-    // The visual viewport goes first: it is the one whose size a library measures a keyboard or a zoom by.
-    for (const [listeners, target] of this.targets()) {
-      sendResize(listeners, target)
-      this.sync()
-    }
-  }
+function syncResize(window: GpuixWindow): void {
+  const mounted = window.renderer
+  const wanted =
+    window.listensForResize && window.isMounted && mounted?.getWindowSize !== undefined ? mounted : undefined
+  const current = watched.get(window)
+  if (current?.renderer === wanted) return
+  current?.stop()
+  watched.delete(window)
+  if (wanted === undefined) return
+  watched.set(window, {
+    renderer: wanted,
+    size: window.size("resize"),
+    stop: createRendererState(wanted).subscribeMedia(() => onMediaChange(window, wanted)),
+  })
 }
 
 /**
- * The window's visual viewport. Ghia has no pinch zoom or on-screen keyboard that moves it, so
- * it is the window's content box at scale 1, and the document cannot scroll.
- */
-class VisualViewport {
-  readonly listeners = new GpuixEventTarget(undefined, this)
-
-  readonly offsetLeft = 0
-  readonly offsetTop = 0
-  readonly pageLeft = 0
-  readonly pageTop = 0
-  readonly scale = 1
-
-  get width(): number {
-    return currentWindowSize("visualViewport.width").width
-  }
-
-  get height(): number {
-    return currentWindowSize("visualViewport.height").height
-  }
-
-  addEventListener(
-    type: string,
-    listener: WindowEventListener,
-    options?: boolean | AddEventListenerOptions
-  ): void {
-    this.listeners.addEventListener(type, listener, options)
-    resizeWatch.sync()
-  }
-
-  removeEventListener(
-    type: string,
-    listener: WindowEventListener,
-    options?: boolean | Pick<AddEventListenerOptions, "capture">
-  ): void {
-    this.listeners.removeEventListener(type, listener, options)
-    resizeWatch.sync()
-  }
-}
-
-const visualViewport = new VisualViewport()
-const resizeWatch = new ResizeWatch(
-  () => visualViewport.listeners.hasListeners("resize") || ghiaWindow.hasListeners("resize"),
-  () => [
-    [visualViewport.listeners, visualViewport],
-    [ghiaWindow, globalThis],
-  ]
-)
-
-/**
- * Installs the members of `window` a library reads for the size of the screen it draws on, and
- * the `resize` event of `window` and `visualViewport`.
+ * Installs the members of `window` a library reads for the size of the screen it draws on, and the
+ * members that follow the window: they answer for the global window, the first one that mounted.
+ * Another window's own members are on its window target (`windowOf(renderer)`), which is also
+ * where the `resize` event of every window is sent.
  */
 export function installWindowMembers(): void {
-  subscribeWindowEventTypes(() => resizeWatch.sync())
-  subscribeMountedRenderer(() => resizeWatch.sync())
+  installWindowHooks({
+    syncResize,
+    matchMedia: (renderer, query) => matchMediaFor(renderer)(query),
+    getComputedStyle,
+    lifecycle: {
+      open: openWindow,
+      close: closeWindowObject,
+      focus: focusWindowObject,
+      postMessage: postMessageToWindow,
+      dispatchEvent: dispatchOnWindow,
+      resizeTo: resizeWindowObject,
+      scaleFactor: scaleFactorOf,
+      position: positionOf,
+    },
+  })
   Object.defineProperties(globalThis, {
     innerWidth: {
       configurable: true,
-      get: () => currentWindowSize("innerWidth").width,
+      get: () => globalWindow().innerWidth,
     },
     innerHeight: {
       configurable: true,
-      get: () => currentWindowSize("innerHeight").height,
+      get: () => globalWindow().innerHeight,
     },
     // The document cannot scroll (Ghia has no scrolling element for the viewport), so the window is always at its origin.
     scrollX: { value: 0, configurable: true, writable: true },
     scrollY: { value: 0, configurable: true, writable: true },
-    visualViewport: { value: visualViewport, configurable: true, writable: true },
+    visualViewport: { configurable: true, get: () => globalWindow().visualViewport },
     frameElement: { value: null, configurable: true, writable: true },
   })
+  installGlobalWindowMembers()
   // A runtime that has its own keeps it: `self` is the global object already in Bun.
   for (const name of ["parent", "top", "self"]) {
     if (Reflect.get(globalThis, name) !== undefined) continue
     Object.defineProperty(globalThis, name, { value: globalThis, configurable: true, writable: true })
+  }
+}
+
+/** The members of a window that the global object carries for the first window: each forwards to `globalWindow()`. */
+function installGlobalWindowMembers(): void {
+  const first = (): GpuixWindow => globalWindow()
+  const readable = ["closed", "devicePixelRatio", "outerWidth", "outerHeight", "screenX", "screenY", "screenLeft", "screenTop", "length"] as const
+  for (const name of readable) {
+    Object.defineProperty(globalThis, name, { configurable: true, get: () => first()[name] })
+  }
+  // `opener` and `name` are settable, as in a browser: a script drops the opener with `opener = null`.
+  Object.defineProperty(globalThis, "opener", {
+    configurable: true,
+    get: () => first().opener,
+    set: (value: null) => {
+      first().opener = value
+    },
+  })
+  Object.defineProperty(globalThis, "name", {
+    configurable: true,
+    get: () => first().name,
+    set: (value: unknown) => {
+      first().name = String(value)
+    },
+  })
+  const methods = ["open", "close", "focus", "blur", "postMessage", "resizeTo", "resizeBy", "moveTo", "moveBy"] as const
+  for (const name of methods) {
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]) => Reflect.apply(Reflect.get(first(), name), first(), args),
+    })
+  }
+  Object.defineProperty(globalThis, "frames", { value: globalThis, configurable: true, writable: true })
+  // The handlers of the events a window sends itself; `onmessage` stays the runtime's where it has one.
+  for (const type of WINDOW_HANDLER_TYPES) {
+    const property = `on${type}`
+    if (type === "message" && Reflect.get(globalThis, property) !== undefined) continue
+    Object.defineProperty(globalThis, property, {
+      configurable: true,
+      get: () => Reflect.get(first(), property),
+      set: (value: unknown) => {
+        Reflect.set(first(), property, value)
+      },
+    })
   }
 }

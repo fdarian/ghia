@@ -12,7 +12,7 @@ import {
   syncWindowSelectionChange,
   unregisterEventHandlers,
 } from "@ghia/native/host"
-import { registerRoot, toAppearance } from "@ghia/native/host"
+import { registerRoot, registerWindowDisposer, registerWindowFactory, toAppearance } from "@ghia/native/host"
 import type {
   Appearance,
   MutationRenderer,
@@ -21,7 +21,16 @@ import type {
   RootEvent,
   RootEventHandlers,
 } from "@ghia/native/host"
-import { createHostElement, createHostText, HostFragment, HostRoot, removeHostNode } from "./host.js"
+import {
+  createHostElement,
+  createHostText,
+  HostFragment,
+  HostRoot,
+  isHostElement,
+  removeHostNode,
+  type HostElement,
+  type HostNode,
+} from "./host.js"
 import { universalRender } from "./universal.js"
 import { reportUncaughtError } from "./uncaught-error.js"
 
@@ -51,6 +60,23 @@ export interface Root {
   flushSync<Value>(fn: () => Value): Value
   dispatch(event: EventPayload): boolean
   unmount(): void
+}
+
+/** What mounts code into an element of a window's tree: the root that window's `<body>` belongs to. */
+const elementMounters = new WeakMap<HostRoot, (element: HostElement, code: () => JSX.Element) => () => void>()
+
+/**
+ * Mounts `code` as children of `element`, an element of a mounted window, as `solid-js/web`'s
+ * `render(code, element)` does, with the window's `useGpuix()` around it. The returned function
+ * disposes it and removes what it rendered; the window's root disposes it too when it unmounts.
+ */
+export function renderIntoElement(code: () => JSX.Element, element: Element): () => void {
+  // A stand-in element (the body of a closed window) or another adapter's element is no host element: it has no window to mount in.
+  if (isHostElement(element) && element.mounted && element.root !== null) {
+    const mount = elementMounters.get(element.root)
+    if (mount !== undefined) return mount(element, code)
+  }
+  throw new TypeError("render() mounts into an element of a window that has a mounted root; this element is in none")
 }
 
 export function createRoot(
@@ -181,6 +207,39 @@ export function createRoot(
 
   attach()
   const unregister = registerRoot(() => root.unmount())
+  // What `window.open` gives an app: the window gets a root of its own, and the app renders into its `document.body`.
+  // `createRoot` registers the window disposer of the popup's root itself, so the factory returns none.
+  const unregisterWindowFactory = registerWindowFactory(renderer, (opened) => {
+    createRoot(opened, { onUncaughtError: rootHandlers.onUncaughtError })
+  })
+  // The window going away (the user closed it, `close()`, the app ending) unmounts the root, the first window's included.
+  const unregisterWindowDisposer = registerWindowDisposer(renderer, () => root.unmount())
+  const elementRenders = new Set<() => void>()
+  elementMounters.set(container, (element, code) => {
+    // Only what this render put in the element goes when it is disposed: another render's nodes, a portal's and the app's own stay.
+    const owned = new Set<HostNode>()
+    const disposeTree = universalRender(
+      () => createComponent(GpuixContext.Provider, {
+        value: context(),
+        get children() {
+          return code()
+        },
+      }),
+      element,
+      { marker: null, owned }
+    )
+    const stop = () => {
+      if (!elementRenders.delete(stop)) return
+      runSteps([
+        disposeTree,
+        () => runAll([...owned].filter((node) => element.childList.includes(node)), (node) => removeHostNode(element, node), "Removing nodes failed"),
+        flush,
+      ], "Disposing the render failed")
+    }
+    elementRenders.add(stop)
+    flush()
+    return stop
+  })
   // The release and the batch are separate steps: a throw in the first must not skip the second.
   const flush = () => {
     runSteps([
@@ -191,6 +250,7 @@ export function createRoot(
   // Every step runs even when one throws, so a failed teardown still releases `<html>` and the handlers.
   const clear = () => {
     runSteps([
+      () => runAll([...elementRenders], (stop) => stop(), "Disposing the renders into elements failed"),
       () => {
         // Cleared first: a throwing `onCleanup` must not leave the tree to be disposed, and throw, again.
         const disposeTree = dispose
@@ -206,33 +266,35 @@ export function createRoot(
     ], "Clearing the root failed")
   }
 
+  const context = (): GpuixContextValue => ({
+    renderer,
+    mutations,
+    subscribeSelection(callback) {
+      selectionListeners.add(callback)
+      callback(renderer.getSelectedText?.() ?? null)
+      syncSelection()
+      return () => {
+        selectionListeners.delete(callback)
+        syncSelection()
+      }
+    },
+    subscribeAppearance(callback) {
+      appearanceListeners.add(callback)
+      syncAppearance()
+      return () => {
+        appearanceListeners.delete(callback)
+        syncAppearance()
+      }
+    },
+  })
+
   const root: Root = {
     render(code) {
       if (dispose) runSteps([clear, detach, attach], "Rendering again failed")
       container.ensureDocumentElements()
       dispose = universalRender(
         () => createComponent(GpuixContext.Provider, {
-          value: {
-            renderer,
-            mutations,
-            subscribeSelection(callback) {
-              selectionListeners.add(callback)
-              callback(renderer.getSelectedText?.() ?? null)
-              syncSelection()
-              return () => {
-                selectionListeners.delete(callback)
-                syncSelection()
-              }
-            },
-            subscribeAppearance(callback) {
-              appearanceListeners.add(callback)
-              syncAppearance()
-              return () => {
-                appearanceListeners.delete(callback)
-                syncAppearance()
-              }
-            },
-          },
+          value: context(),
           get children() {
             return code()
           },
@@ -250,6 +312,8 @@ export function createRoot(
     },
     unmount() {
       unregister()
+      unregisterWindowFactory()
+      unregisterWindowDisposer()
       runSteps([clear, detach], "Unmounting failed")
     },
   }

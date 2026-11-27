@@ -4,15 +4,16 @@
  *
  * Native reads two boundary points and the editing host of a caret (`setNodeSelection`, last op of a
  * batch). The batch carries what the selection is when the queue flushes, not each step it took to get
- * there: `takeNodeSelectionWrite` compares the selection with what the root was last sent, so a flush
- * that finds no change sends nothing, and a selection that moved to another root clears the one it left.
+ * there: `takeNodeSelectionWrite` compares the selection of the root's window with what the root was last sent, so a flush
+ * that finds no change sends nothing. Each window has its own selection, and so each root its own.
  * A change outside a framework commit asks the queues concerned for a flush, so it is painted by the next
  * frame like a style written from code.
  */
 
 import { requestMutationFlush } from "../bounds.js"
 import { DOM_BINDING, type ElementBinding, type Node, type TextBinding } from "../dom/nodes.js"
-import { getSelection, holdsNodeSelection, subscribeNodeSelection } from "../dom/selection.js"
+import { holdsNodeSelection, rendererOfSelection, subscribeNodeSelection, type Selection } from "../dom/selection.js"
+import { documentOf } from "../events/window-target.js"
 import type { NativeRenderer } from "../host.js"
 import { editingHostOf } from "./host.js"
 import type { WireNodeSelection } from "../wire.js"
@@ -23,8 +24,6 @@ const TEXT_NODE = 3
 interface Sent {
   /** What each root holds now, by the text `keyOf` makes of it; a root that holds nothing has no entry. */
   keys: WeakMap<object, string>
-  /** The roots that hold a selection, to clear the one the selection left. */
-  holders: Set<WeakRef<NativeRenderer>>
 }
 
 const SENT_KEY = Symbol.for("@ghia/native/node-selection-sent")
@@ -33,7 +32,7 @@ const SENT_KEY = Symbol.for("@ghia/native/node-selection-sent")
 function sent(): Sent {
   const existing = Reflect.get(globalThis, SENT_KEY) as Sent | undefined
   if (existing) return existing
-  const created: Sent = { keys: new WeakMap(), holders: new Set() }
+  const created: Sent = { keys: new WeakMap() }
   Reflect.set(globalThis, SENT_KEY, created)
   return created
 }
@@ -47,7 +46,7 @@ function nativeOf(node: Node): { renderer: NativeRenderer; id: number } | undefi
 const NO_HOST = 0
 
 /** The id of the editing host the caret `focusNode` is in, `NO_HOST` for a selection that is not one. */
-function hostIdOf(selection: ReturnType<typeof getSelection>, focusNode: Node): number {
+function hostIdOf(selection: Selection, focusNode: Node): number {
   if (!selection.isCollapsed) return NO_HOST
   const host = editingHostOf(focusNode)
   if (host === null) return NO_HOST
@@ -59,8 +58,8 @@ function hostIdOf(selection: ReturnType<typeof getSelection>, focusNode: Node): 
 
 /** The selection as the root `renderer` is to hold it: both ends in it, or `null`. */
 function wantedBy(renderer: NativeRenderer): WireNodeSelection | null {
-  if (!holdsNodeSelection()) return null
-  const selection = getSelection()
+  const selection = documentOf(renderer).getSelection()
+  if (!holdsNodeSelection(selection)) return null
   const anchorNode = selection.anchorNode
   const focusNode = selection.focusNode
   if (anchorNode === null || focusNode === null) return null
@@ -90,38 +89,19 @@ function keyOf(selection: WireNodeSelection | null): string {
 export function takeNodeSelectionWrite(renderer: NativeRenderer): WireNodeSelection | null | undefined {
   const state = sent()
   const known = state.keys.get(renderer)
-  if (known === undefined && !holdsNodeSelection()) return undefined
+  if (known === undefined && !holdsNodeSelection(documentOf(renderer).getSelection())) return undefined
   const wanted = wantedBy(renderer)
   const key = keyOf(wanted)
   if (known === undefined ? key === "" : known === key) return undefined
-  if (wanted === null) {
-    state.keys.delete(renderer)
-    for (const holder of state.holders) {
-      const held = holder.deref()
-      if (held === undefined || held === renderer) state.holders.delete(holder)
-    }
-  } else {
-    state.keys.set(renderer, key)
-    if (![...state.holders].some((holder) => holder.deref() === renderer)) state.holders.add(new WeakRef(renderer))
-  }
+  if (wanted === null) state.keys.delete(renderer)
+  else state.keys.set(renderer, key)
   return wanted
 }
 
-/** The selection changed: the root it is in, and the roots that hold an older one, are to send it. */
-function selectionChanged(): void {
-  const state = sent()
-  const roots = new Set<NativeRenderer>()
-  for (const holder of state.holders) {
-    const held = holder.deref()
-    if (held === undefined) state.holders.delete(holder)
-    else roots.add(held)
-  }
-  if (holdsNodeSelection()) {
-    const anchorNode = getSelection().anchorNode
-    const owner = anchorNode === null ? undefined : nativeOf(anchorNode)?.renderer
-    if (owner !== undefined) roots.add(owner)
-  }
-  for (const root of roots) requestMutationFlush(root)
+/** A selection changed: the root of its window is to send it, as it is to clear a selection it holds no longer. */
+function selectionChanged(selection: Selection): void {
+  const renderer = rendererOfSelection(selection)
+  if (renderer !== undefined) requestMutationFlush(renderer)
 }
 
 subscribeNodeSelection(selectionChanged)

@@ -2,6 +2,8 @@
 //! a test sets, and reports only the events a test makes.
 use std::{cell::RefCell, collections::HashMap, collections::VecDeque, rc::Rc};
 
+use gpui::WindowId;
+
 use super::backend::{EventEmitter, FocusExit, PageFocus, ScriptDone, ScriptOutcome, WebviewBackend, WebviewEvent, WebviewState};
 
 /// What the element asked of the engine, in order.
@@ -27,17 +29,18 @@ pub(crate) struct TestPage {
     pub(crate) focus_exit: Option<FocusExit>,
 }
 
-/// The pages of the webviews that exist, by element id. A global of the app, so the engine of a
-/// webview finds it, and so does a test.
+/// The pages of the webviews that exist, by window and element id (host ids are allocated by each
+/// renderer, so two windows have the same ones). A global of the app, so the engine of a webview
+/// finds it, and so does a test.
 #[derive(Clone, Default)]
-pub(crate) struct TestWebviews(Rc<RefCell<HashMap<u64, TestPage>>>);
+pub(crate) struct TestWebviews(Rc<RefCell<HashMap<(WindowId, u64), TestPage>>>);
 
 impl gpui::Global for TestWebviews {}
 
 impl TestWebviews {
-    pub(crate) fn with_page<R>(&self, id: u64, f: impl FnOnce(&mut TestPage) -> R) -> Result<R, String> {
+    pub(crate) fn with_page<R>(&self, window: WindowId, id: u64, f: impl FnOnce(&mut TestPage) -> R) -> Result<R, String> {
         let mut pages = self.0.borrow_mut();
-        let page = pages.get_mut(&id).ok_or_else(|| {
+        let page = pages.get_mut(&(window, id)).ok_or_else(|| {
             format!("Element {id} has no page: a <webview> gets one when it is first painted")
         })?;
         Ok(f(page))
@@ -46,11 +49,12 @@ impl TestWebviews {
     /// Makes the page report `event`, after `change` has moved the state it reports.
     pub(crate) fn report(
         &self,
+        window: WindowId,
         id: u64,
         change: impl FnOnce(&mut WebviewState),
         event: WebviewEvent,
     ) -> Result<(), String> {
-        let emitter = self.with_page(id, |page| {
+        let emitter = self.with_page(window, id, |page| {
             change(&mut page.state);
             page.emitter.clone()
         })?;
@@ -61,9 +65,9 @@ impl TestWebviews {
     }
 
     /// Settles the oldest script that waits.
-    pub(crate) fn settle_script(&self, id: u64, outcome: ScriptOutcome) -> Result<(), String> {
+    pub(crate) fn settle_script(&self, window: WindowId, id: u64, outcome: ScriptOutcome) -> Result<(), String> {
         let done = self
-            .with_page(id, |page| page.scripts.pop_front())?
+            .with_page(window, id, |page| page.scripts.pop_front())?
             .ok_or_else(|| format!("Element {id} has no script waiting"))?;
         done(outcome);
         Ok(())
@@ -71,29 +75,30 @@ impl TestWebviews {
 }
 
 pub(crate) struct TestBackend {
+    window: WindowId,
     id: u64,
     pages: TestWebviews,
 }
 
 impl TestBackend {
-    pub(crate) fn new(id: u64, pages: &TestWebviews, emitter: Rc<EventEmitter>, focus_exit: FocusExit) -> Self {
+    pub(crate) fn new(window: WindowId, id: u64, pages: &TestWebviews, emitter: Rc<EventEmitter>, focus_exit: FocusExit) -> Self {
         pages.0.borrow_mut().insert(
-            id,
+            (window, id),
             TestPage { emitter: Some(emitter), focus_exit: Some(focus_exit), ..TestPage::default() },
         );
-        Self { id, pages: pages.clone() }
+        Self { window, id, pages: pages.clone() }
     }
 
     fn command(&self, command: WebviewCommand) {
         self.pages
-            .with_page(self.id, |page| page.commands.push(command))
+            .with_page(self.window, self.id, |page| page.commands.push(command))
             .expect("the page of a live backend");
     }
 }
 
 impl Drop for TestBackend {
     fn drop(&mut self) {
-        self.pages.0.borrow_mut().remove(&self.id);
+        self.pages.0.borrow_mut().remove(&(self.window, self.id));
     }
 }
 
@@ -120,12 +125,12 @@ impl WebviewBackend for TestBackend {
     }
 
     fn state(&self) -> WebviewState {
-        self.pages.with_page(self.id, |page| page.state.clone()).expect("the page of a live backend")
+        self.pages.with_page(self.window, self.id, |page| page.state.clone()).expect("the page of a live backend")
     }
 
     fn execute_javascript(&mut self, code: &str, done: ScriptDone) {
         self.pages
-            .with_page(self.id, |page| {
+            .with_page(self.window, self.id, |page| {
                 page.commands.push(WebviewCommand::ExecuteJavaScript(code.to_string()));
                 page.scripts.push_back(done);
             })
@@ -151,7 +156,7 @@ mod tests {
         let emitter = EventEmitter::new(7);
         emitter.set_callback(Some(Arc::new(move |payload| sink.lock().unwrap().push(payload))));
         let pages = TestWebviews::default();
-        let backend = TestBackend::new(7, &pages, emitter, Rc::new(|_| {}));
+        let backend = TestBackend::new(WindowId::from(1), 7, &pages, emitter, Rc::new(|_| {}));
         (pages, backend, heard)
     }
 
@@ -162,7 +167,7 @@ mod tests {
         backend.reload();
         backend.set_first_responder(PageFocus::Focused).unwrap();
         assert_eq!(
-            pages.with_page(7, |page| page.commands.clone()).unwrap(),
+            pages.with_page(WindowId::from(1), 7, |page| page.commands.clone()).unwrap(),
             [
                 WebviewCommand::Load("https://example.test/".into()),
                 WebviewCommand::Reload,
@@ -175,7 +180,7 @@ mod tests {
     fn a_reported_event_moves_the_state_and_reaches_the_element() {
         let (pages, backend, heard) = page();
         pages
-            .report(7, |state| state.url = "https://example.test/a".into(), WebviewEvent::DidNavigate {
+            .report(WindowId::from(1), 7, |state| state.url = "https://example.test/a".into(), WebviewEvent::DidNavigate {
                 url: "https://example.test/a".into(),
             })
             .unwrap();
@@ -195,9 +200,9 @@ mod tests {
             let settled = settled.clone();
             backend.execute_javascript(name, Box::new(move |outcome| settled.borrow_mut().push((name, outcome))));
         }
-        pages.settle_script(7, Ok(Some(serde_json::json!(1)))).unwrap();
-        pages.settle_script(7, Err("boom".into())).unwrap();
-        assert!(pages.settle_script(7, Ok(None)).is_err());
+        pages.settle_script(WindowId::from(1), 7, Ok(Some(serde_json::json!(1)))).unwrap();
+        pages.settle_script(WindowId::from(1), 7, Err("boom".into())).unwrap();
+        assert!(pages.settle_script(WindowId::from(1), 7, Ok(None)).is_err());
         assert_eq!(
             *settled.borrow(),
             [("first", Ok(Some(serde_json::json!(1)))), ("second", Err("boom".to_string()))]
@@ -208,6 +213,6 @@ mod tests {
     fn the_page_goes_with_the_backend() {
         let (pages, backend, _) = page();
         drop(backend);
-        assert!(pages.with_page(7, |_| ()).is_err());
+        assert!(pages.with_page(WindowId::from(1), 7, |_| ()).is_err());
     }
 }

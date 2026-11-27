@@ -457,7 +457,7 @@ impl GpuixView {
                 self.retain.anchor_repainted(&tree, anchor, rewritten.contains(&anchor));
             }
         }
-        crate::renderer::layout_is_drawn(cx.entity_id());
+        crate::renderer::layout_is_drawn(window.window_handle().window_id());
         let running = self.css_transitions.take_active() | self.css_animations.take_active();
         let asks_next_frame = running || stepped.motion || stepped.motion_values == crate::motion::Demand::Frame;
         self.retain.note_clock_asked(asks_next_frame);

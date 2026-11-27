@@ -53,6 +53,18 @@ export declare class GpuixRenderer {
   tick(): boolean
   isInitialized(): boolean
   /**
+   * Whether the window this renderer opened is gone: the user closed it, `closeWindow()` did, or
+   * the app quit. The App goes on for the windows that are left, and `tick()` keeps pumping it
+   * and answering `true` until the last one closes. False before `init`.
+   */
+  isWindowClosed(): boolean
+  /**
+   * Closes this renderer's window and no other. The App ends when the last window closes (the
+   * quit `tick()` reports), as when the user closes it. Closing a window that is already gone
+   * does nothing.
+   */
+  closeWindow(): void
+  /**
    * Whether a display link started since it last drew still waits for its first step, so the
    * frame loop has to call `stepStartedLinks` after the task and microtasks of the tick that
    * started it. macOS only; everything else answers false.
@@ -145,6 +157,21 @@ export declare class GpuixRenderer {
    * platform's answer.
    */
   isWindowKey(): boolean
+  /**
+   * The window's device pixels per CSS px: `devicePixelRatio`. It follows the display the
+   * window is on, so read it again after a `mediaChange`.
+   */
+  getScaleFactor(): number
+  /**
+   * Where the window's top-left corner is, in CSS px in the global space `getAllDisplays()`
+   * reports (`screenX` and `screenY`). macOS only.
+   */
+  getWindowPosition(): WindowPosition
+  /**
+   * Sets the size of the window's content in CSS px, as the user dragging an edge would
+   * (`window.resizeTo`). The window is not clamped to the display. macOS only.
+   */
+  setWindowSize(width: number, height: number): void
   /**
    * Bring the window forward and give it focus. This is how a window opened
    * with `show: false` or `focus: false` is revealed later.
@@ -819,6 +846,11 @@ export declare class TestGpuixRenderer {
    */
   constructor(options?: WindowOptions | undefined | null, scaleFactor?: number | undefined | null)
   /**
+   * Whether GPUI no longer has this window: disposed, or taken by an app that ended. Not what a
+   * script's `window.close()` asks, which the JS side keeps.
+   */
+  isWindowClosed(): boolean
+  /**
    * Tears the window and its GPUI app down. Every call that needs the window
    * throws afterwards; the retained tree stays readable. Call it after the
    * root is unmounted.
@@ -1162,6 +1194,13 @@ export declare class TestGpuixRenderer {
   writeClipboard(items: Array<ClipboardData>): void
   readClipboard(): Array<ClipboardData>
   getFocusedElementId(): number | null
+  /**
+   * Whether the offscreen window is the active one: the test stand-in of `isWindowKey`, which
+   * `setWindowActive` changes.
+   */
+  isWindowKey(): boolean
+  /** The window's device pixels per CSS px, as the live renderer's `getScaleFactor`. */
+  getScaleFactor(): number
   /** Makes the offscreen window key or not, as when the user switches apps. */
   setWindowActive(active: boolean): void
   focusNextWithin(elementId: number): void
@@ -3278,6 +3317,12 @@ export interface WindowOptions {
    * frontmost. macOS only; elsewhere it is a normal window. Anything else throws.
    */
   kind?: 'normal' | 'panel'
+}
+
+/** A window's top-left corner in CSS px, in the global space of `getAllDisplays()`. */
+export interface WindowPosition {
+  x: number
+  y: number
 }
 
 export interface WindowSize {

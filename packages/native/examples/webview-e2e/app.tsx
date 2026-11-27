@@ -29,7 +29,7 @@ export interface Controls {
   focusLog: string[]
   clicks: { popover: number; gpuiButton: number }
   views: Record<string, WebviewInstance | null>
-  elements: Record<string, { id: number; getBoundingClientRect(): { x: number; y: number; width: number; height: number }; scrollTop: number; scrollTo?: (x: number, y: number) => void; focus?: () => void; blur?: () => void } | null>
+  elements: Record<string, { nativeId: number; getBoundingClientRect(): { x: number; y: number; width: number; height: number }; scrollTop: number; scrollTo?: (x: number, y: number) => void; focus?: () => void; blur?: () => void } | null>
   setPageCHidden(hidden: boolean): void
   setPageCMounted(mounted: boolean): void
   setPageBMounted(mounted: boolean): void

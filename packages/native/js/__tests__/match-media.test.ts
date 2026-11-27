@@ -7,6 +7,7 @@ import {
   matchMediaFor,
   observeReducedMotion,
   readReducedMotion,
+  windowOf,
 } from "../host.js"
 import type { MediaFeatures, NativeRenderer } from "../host.js"
 
@@ -307,28 +308,33 @@ describe("matchMedia", () => {
       expect(() => matchMedia("(hover)")).toThrow(/mounted/)
     })
 
-    it("falls back to the previous root when the newest one unmounts", () => {
+    it("answers for the first window that mounted, and a window answers for itself", () => {
       const first = fakeWindow()
       first.features = { reducedMotion: true, increasedContrast: false, forcedColors: false }
       const second = fakeWindow()
       const firstBinding = createRendererState(first).attach()
       const secondBinding = createRendererState(second).attach()
-      expect(matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false)
+      expect(matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(true)
+      expect(windowOf(second).matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false)
+      expect(windowOf(first).matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(true)
+      // The global matchMedia does not move to the window that is left.
       secondBinding.detach()
       expect(matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(true)
+      expect(() => windowOf(second).matchMedia("(hover)")).toThrow(/mounted/)
       firstBinding.detach()
       expect(() => matchMedia("(hover)")).toThrow(/mounted/)
     })
 
-    it("keeps the newest root when an older one unmounts", () => {
+    it("does not move to a later window while the first window's root is mounted", () => {
       const first = fakeWindow()
       const second = fakeWindow()
       second.features = { reducedMotion: true, increasedContrast: false, forcedColors: false }
       const firstBinding = createRendererState(first).attach()
       const secondBinding = createRendererState(second).attach()
-      firstBinding.detach()
-      expect(matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(true)
+      expect(matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false)
+      expect(windowOf(second).matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(true)
       secondBinding.detach()
+      firstBinding.detach()
     })
   })
 

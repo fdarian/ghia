@@ -12,6 +12,7 @@
     "types": ["bun"],
     "baseUrl": ".",
     "paths": {
+      "@ghia/native/host": ["../../dist/host.js"],
       "@ghia/react": ["../../../react/dist/index.js"],
       "@ghia/react/jsx-runtime": ["../../../react/jsx-runtime.js"],
       "@ghia/react/jsx-dev-runtime": ["../../../react/jsx-dev-runtime.js"]

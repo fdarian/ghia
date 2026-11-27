@@ -232,8 +232,8 @@ struct Scrollbar {
 }
 
 impl Scrollbar {
-    fn of(id: u64) -> Self {
-        let (width, height) = crate::renderer::reserved_scrollbar(id);
+    fn of(window: WindowId, id: u64) -> Self {
+        let (width, height) = crate::renderer::reserved_scrollbar(window, id);
         Self { width, height }
     }
 }
@@ -297,7 +297,7 @@ pub(crate) fn clip_rects(window: WindowId, ancestors: &[ClippingAncestor]) -> Ve
             let painted = crate::automation::get_bounds(window, ancestor.id)?;
             let (x, y) = (painted.x as f32, painted.y as f32);
             let (width, height) = (painted.width as f32, painted.height as f32);
-            let scrollbar = Scrollbar::of(ancestor.id);
+            let scrollbar = Scrollbar::of(window, ancestor.id);
             let (left, right) = if ancestor.clip_x {
                 (
                     x + painted.client_left as f32,
@@ -693,7 +693,7 @@ fn sweep(
             let (border, scrollbar) = if published.is_transformed() {
                 (Insets::default(), Scrollbar::default())
             } else {
-                (border_of(&published), Scrollbar::of(target.id))
+                (border_of(&published), Scrollbar::of(window, target.id))
             };
             found.extend(report_intersection(
                 observers,

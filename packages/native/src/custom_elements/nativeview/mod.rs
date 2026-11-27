@@ -43,7 +43,7 @@ impl gpui::Global for SurfacesRefused {}
 /// What happened to the native surfaces of a window, which the test renderer reads: its window is a
 /// real offscreen one, whose platform records nothing.
 #[derive(Clone, Default)]
-pub(crate) struct SurfaceLog(pub(crate) Rc<RefCell<Vec<SurfaceEvent>>>);
+pub(crate) struct SurfaceLog(pub(crate) Rc<RefCell<Vec<(gpui::WindowId, SurfaceEvent)>>>);
 
 impl gpui::Global for SurfaceLog {}
 
@@ -78,7 +78,7 @@ struct Attached {
 impl Drop for Attached {
     fn drop(&mut self) {
         if let Some(log) = &self.log {
-            log.0.borrow_mut().push(SurfaceEvent::Removed(self.handle));
+            log.0.borrow_mut().push((self.window, SurfaceEvent::Removed(self.handle)));
         }
     }
 }
@@ -176,7 +176,7 @@ impl Shared {
         window.size_native_surface(&surface, bounds);
         let log = cx.has_global::<SurfaceLog>().then(|| cx.global::<SurfaceLog>().clone());
         if let Some(log) = &log {
-            log.0.borrow_mut().push(SurfaceEvent::Created(*handle));
+            log.0.borrow_mut().push((window.window_handle().window_id(), SurfaceEvent::Created(*handle)));
         }
         Ok(Attached { surface, handle: *handle, window: window.window_handle().window_id(), log })
     }

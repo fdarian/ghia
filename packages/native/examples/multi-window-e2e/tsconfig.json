@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@ghia/react",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": [
+      "bun"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@ghia/react": [
+        "../../../react/dist/index.js"
+      ],
+      "@ghia/react/jsx-runtime": [
+        "../../../react/jsx-runtime.js"
+      ],
+      "@ghia/react/jsx-dev-runtime": [
+        "../../../react/jsx-dev-runtime.js"
+      ],
+      "@ghia/native": [
+        "../../index.js"
+      ],
+      "@ghia/native/runtime": [
+        "../../dist/runtime.js"
+      ],
+      "@ghia/native/host": [
+        "../../dist/host.js"
+      ]
+    }
+  },
+  "include": [
+    "./*.ts",
+    "./*.tsx"
+  ]
+}

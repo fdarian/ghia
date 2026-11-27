@@ -401,6 +401,16 @@ pub fn ordinal_frame_reset(window: WindowId) {
     ORDINALS.with(|state| state.borrow_mut().insert(window, Ordinals::default()));
 }
 
+/// The window closed: its numbering goes.
+pub(crate) fn forget_window(window: WindowId) {
+    ORDINALS.with(|state| state.borrow_mut().remove(&window));
+}
+
+#[cfg(test)]
+pub(crate) fn holds_ordinals(window: WindowId) -> bool {
+    ORDINALS.with(|state| state.borrow().contains_key(&window))
+}
+
 /// Announce the matches a retained run is about to paint, so they can be numbered in DOCUMENT
 /// order. Called from prepaint, before any run paints.
 pub fn announce_retained_run(

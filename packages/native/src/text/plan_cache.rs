@@ -76,7 +76,7 @@ pub(crate) fn planned(tree: &RetainedTree, element: &RetainedElement) -> Arc<Pla
         white_space: white_space::computed(tree, element),
         settled: SETTLED.with(Cell::get),
     };
-    if mode == Mode::Off || crate::layout::box_generation::any_display_held() {
+    if mode == Mode::Off || crate::layout::box_generation::any_display_held(tree) {
         crate::perf_counters::plan_made(false);
         return Arc::new(compute(tree, element, key));
     }
