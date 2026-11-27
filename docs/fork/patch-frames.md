@@ -1357,6 +1357,51 @@ first wheel after a commit, slice 3's.
 
 **Not in 2b.** The row that comes in at an edge (`Membership`: a layout that builds a row, slice G3 below), and the hover that changes what is under the pointer (`Hover`).
 
+### A `div` scroller (slice D1a)
+
+A wheel over a `div` scroller (`overflow: auto` or `scroll`, one with a `ScrollHandle`) used to draw a whole frame (`notify_scroll_only`, which
+no tick follows). Now `Div`'s wheel listeners also say `Window::note_scroll_moved(view)` (the same mark as a list's), and the draw that follows
+classifies the frame as a list's is: a pure move of what the scroller's roots recorded is drawn as a translate, builds nothing, and shifts the
+scroller's pixels on both axes (`ShiftPlan` takes `shift.x` too). Code: zed `window/scroll_patch/div.rs`; the wiring in `elements/div.rs`.
+
+- **Runs.** The relocatable roots painted inside the scroller are runs, as the rows of a list are, numbered by the order they are prepainted in. A
+  root that is lifted into a stacking context (every positioned element is, in Ghia's window: TanStack's rows and the box that holds them) has its
+  hitboxes taken out of the frame where it noted them and put elsewhere by the context, so a div run keeps the **ids** of its hitboxes
+  (`ScrollRun::hitbox_ids`) and a translate finds them in the frame by id. A root that culling left out is a run with an empty recording
+  (`RetainedState::is_recorded_culled`): it moves nothing.
+- **`DivFrame`** (in `rendered_frame.scroll.divs`): the offset the content was built at, the clip around the children, the children culling left out
+  with where it looked for each (`Window::lies_outside_the_mask` notes both reaches), the hitboxes the content inserted that no root holds, and the
+  operations its paint left (and the ones a stacking context painted for its lifted children that are no root). A splice of the frame marks it stale
+  (`Other`: the next frame is built whole).
+- **The classifier** (`Window::div_verdict`) runs the checks of a list's (`Edited`, `Hover`, `Place`, `Region`, `Clip`, `A11y`, `ScrollAnimation`,
+  `Clock`, `Thumb`) with the shift on both axes, and new causes of `NotRelocatable`:
+
+| Cause (`held`) | It holds when |
+|---|---|
+| `NotRelocatable.entered` | a child culling left out (it was apart from the clip by the overscan) would not be apart at the new offset: it has to be built, so the frame is built whole and never paints it empty |
+| `NotRelocatable.unrooted` | the content painted an operation no root holds (a background on the box that holds the rows), or inserted a hitbox no root holds that is not a plain box under the scroller's clip (a hitbox of a plain element, such as the box that holds the rows, is moved by the shift) |
+| `NotRelocatable.nested` | a list or another scroller is inside the scroller |
+| `NotRelocatable.layered` | the scroller's children are painted in a stacking context of its own or in an order of its own, or hold a sticky or escaping box |
+| `NotRelocatable.noRun` | none of the content is a root |
+
+- **The translate** writes the runs as a list's, then the hitboxes no root holds (`Hitbox::scrolled_by`: the box moved, the clip around it stays), the
+  scroller's `ScrollAnchoring` as its prepaint would leave it (`note_scrolled_in_place`: the anchor is dropped, the offset is the one the last step
+  left, and the next layout picks another), the thumbs, the runs' hooks (`RetainedPhase::Scrolled`, which moves what the roots wrote into the
+  registries), and tells the owner of the scroller (`InteractiveElement::on_scroll_translated(shift)`): Ghia's moves the boxes the build wrote for the
+  elements between the scroller and the roots (`automation::shift_built`; a box a root's tape holds moves with the root). The `scroll` event of
+  `onScroll` is not the translate's: it is reported from the offset by the frame steps ahead of the draw (`frame_steps.rs`), the same for a built frame.
+- **The gate.** The scroll of a scroller that is no list is not an `Edited` source of the frame (`Retain::sources_changed` leaves it out): gpui says
+  whether exactly one scroller moved and whether the frame can be a move of its content.
+- **The thumb.** A scroller's bar notes its thumbs (`Window::paint_scroll_thumb(scroll_key, ..)`, one per axis) and is planned and moved as a list's; the
+  fade of its thumb is still a built frame (`repaint_thumb` is a list's).
+- **After a translate the next tick is declined** while `Retain::seen.scrolls` holds the offset of the frame built whole (a hover patch or a caret
+  tick after a wheel builds the frame): slice D1b.
+
+Tests: zed `window/scroll_patch_div_tests.rs` (the translate is the frame built whole for the box that holds the rows, with a hitbox, rows in the flow,
+rows with no hitbox and rows not culled; each cause; the thumb; the verifier; the anchoring; the owner told), `scrollbar.rs`, `retain.rs`
+(`a_frame_that_only_moves_the_rows_of_a_list_asks_for_the_sources_a_tick_asks_for`), and react `scroll-patch-div.test.tsx` (every step a translate,
+pictures, boxes, hit points, clicks, `scroll` events and `scrollTop`, a culled child that comes into reach, the scrollbar, the verifier).
+
 ### Rows that come in and leave (slice G3)
 
 A scroll that changes which rows show is a translate as well, when every row that comes in has a measured size (zed `window/scroll_patch.rs`, `elements/list/scroll_patch.rs`, `window/patch_splice.rs`; counters `membershipFrames`, `rowsBuilt`, `rowsRemoved`). gpui moves the rows that stay as before, takes the rows that leave out of the frame (their ranges in every vector), and builds the rows that come in through the builder the list was given, which is `GpuixView::build_virtual_child`: each is laid out as a root of its own, prepainted and painted in a scratch frame at the place the new position gives it, and spliced in at the head or the tail of the rows. A row whose height differs from the one the list measured is `Height` (the rows after it would be somewhere else, as only a layout puts them), and a row that defers a draw or asks for a frame declines as `Effects`; a row that comes in under a still pointer is not a reason, as the hover is not recomputed while the scroll goes on. What holds the frame whole is counted by cause under `Membership` in `held`: `Membership.unmeasured` (a row that shows has no size), `.unmeasuredOverdraw` (one in the overdraw has none: a layout would measure it), `.settles` (the list moves its own position or does not fill), `.disjoint` (none of the rows of the frame shown shows), `.noBuilder`. A row that stays can be moved by no more than the overscan its recording was made with (`Region`, half of the list's height); in slices G3b and G3c a scroll by more than that was a whole frame, and since [G3d](#overdraw-measured-and-rows-built-again-slice-g3d) a row that cannot be moved is built where it is, so only a scroll that leaves none of the rows of the frame shown (`Membership.disjoint`) is whole for it.

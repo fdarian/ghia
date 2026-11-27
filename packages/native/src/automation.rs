@@ -449,6 +449,19 @@ impl WindowBounds {
         }
     }
 
+    /// Moves the boxes of `ids` that the frame shown wrote: the elements between a scroller and the roots a frame moved from their
+    /// recordings (a root's boxes move with its tape, [`Self::shift`]). A box a replay puts back is read from the recording of
+    /// a root that is not built and is not put elsewhere, so it is not here.
+    fn shift_built(&mut self, ids: &[u64], shift: Point<Pixels>) {
+        let frame = self.frame;
+        for id in ids {
+            let Some(stored) = self.boxes.get_mut(id) else { continue };
+            if stored.frame == frame {
+                stored.bounds = stored.bounds.translated(shift);
+            }
+        }
+    }
+
     /// Forgets the boxes of the elements `keep` says are gone.
     fn retain(&mut self, mut keep: impl FnMut(u64) -> bool) {
         self.boxes.retain(|id, _| keep(*id));
@@ -582,6 +595,15 @@ pub(crate) fn shift(window: WindowId, ids: &[u64], roots: &crate::tape::Roots, s
     BOUNDS.with(|cell| {
         if let Some(bounds) = cell.borrow_mut().get_mut(&window) {
             bounds.shift(ids, roots, shift);
+        }
+    });
+}
+
+/// A frame moved the content of a scroller in place: the boxes of the elements `ids` that the frame shown built are `shift` further.
+pub(crate) fn shift_built(window: WindowId, ids: &[u64], shift: Point<Pixels>) {
+    BOUNDS.with(|cell| {
+        if let Some(bounds) = cell.borrow_mut().get_mut(&window) {
+            bounds.shift_built(ids, shift);
         }
     });
 }

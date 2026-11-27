@@ -992,6 +992,8 @@ struct Deltas {
 struct Compared {
     all: bool,
     changed: Vec<u64>,
+    /// Which of `changed` are the scrolls of scrollers that are no list.
+    scroll_ids: std::ops::Range<usize>,
     scrolled: FxHashSet<u64>,
     scrolling: bool,
     scrolls: FxHashMap<u64, (u32, u32)>,
@@ -1903,6 +1905,7 @@ impl Retain {
             }
         }
 
+        let scroll_from = changed.len();
         let mut scrolled = FxHashSet::default();
         let scrolls = scroll_bits(sources.scrolls);
         let mut scrolling = false;
@@ -1919,6 +1922,7 @@ impl Retain {
             scrolled.insert(*id);
         }
         changed.extend(seen.scrolls.keys().filter(|id| !scrolls.contains_key(id)));
+        let scroll_ids = scroll_from..changed.len();
 
         let mut customs = FxHashMap::default();
         for (id, state) in &sources.customs {
@@ -1929,20 +1933,22 @@ impl Retain {
         }
         changed.extend(seen.customs.keys().filter(|id| !customs.contains_key(id)));
 
-        Compared { all, changed, scrolled, scrolling, scrolls, customs }
+        Compared { all, changed, scroll_ids, scrolled, scrolling, scrolls, customs }
     }
 
-    /// Whether something differs from the frame shown that a frame that only moves the rows of a list would
+    /// Whether something differs from the frame shown that a frame that only moves the content of a scroller would
     /// leave as it was: a source `compute_deltas` finds for a tick (a press, the focus, a selection, a custom
-    /// element, the scroll of a scroller that is no list: the list is not among `Sources::scrolls`), a
-    /// measurement, a link, a command or a hover restyled by paint that no frame has drawn. A peek, as `preview` is.
+    /// element), a measurement, a link, a command or a hover restyled by paint that no frame has drawn. The scroll of
+    /// a scroller is not one: gpui says which scroller moved, and whether the frame can be a move of its content
+    /// (`Window::note_scroll_moved`). A peek, as `preview` is.
     pub(crate) fn sources_changed(&self, sources: &Sources) -> bool {
         if !self.seen.known {
             return true;
         }
         let compared = self.compare_sources(sources, true);
+        let other_sources = compared.changed.len() - compared.scroll_ids.len();
         compared.all
-            || !compared.changed.is_empty()
+            || other_sources > 0
             || !sources.measured.is_empty()
             || !sources.links.is_empty()
             || !sources.commanded.is_empty()
@@ -8374,7 +8380,7 @@ mod tests {
         let mut page = Units::new();
         page.page(&[], None, None);
         page.page(&[], None, None);
-        assert!(!page.retain.sources_changed(&page.sources()), "nothing but time and the scroll of a list differs");
+        assert!(!page.retain.sources_changed(&page.sources()), "nothing but time and the scroll of a scroller differs");
 
         // The pointer is the classifier's: a hover chain that moved is no source here.
         let moved = [3, 2, 1];
@@ -8407,7 +8413,7 @@ mod tests {
         assert!(!page.retain.sources_changed(&page.sources()));
         page.scrolls.insert(2, gpui::ScrollHandle::new());
         page.scrolls[&2].set_offset(gpui::point(gpui::px(0.0), gpui::px(-40.0)));
-        assert!(page.retain.sources_changed(&page.sources()), "a scroller that is no list scrolled");
+        assert!(!page.retain.sources_changed(&page.sources()), "the scroll of a scroller is the classifier's");
     }
 
     #[test]
