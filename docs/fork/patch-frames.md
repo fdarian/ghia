@@ -235,16 +235,23 @@ of them arrives late). The input's measure was a keyless request, which made eve
   focus and the window going key are already in the planner's focus bits. Its measure is keyed (`request_keyed_measured_layout`,
   `TextEditorState::measure_key`: the shaped text, runs, sizes, rows, the font generation and the entity).
   `TextSystem::font_generation` is public in zed for the key.
-- **The caret is the clock's only.** `CustomElement::follows_clock` notes `Dynamic::Blink`, an own, paint-only kind, so a focused
-  input is a unit unless a layout animation also runs on it. The blink is a timer aimed at the end of the phase (`arm_blink`, from
-  the activity anchor on the executor's clock, not a 500 ms loop) that calls `Window::request_tick` instead of notifying, and the
-  caret quad is painted in both phases (in no colour while off) so a patch has the operations of the recording. An unfocused input,
-  or one in a window that is not key, has no source at all.
+- **The caret is the clock's only, and the window blinks it.** The editor paints it through `Window::paint_caret` with the
+  activity anchor and no phase of its own: a window with no native surface shows it as a layer of the compositor that blinks it,
+  or draws it lit and transparent in a present of its own, so a blink is no frame of the page at all ([editing.md](editing.md#painting-the-caret),
+  [frames-and-wakes.md](frames-and-wakes.md)). The rest of this entry is the fallback, for a caret `paint_caret` cannot give to
+  the window (it returns `true`: a composed window, a platform that cannot leave a quad out of a frame, an effect group or text
+  clip around it). `CustomElement::follows_clock` notes `Dynamic::Blink`, an own, paint-only kind, so a focused
+  input is a unit unless a layout animation also runs on it. The blink is a timer aimed at the end of the phase (`keep_blinking`,
+  from the activity anchor on the executor's clock, not a 500 ms loop) that calls `Window::request_tick` instead of notifying, and
+  `paint_caret` paints the caret in the phase it is in at paint time, in no colour while off, so a patch has the operations of the
+  recording. An unfocused input, or one in a window that is not key, has no source at all, and a caret the window blinks has no
+  timer and never sets `clock_due`.
 - **A tick of another loop does not build the input.** `CustomElement::clock_due` says whether what follows the clock changed since
   it was painted: the phase's timer sets it and the paint clears it. `Retain::between_changes` leaves an element whose only dynamic
   is `Blink` out of the touched set while it is not due.
-- **A caret nobody sees asks for no frame.** The timer is armed by the prepaint of the editor (`TextEditorState::keep_blinking`),
-  only while the window is key, the caret is shown and its box meets the content mask and the bounds of the editor; `render` only
+- **A caret nobody sees asks for no frame.** The timer is armed by the paint of the editor (`TextEditorState::keep_blinking`),
+  only while the window is key, the caret is shown, its box meets the content mask and the bounds of the editor (the prepaint
+  checks this) and `paint_caret` returned `true` or `caret_needs_ticks()` says the last presented frame had a caret to tick (a patch paints the editor outside the group around it); a paint that finds otherwise drops it (`stop_blinking`). `render` only
   notes the focus coming. An input scrolled back into view arms again in the frame that moves it.
 - **`<code-block>`, `<markdown>` and `<diff>` left `varies_with_time`.** Nothing else read it for custom elements.
 - **A virtual list and its rows left `varies_with_time` too (r52).** A `<virtual-list>` beside the input (the search box of a mail client) made the frame before it unsteady, so every blink was a whole frame that rebuilt the visible rows (2.4 ms in a `sample` profile). A list is painted as the frame that built it left it: its rows are measured in that frame, and a scroll, a new window of rows or an animation in a row is a source of its own (an animation in a row is `Outside`, since no unit holds it). Test: `animation-frame-work` "blinks in patched frames that build the input alone beside a virtual list".

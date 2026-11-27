@@ -1526,6 +1526,27 @@ impl TestGpuixRenderer {
         self.update_view(|_view, window, _cx| window.set_a11y_active_for_tests(active))
     }
 
+    /// Treats every caret as one the window cannot blink, as a composed window does: the caret is
+    /// painted in the phase it is in and its painter ticks. Tests of that fallback (the patch frames
+    /// of a blink) turn it on; with it off the window blinks the caret itself.
+    #[napi(js_name = "setPaintedCarets")]
+    pub fn set_painted_carets(&self, enabled: bool) -> Result<()> {
+        self.update_view(move |_view, window, _cx| window.force_painted_carets(enabled))
+    }
+
+    /// Whether the last presented frame shows a caret on the platform's layer, where the compositor
+    /// blinks it.
+    #[napi(js_name = "getCaretOnLayer")]
+    pub fn get_caret_on_layer(&self) -> Result<bool> {
+        self.update_view(|_view, window, _cx| window.caret_on_layer())
+    }
+
+    /// Whether the last presented frame shows a caret that its painter has to tick.
+    #[napi(js_name = "getCaretNeedsTicks")]
+    pub fn get_caret_needs_ticks(&self) -> Result<bool> {
+        self.update_view(|_view, window, _cx| window.caret_needs_ticks())
+    }
+
     /// How many subtrees the window has skipped as lying outside their clip, over its life: the
     /// work `getPaintedFrameCount` frames did not do. A test compares it before and after a frame.
     #[napi]
@@ -1575,13 +1596,13 @@ impl TestGpuixRenderer {
         if unflushed != Dirty::Clean {
             self.flush_for(unflushed)?;
         }
-        let window = self.window_call(|window, cx| {
+        let (window, now) = self.window_call(|window, cx| {
             crate::renderer::settle_pending_layout(window, cx);
             window.paint_if_dirty(cx);
-            window.window_handle().window_id()
+            (window.window_handle().window_id(), cx.background_executor().now())
         })?;
         let tree = self.tree.lock().unwrap();
-        read(&crate::editing::Reads { tree: &tree, window }).map_err(Error::from_reason)
+        read(&crate::editing::Reads { tree: &tree, window, now }).map_err(Error::from_reason)
     }
 
     /// [`Self::flush`] for the changes of a bounds read that was waiting on mutations.

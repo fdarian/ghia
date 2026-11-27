@@ -160,6 +160,8 @@ describeNative("a tick due in the draw of a scroll", { timeout: TIMEOUT }, () =>
   unverified("patches the tick of a caret that comes after a translate", () => {
     const { renderer, unmount } = open(true, true)
     try {
+      // Exercises the fallback: a caret the window cannot blink (composed window, effect group) is painted and ticked by the page.
+      renderer.setPaintedCarets(true)
       renderer.focusElement(renderer.findByTestId("field").id)
       renderer.dispatchNativeEvents()
       renderer.drawFrame()

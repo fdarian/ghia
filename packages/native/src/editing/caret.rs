@@ -1,26 +1,29 @@
 //! The caret of an editing host, as native paints it.
 //!
 //! The node selection says where it is (`node_selection::NodeSelection::caret_byte`); this is whether it
-//! is shown, and its blink. The paragraph that holds the caret paints it (`text::paint::SelectableText`),
-//! in both phases of the blink and in no colour while it is off, so that the operations of the paragraph
-//! are the same in both and a tick that paints it again is a patch. That paragraph's container is what the
-//! blink is noted on (`Retain::blinks`): a unit that a tick builds alone, as the editor of an `<input>` is.
-//! The clock is the one of the input, [`crate::caret`]; the state is the view's, as the input's is its
-//! editor's, and is solid again whenever the selection changes or the caret comes into view.
+//! is shown, and its blink. The paragraph that holds the caret paints it after its glyphs
+//! (`text::paint::SelectableText`) through `Window::paint_caret`, which blinks it: on a layer of the
+//! compositor, or lit and transparent in the frames of the window. Only when the window cannot (it says so
+//! as it paints) does this tick: the caret is painted in the phase it is in, in no colour while it is off,
+//! so that the operations of the paragraph are the same in both and a tick that paints it again is a patch.
+//! That paragraph's container is what the blink is noted on (`Retain::blinks`): a unit that a tick builds
+//! alone, as the editor of an `<input>` is. The clock is the one of the input, [`crate::caret`]; the state
+//! is the view's, as the input's is its editor's, and is solid again whenever the selection changes or the
+//! caret comes into view.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use gpui::{
-    canvas, div, fill, point, px, transparent_black, AnyElement, Bounds, Context, FocusHandle, Hsla, IntoElement, ParentElement, Pixels, SharedString, Styled, Task,
-    TextLayout, Window, WindowId,
+    canvas, div, point, px, until_phase_change, AnyElement, App, Bounds, Context, FocusHandle, Hsla, IntoElement, ParentElement, Pixels, SharedString, Styled, Task,
+    TextLayout, WeakEntity, Window, WindowId,
 };
 use web_time::Instant;
 
 use super::geometry::window_box;
 use crate::automation::window_point_from;
-use crate::caret::{caret_rect, caret_visible, until_phase_change, CARET_WIDTH};
+use crate::caret::{caret_rect, CARET_WIDTH};
 use crate::renderer::GpuixView;
 use crate::retain::Retain;
 use crate::retained_tree::RetainedTree;
@@ -38,27 +41,32 @@ pub struct EditingCaret {
     painted_shown: Cell<bool>,
     /// The caret changed phase after it was painted last: only a paint of it clears it.
     timer_due: Cell<bool>,
-    /// A task is waiting for the caret to change phase.
+    /// A task is waiting for the caret to change phase, which only a window that cannot blink it has.
     armed: Cell<bool>,
     task: RefCell<Option<Task<()>>>,
+    /// The view that says whether the caret is shown, which the task asks when it wakes.
+    view: RefCell<Option<WeakEntity<GpuixView>>>,
 }
 
 thread_local! {
-    /// By window: whether the last paint of the caret was in the phase that has a colour. Not in the
-    /// registered text with the rest of what it painted, since a replay of a paragraph puts back the
-    /// writes of the paint it was recorded from, which a tick since has changed.
-    static LIT: RefCell<HashMap<WindowId, bool>> = RefCell::new(HashMap::new());
+    /// By window: when the blink of the caret it last painted restarted. Not in the registered text with
+    /// the rest of what it painted, since a replay of a paragraph puts back the writes of the paint it was
+    /// recorded from, which a tick since has changed.
+    static ANCHOR: RefCell<HashMap<WindowId, Instant>> = RefCell::new(HashMap::new());
 }
 
-/// Whether `window` last painted its editing caret in the lit phase of its blink.
-pub fn painted_lit(window: WindowId) -> Option<bool> {
-    LIT.with(|lit| lit.borrow().get(&window).copied())
+/// Whether `window` paints its editing caret in the lit phase of its blink at `now`: the answer of the clock
+/// the window blinks it by, whether a layer of the compositor shows it or the frames do. `None` when it
+/// paints none.
+pub fn painted_lit(window: WindowId, now: Instant) -> Option<bool> {
+    let anchor = ANCHOR.with(|anchors| anchors.borrow().get(&window).copied())?;
+    Some(gpui::caret_visible(now.saturating_duration_since(anchor)))
 }
 
-fn note_lit(window: WindowId, lit: Option<bool>) {
-    LIT.with(|all| match lit {
-        Some(lit) => {
-            all.borrow_mut().insert(window, lit);
+fn note_anchor(window: WindowId, anchor: Option<Instant>) {
+    ANCHOR.with(|all| match anchor {
+        Some(anchor) => {
+            all.borrow_mut().insert(window, anchor);
         }
         None => {
             all.borrow_mut().remove(&window);
@@ -78,6 +86,7 @@ impl EditingCaret {
             timer_due: Cell::new(false),
             armed: Cell::new(false),
             task: RefCell::new(None),
+            view: RefCell::new(None),
         })
     }
 
@@ -88,7 +97,7 @@ impl EditingCaret {
         let moved = self.seen_generation.replace(generation) != generation;
         if moved {
             EMPTY_LINE.with(|painted| painted.borrow_mut().remove(&window));
-            note_lit(window, None);
+            note_anchor(window, None);
         }
         let came = shown && !self.was_shown.replace(shown);
         self.was_shown.set(shown);
@@ -103,15 +112,19 @@ impl EditingCaret {
         }
     }
 
-    fn elapsed_ms(&self, now: Instant) -> u64 {
-        let anchor = self.anchor.get().expect("sync starts the clock before anything is painted");
-        now.saturating_duration_since(anchor).as_millis() as u64
+    pub(crate) fn anchor(&self) -> Instant {
+        self.anchor.get().expect("sync starts the clock before anything is painted")
     }
 
     /// Whether the container `id` has to paint the caret again: its phase changed, or it painted it
     /// shown or hidden and the caret is the other now.
     pub fn due(&self, id: u64, shown: bool) -> bool {
         self.holder.get() == Some(id) && (self.timer_due.get() || self.painted_shown.get() != shown)
+    }
+
+    /// The window stopped blinking the caret: the container that paints it has to paint it again.
+    pub fn repaint(&self) {
+        self.timer_due.set(true);
     }
 
     pub fn blink_due(&self, shown: bool, window: &mut Window) -> bool {
@@ -124,17 +137,19 @@ impl EditingCaret {
         true
     }
 
-    /// Keeps a task waiting for the caret to change phase while it is shown, and none while it is not: a
-    /// caret nobody can see asks for no frame. The change is a tick of the window, see
+    /// Keeps a task waiting for the caret to change phase, for a caret the window cannot blink
+    /// (`Window::paint_caret` said so as it was painted): a caret nobody can see asks for no frame, and
+    /// neither does one the window blinks. The change is a tick of the window, see
     /// `CustomElement::follows_clock`.
-    pub fn keep_blinking(self: &Rc<Self>, window: &Window, cx: &mut Context<GpuixView>) {
+    fn keep_blinking(self: &Rc<Self>, window: &Window, cx: &App) {
         if self.armed.replace(true) {
             return;
         }
         let this: Weak<Self> = Rc::downgrade(self);
-        *self.task.borrow_mut() = Some(cx.spawn_in(window, async move |view, cx| loop {
+        *self.task.borrow_mut() = Some(window.spawn(cx, async move |cx| loop {
             let Some(caret) = this.upgrade() else { return };
-            let wait = until_phase_change(caret.elapsed_ms(cx.background_executor().now()));
+            let wait = until_phase_change(cx.background_executor().now().saturating_duration_since(caret.anchor()));
+            let view = caret.view.borrow().clone().expect("a caret that ticks was given its view by the build");
             drop(caret);
             cx.background_executor().timer(wait).await;
             let Some(caret) = this.upgrade() else { return };
@@ -143,6 +158,12 @@ impl EditingCaret {
                 return;
             }
         }));
+    }
+
+    /// The caret needs no tick: the window blinks it, or it is not shown.
+    fn stop_blinking(&self) {
+        self.armed.set(false);
+        self.task.borrow_mut().take();
     }
 }
 
@@ -156,34 +177,41 @@ pub struct CaretPaint {
 }
 
 impl CaretPaint {
-    /// Notes on the container being built that the caret blinks in it and, while it is shown, keeps the
-    /// clock running. Held shown or not: what makes it due is the focus coming or going, as well as the
-    /// clock.
-    pub fn follow_clock(&self, retain: &mut Retain, window: &Window, cx: &mut Context<GpuixView>) {
+    /// Notes on the container being built that the caret blinks in it, held shown or not: what makes it
+    /// due is the focus coming or going, as well as the clock of a window that cannot blink it.
+    pub fn follow_clock(&self, retain: &mut Retain, cx: &mut Context<GpuixView>) {
         retain.blinks();
-        if self.shown {
-            self.state.keep_blinking(window, cx);
-        }
+        *self.state.view.borrow_mut() = Some(cx.weak_entity());
     }
 
-    /// Paints the caret at `byte` of `layout`, as tall as its row, in no colour while it is off. Returns
-    /// where it is, in the space of the layout.
-    pub fn paint(&self, layout: &TextLayout, window: &mut Window, now: Instant) -> Option<Bounds<Pixels>> {
+    /// Notes that the paragraph paints the caret now, in the paint that registers its text, and says where
+    /// it is, in the space of the layout, as tall as its row. `None` when it is not shown. The caret is
+    /// painted by [`Self::paint`], after the glyphs.
+    pub fn locate(&self, layout: &TextLayout, window: &Window) -> Option<Bounds<Pixels>> {
         self.state.holder.set(Some(self.holder));
         self.state.painted_shown.set(self.shown);
         self.state.timer_due.set(false);
         let id = window.window_handle().window_id();
         if !self.shown {
-            note_lit(id, None);
+            note_anchor(id, None);
             return None;
         }
         let position = layout.position_for_index(self.byte)?;
         let row = layout.row_for_index(self.byte)?;
-        let rect = caret_rect(point(position.x, row.top), row.height);
-        let lit = caret_visible(self.state.elapsed_ms(now));
-        window.paint_quad(fill(rect, if lit { self.state.color } else { transparent_black() }));
-        note_lit(id, Some(lit));
-        Some(rect)
+        note_anchor(id, Some(self.state.anchor()));
+        Some(caret_rect(point(position.x, row.top), row.height))
+    }
+
+    /// Paints the caret `locate` found, above the glyphs. The window blinks it; when it cannot, this
+    /// paints it in the phase it is in and the caret ticks until it is painted again.
+    pub fn paint(&self, rect: Bounds<Pixels>, window: &mut Window, cx: &App) {
+        // A patch paints the paragraph alone, outside the effect group around it, so `paint_caret` does not
+        // always know that the window cannot blink the caret: what it presented says.
+        if window.paint_caret(rect, self.state.color, self.state.anchor()) || window.caret_needs_ticks() {
+            self.state.keep_blinking(window, cx);
+        } else {
+            self.state.stop_blinking();
+        }
     }
 }
 
@@ -256,7 +284,7 @@ pub fn empty_line(caret: CaretPaint, line: Option<AnyElement>) -> AnyElement {
         |_, _, _| (),
         move |bounds, _, window, cx| {
             let height = window.text_system().line_height(&window.text_style(), window.rem_size(), window.scale_factor());
-            caret.paint_empty_line(point(bounds.origin.x, bounds.origin.y), height, window, cx.background_executor().now());
+            caret.paint_empty_line(point(bounds.origin.x, bounds.origin.y), height, window, cx);
         },
     )
     .keeps_no_position()
@@ -281,22 +309,37 @@ pub fn painted_empty_line(window: WindowId) -> Option<Bounds<Pixels>> {
 }
 
 impl CaretPaint {
-    fn paint_empty_line(&self, origin: gpui::Point<Pixels>, height: Pixels, window: &mut Window, now: Instant) {
+    fn paint_empty_line(&self, origin: gpui::Point<Pixels>, height: Pixels, window: &mut Window, cx: &App) {
         self.state.holder.set(Some(self.holder));
         self.state.painted_shown.set(self.shown);
         self.state.timer_due.set(false);
         let id = window.window_handle().window_id();
         if !self.shown {
             EMPTY_LINE.with(|painted| painted.borrow_mut().remove(&id));
-            note_lit(id, None);
+            note_anchor(id, None);
             return;
         }
         let rect = caret_rect(origin, height);
-        let lit = caret_visible(self.state.elapsed_ms(now));
-        window.paint_quad(fill(rect, if lit { self.state.color } else { transparent_black() }));
+        self.paint(rect, window, cx);
         let matrix = window.transform();
         let Some(rect) = window_box(rect, |corner| window_point_from(&matrix, corner)) else { return };
         EMPTY_LINE.with(|painted| painted.borrow_mut().insert(id, rect.bounds()));
-        note_lit(id, Some(lit));
+        note_anchor(id, Some(self.state.anchor()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_repainted_caret_makes_the_container_that_painted_it_due() {
+        let caret = EditingCaret::new(gpui::black());
+        caret.holder.set(Some(7));
+        caret.painted_shown.set(true);
+        assert!(!caret.due(7, true));
+        caret.repaint();
+        assert!(caret.due(7, true));
+        assert!(!caret.due(8, true), "only the container that holds the caret");
     }
 }

@@ -828,7 +828,27 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         && cursor_hitboxes.is_none()
         && region_hitboxes.is_none()
         && press_focus.is_empty()
-        && !has_atomics;
+        && !has_atomics
+        && caret.is_none();
+    // The caret is painted above the glyphs, where a layer of the window shows it and a window that
+    // draws it itself does too, as in a browser.
+    let caret_above = caret.clone().map(|caret| {
+        let layout = layout.clone();
+        let mut canvas = canvas(
+            |_, _, _| (),
+            move |_, _, window, cx: &mut gpui::App| {
+                if window.visibility() == gpui::Visibility::Hidden {
+                    return;
+                }
+                if let Some(rect) = caret.locate(&layout, window) {
+                    caret.paint(rect, window, cx);
+                }
+            },
+        )
+        .keeps_no_position();
+        InPlace::new(&mut canvas).absolute().unlifted().size_full();
+        canvas
+    });
     let announced = highlight.clone().map(|source| (source, key.clone(), doc.clone(), text.clone()));
     let inline_boxes = std::rc::Rc::new(inline_boxes);
     let layout_of_boxes = layout.clone();
@@ -909,7 +929,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     ));
                 }
             }
-            let painted_caret = caret.as_ref().and_then(|caret| caret.paint(&layout, window, cx.background_executor().now()));
+            let painted_caret = caret.as_ref().and_then(|caret| caret.locate(&layout, window));
             if selectable {
                 let entry = RegEntry {
                     key: key.clone(),
@@ -972,6 +992,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         .child(underlay)
         .child(glyphs.into_any())
         .children(settled.map(settle_after_glyphs))
+        .children(caret_above)
         .children(decorations)
         .children(groups)
         .children(cursor_hitboxes)

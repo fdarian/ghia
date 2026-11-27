@@ -2038,7 +2038,7 @@ impl GpuixRenderer {
     fn read_painted_dom<R>(&self, read: impl FnOnce(&crate::editing::Reads<'_>) -> std::result::Result<R, String>) -> Result<Option<R>> {
         let Some(window) = self.paint_pending_changes()? else { return Ok(None) };
         let tree = self.tree.lock().unwrap();
-        read(&crate::editing::Reads { tree: &tree, window }).map(Some).map_err(Error::from_reason)
+        read(&crate::editing::Reads { tree: &tree, window, now: web_time::Instant::now() }).map(Some).map_err(Error::from_reason)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -6831,6 +6831,8 @@ pub(crate) struct GpuixView {
     pub(crate) tapes: crate::tape::Tapes,
     /// The caret of the editing host the node selection is in, see `editing::caret`.
     pub(crate) editing_caret: Rc<crate::editing::caret::EditingCaret>,
+    /// Whether the window has asked the page to blink a caret it blinked before, see `caret::hand_over`.
+    caret_handover: crate::caret::Handover,
     /// The press in an editing host that is down, see `editing::pointer`.
     pub(crate) editing_pointer: Rc<crate::editing::pointer::EditingPointerState>,
     /// Where the pointer is and what it is pressing.
@@ -7889,6 +7891,7 @@ impl GpuixView {
             },
             tapes: Default::default(),
             editing_caret: crate::editing::caret::EditingCaret::new(Theme::dark().caret),
+            caret_handover: Default::default(),
             editing_pointer: Default::default(),
             pointer: Rc::new(RefCell::new(crate::events::state::PointerState::with_requests(
                 pointer_requests,
@@ -10421,8 +10424,10 @@ impl GpuixView {
     }
 
     /// Whether the tick at `now` can be drawn by building the units that hold what changed, and
-    /// which they are, see `Retain::preview`. Changes nothing: what the frame takes when it reads
-    /// the measurements, links and commands of the animations stays for it.
+    /// which they are, see `Retain::preview`. Changes nothing of the animations: what the frame takes
+    /// when it reads the measurements, links and commands of the animations stays for it. It does
+    /// consume the hand-over of a caret from the window to the page (`caret::hand_over`) and marks
+    /// the owners of the caret due, so the frame that follows builds them.
     ///
     /// The motions run as `sync_motion_states` last left them: a patcher steps them before it
     /// builds a unit, which nothing here depends on, since a motion starts or retargets only
@@ -10444,7 +10449,9 @@ impl GpuixView {
     }
 
     /// Reads everything the build takes besides the tree, as the frame at `now` would find it (changing
-    /// nothing, see [`Self::preview_tick`]) and gives it to `read`, with whether a `layout` glide is in flight.
+    /// nothing of the animations, see [`Self::preview_tick`]) and gives it to `read`, with whether a
+    /// `layout` glide is in flight. The one change is the caret hand-over (`caret::hand_over`), which is
+    /// consumed here and sets the due flags of the caret's owners, as the frame would.
     pub(crate) fn with_sources<R>(
         &self,
         window: &gpui::Window,
@@ -10479,6 +10486,7 @@ impl GpuixView {
             .copied()
             .collect();
         let value_bindings = self.bindings_of(self.motion_value_key(&tree, window));
+        crate::caret::hand_over(&self.caret_handover, window, &self.custom_registry, &self.editing_caret);
         let caret_shown = crate::editing::caret::is_shown(&tree, &self.focus_handles, window);
         let sources = crate::retain::Sources {
             tree: &tree,
@@ -11096,6 +11104,7 @@ impl gpui::Render for GpuixView {
         if !window.is_layout_pass() {
             self.tapes.begin_rows();
         }
+        crate::caret::hand_over(&self.caret_handover, window, &self.custom_registry, &self.editing_caret);
         let caret_shown = self.sync_editing_caret(&tree, window, cx);
         self.retain.begin_frame(crate::retain::Sources {
             tree: &tree,
@@ -13903,7 +13912,7 @@ fn build_plan(
                 let line = matches!(child, crate::text::inline::Child::BlankLine).then(crate::editing::caret::blank_line);
                 content_elements.push(match caret {
                     Some(caret) => {
-                        caret.follow_clock(&mut ctx.retain, window, cx);
+                        caret.follow_clock(&mut ctx.retain, cx);
                         crate::editing::caret::empty_line(caret, line)
                     }
                     None => line.unwrap_or_else(|| gpui::div().into_any_element()),
@@ -14067,9 +14076,9 @@ fn paragraph_content(
     let node_wash: Vec<std::ops::Range<usize>> = ctx.tree.node_selection.wash_range(paragraph).into_iter().collect();
     let caret = crate::editing::caret::held_by(&ctx.editing_caret, ctx.tree, ctx.focus_handles, paragraph, window);
     if let Some(caret) = &caret {
-        caret.follow_clock(&mut ctx.retain, window, cx);
+        caret.follow_clock(&mut ctx.retain, cx);
     }
-    ctx.retain.digest(|| format!("{} {:?} {node_wash:?} {:?}", paragraph.text, styles.runs, caret.as_ref().map(|caret| (caret.byte, caret.shown))));
+    ctx.retain.digest(|| format!("{} {:?} {node_wash:?} {:?}", paragraph.text, styles.runs, caret.as_ref().map(|caret| (caret.byte, caret.shown, caret.state.anchor()))));
     // A box in the paragraph, or the paragraph being inline content of a box, puts the texts around
     // and inside the boxes on one line for copy.
     let line = ctx

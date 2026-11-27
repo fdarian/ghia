@@ -386,6 +386,9 @@ interface NativeTestRendererApi
   getRegistrySlots(): number[]
   getCulledSubtreeCount(): number
   setA11yActive(active: boolean): void
+  setPaintedCarets(enabled: boolean): void
+  getCaretOnLayer(): boolean
+  getCaretNeedsTicks(): boolean
   setInlineDraws(enabled: boolean): void
   setHoverResyncByFrame(byFrame: boolean): void
   drawFrame(): void
@@ -1636,6 +1639,25 @@ export class TestRenderer implements NativeRenderer {
    *  or not. Without one no accessibility tree is built. */
   setA11yActive(active: boolean): void {
     this.native.setA11yActive(active)
+  }
+
+  /** Treats every caret as one the window cannot blink, as a composed window does (a webview or a
+   *  native view, an effect group around the caret): the caret is painted in the phase it is in and
+   *  its painter ticks, a patched frame at each change of phase. Without it the window blinks the
+   *  caret itself, on a layer of the compositor or in presents of its own, and the page paints no
+   *  frame for it. A test of the patch frames of a blink turns it on. */
+  setPaintedCarets(enabled: boolean): void {
+    this.native.setPaintedCarets(enabled)
+  }
+
+  /** Whether the last presented frame shows a caret on the compositor's layer. */
+  getCaretOnLayer(): boolean {
+    return this.native.getCaretOnLayer()
+  }
+
+  /** Whether the last presented frame shows a caret that its painter has to tick. */
+  getCaretNeedsTicks(): boolean {
+    return this.native.getCaretNeedsTicks()
   }
 
   /** Subtrees the window has skipped as lying outside their clip, over its

@@ -163,7 +163,7 @@ pub struct PaintedNodeSelection {
 
 /// What the last painted frame drew for the node selection, in paint order: read from the texts the
 /// frame registered, so a replay that kept a stale wash or caret shows here as it does on screen.
-pub fn painted(window: WindowId) -> PaintedNodeSelection {
+pub fn painted(window: WindowId, now: web_time::Instant) -> PaintedNodeSelection {
     let utf16 = |text: &str, byte: usize| text[..byte.min(text.len())].encode_utf16().count() as f64;
     let entries = crate::text::paint::node_washed(window);
     let washes = entries
@@ -181,7 +181,7 @@ pub fn painted(window: WindowId) -> PaintedNodeSelection {
                 .collect::<Vec<_>>()
         })
         .collect();
-    let lit = super::caret::painted_lit(window);
+    let lit = super::caret::painted_lit(window, now);
     let caret = entries
         .iter()
         .find_map(|entry| Some(PaintedNodeCaret { key: entry.key.to_string(), rect: window_rect(entry, entry.caret?)?, lit: lit? }))
