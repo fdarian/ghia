@@ -13,7 +13,7 @@ const renderer = new GpuixRenderer(() => {})
 renderer.init({ show: false, focus: false })
 if (mode === "slow") renderer.setTickDelay(25)
 
-// The first tick is synchronous and includes window setup, so timing starts after it.
+// The first tick runs as its own task and includes window setup, so timing starts after it.
 let startedAt = performance.now()
 let ticks = 0
 let firstTickDone = false
@@ -55,6 +55,7 @@ const host = {
 }
 
 startFrameLoop(host)
+await new Promise((resolve) => setImmediate(resolve))
 startedAt = performance.now()
 lastTimeoutAt = startedAt
 ticks = 0

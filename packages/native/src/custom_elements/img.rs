@@ -280,18 +280,74 @@ fn http_image_uri(src: &str) -> Option<gpui::SharedUri> {
     (src.len() > scheme_end + 3).then(|| gpui::SharedUri::from(src.to_string()))
 }
 
+/// The GPUI `HttpClient` that builds its `ReqwestClient` on the first request.
+///
+/// `ReqwestClient::user_agent` loads the macOS trust store (about 150
+/// `SecTrustSettings` calls, ~76 ms), and `init` runs on the main thread
+/// before the first window exists. Building at the first fetch moves that cost
+/// to GPUI's background executor, and an app with no http(s) image never pays
+/// it. Don't build the client in `init`.
+#[cfg(not(target_family = "wasm"))]
+struct LazyHttpClient {
+    client: std::sync::Arc<std::sync::OnceLock<Result<reqwest_client::ReqwestClient, String>>>,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl LazyHttpClient {
+    fn new() -> Self {
+        Self {
+            client: std::sync::Arc::new(std::sync::OnceLock::new()),
+        }
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn built_client(
+    cell: &std::sync::OnceLock<Result<reqwest_client::ReqwestClient, String>>,
+) -> anyhow::Result<&reqwest_client::ReqwestClient> {
+    cell.get_or_init(|| {
+        reqwest_client::ReqwestClient::user_agent("gpuix").map_err(|error| {
+            log::error!(
+                "GPUIX HTTP client failed to start; <img src=\"http…\"> will not load: {error:#}"
+            );
+            format!("{error:#}")
+        })
+    })
+    .as_ref()
+    .map_err(|error| anyhow::anyhow!("GPUIX HTTP client failed to start: {error}"))
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl http_client::HttpClient for LazyHttpClient {
+    // `ReqwestClient::user_agent` sets the header as a default header on the
+    // reqwest client and reports neither of these, so they stay `None` here.
+    fn user_agent(&self) -> Option<&http_client::http::HeaderValue> {
+        None
+    }
+
+    fn proxy(&self) -> Option<&http_client::Url> {
+        None
+    }
+
+    fn send(
+        &self,
+        req: http_client::http::Request<http_client::AsyncBody>,
+    ) -> futures::future::BoxFuture<
+        'static,
+        anyhow::Result<http_client::Response<http_client::AsyncBody>>,
+    > {
+        let cell = self.client.clone();
+        Box::pin(async move { built_client(&cell)?.send(req).await })
+    }
+}
+
 /// Install the GPUI HTTP client so `<img src="https://…">` can fetch.
 ///
 /// Web already gets `fetch` from `gpui_platform::single_threaded_web`. Desktop
 /// Application defaults to `NullHttpClient`, which fails every URI load.
 pub fn init(cx: &mut gpui::App) {
     #[cfg(not(target_family = "wasm"))]
-    match reqwest_client::ReqwestClient::user_agent("gpuix") {
-        Ok(client) => cx.set_http_client(std::sync::Arc::new(client)),
-        Err(error) => log::error!(
-            "GPUIX HTTP client failed to start; <img src=\"http…\"> will not load: {error:#}"
-        ),
-    }
+    cx.set_http_client(std::sync::Arc::new(LazyHttpClient::new()));
     #[cfg(target_family = "wasm")]
     let _ = cx;
 }
@@ -1118,5 +1174,47 @@ mod drawn_size_tests {
     #[test]
     fn a_bitmap_cut_down_to_the_texture_limit_fills_the_box() {
         assert_eq!(drawn((8192, 4096), (5000.0, 5000.0), 2.0), (5000.0, 2500.0));
+    }
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod http_client_tests {
+    #[test]
+    fn the_http_client_is_built_on_the_first_request_not_at_init() {
+        use http_client::HttpClient as _;
+        use std::io::{Read, Write};
+
+        let client = super::LazyHttpClient::new();
+        assert!(client.client.get().is_none());
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let read = stream.read(&mut request).unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 4\r\nconnection: close\r\n\r\nbody")
+                .unwrap();
+            String::from_utf8_lossy(&request[..read]).to_lowercase()
+        });
+
+        let bytes = futures::executor::block_on(async {
+            use futures::AsyncReadExt as _;
+            let mut response = client
+                .get(
+                    &format!("http://127.0.0.1:{port}/a.png"),
+                    http_client::AsyncBody::default(),
+                    true,
+                )
+                .await
+                .unwrap();
+            let mut bytes = Vec::new();
+            response.body_mut().read_to_end(&mut bytes).await.unwrap();
+            bytes
+        });
+        assert_eq!(bytes, b"body");
+        assert!(client.client.get().is_some());
+        assert!(server.join().unwrap().contains("user-agent: gpuix"));
     }
 }

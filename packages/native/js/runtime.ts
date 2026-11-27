@@ -221,7 +221,10 @@ export function startFrameLoop(
   }
   const frameWake = options.frameMs === undefined &&
     renderer.setFrameWakeCallback?.(wake) === true
-  loop()
+  // The first tick is a task of its own, after the code that follows startFrameLoop() and the
+  // microtasks the mount queued (a promise-based positioner, an editor's commit), as a browser
+  // paints after the task that built the page and its microtask checkpoint.
+  wake()
   return { stop }
 }
 
