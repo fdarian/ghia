@@ -705,7 +705,9 @@ drew.
 
 ## Startup order
 
-`render()` (`@ghia/solid`, `@ghia/react`) mounts the tree and then starts the frame loop, so the first presented frame has content. The loop's first `tick()` draws the window; started before the mount it presented an empty window and the content a frame later (about 50 ms on the scratch app, measured with the window-visible marks of `ghia-startup-2026-11-27`). The mount does not need the loop: it is synchronous.
+`render()` (`@ghia/solid`, `@ghia/react`) mounts the tree and then starts the frame loop, so the first presented frame has content. The loop's first `tick()` draws the window; started before the mount it presented an empty window and the content a frame later (about 50 ms on the scratch app, measured with the window-visible marks of `ghia-startup-2026-11-27`). The mount does not need the loop: it is synchronous. The loop is started in a `finally` around the mount, so a mount that throws still leaves the opened window ticking.
+
+`startFrameLoop` does not tick inline: its first tick is its own task (a `setImmediate` behind the `scheduledFrame` guard, the one a wake uses). It runs after the mount, after the code that follows `render()`, and after the microtasks the mount queued (an async `onMount`, a promise-based floating-ui position, Lexical's microtask commit), so all of them, and a mutation made right after `render()` returns, land in the first presented frame. A browser paints after the task that built the page and its microtask checkpoint; `scheduleInputFrame` follows the same rule.
 
 Nothing slow goes before the window on the main thread. The `<img>` HTTP client (`custom_elements::img::init`) is a `LazyHttpClient` that builds its `ReqwestClient` inside the first http(s) fetch, on GPUI's background executor: `reqwest` loads the macOS trust store when it builds a client (about 150 `SecTrustSettings` calls, ~76 ms), which used to run in the did-finish-launching callback before the window existed. An app with no http(s) image never builds it. Its user agent (`gpuix`) and proxy handling are those of `ReqwestClient::user_agent`.
 
@@ -718,9 +720,10 @@ Nothing slow goes before the window on the main thread. The `<img>` HTTP client 
 
 ## Tests
 
-- gpuix `packages/native/js/__tests__/frame-loop.test.ts` (10) runs the loop against a fake renderer: the tick at start
-  and on every wake, teardown, termination, tick errors, and timer polling. An idle wake loop ticks once at start and then
-  never, and ticks once per wake and not in between. `frame-loop-yields.test.ts` (2) runs the real loop against a hidden
+- gpuix `packages/native/js/__tests__/frame-loop.test.ts` runs the loop against a fake renderer: the first tick as its own
+  task (after the code that follows `startFrameLoop` and the microtasks queued before it, in the same frame as a mutation
+  made right after the call) and a tick on every wake, teardown, termination, tick errors, and timer polling. An idle wake
+  loop ticks once at start and then never, and ticks once per wake and not in between. `frame-loop-yields.test.ts` (2) runs the real loop against a hidden
   window with synthetic wakes from a Rust thread (`simulateFrameWakes`, `setTickDelay`, test-support builds only) and
   checks that timers and file reads keep running when every frame outlasts a vsync.
 - `packages/native/examples/quit-e2e` ([testing.md](testing.md#the-quit-e2e)) asks a real idle app to quit four ways and checks

@@ -438,15 +438,20 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     tabNavigation,
     keyboardFocusDim,
   }
-  const root = mountRoot({ slot, node, options: slot.lastOptions })
   // After the mount, not before: the loop's first tick draws the window, and
-  // started earlier it presents an empty frame (~50 ms) before the content.
-  if (!injected && host instanceof GpuixRenderer && !slot.loop) {
-    slot.loop = startFrameLoop(host, {
-      onTerminated: () => {
-        if (typeof process !== "undefined") process.exit(0)
-      },
-    })
+  // started earlier it presents an empty frame (~50 ms) before the content. In a
+  // `finally` so a mount that throws still leaves the opened window ticking.
+  let root: Root
+  try {
+    root = mountRoot({ slot, node, options: slot.lastOptions })
+  } finally {
+    if (!injected && host instanceof GpuixRenderer && !slot.loop) {
+      slot.loop = startFrameLoop(host, {
+        onTerminated: () => {
+          if (typeof process !== "undefined") process.exit(0)
+        },
+      })
+    }
   }
   console.log(remount ? "[gpuix] remount complete" : "[gpuix] mount complete")
   return root

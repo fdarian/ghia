@@ -101,17 +101,21 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     )
   }
   if (debugFrameOverlay) host.renderer.setDebugFrameOverlay?.(debugFrameOverlay)
-  host.root.render(code)
   // After the mount, not before: the loop's first tick draws the window, and
-  // started earlier it presents an empty frame (~50 ms) before the content.
-  if (!injected && host.renderer instanceof GpuixRenderer && !host.loop) {
-    host.loop = startFrameLoop(host.renderer, {
-      ...frameLoop,
-      onTerminated: () => {
-        if (typeof process !== "undefined") process.exit(0)
-      },
-      onError: (error) => console.error("[gpuix-solid] frame error", error),
-    })
+  // started earlier it presents an empty frame (~50 ms) before the content. In a
+  // `finally` so a mount that throws still leaves the opened window ticking.
+  try {
+    host.root.render(code)
+  } finally {
+    if (!injected && host.renderer instanceof GpuixRenderer && !host.loop) {
+      host.loop = startFrameLoop(host.renderer, {
+        ...frameLoop,
+        onTerminated: () => {
+          if (typeof process !== "undefined") process.exit(0)
+        },
+        onError: (error) => console.error("[gpuix-solid] frame error", error),
+      })
+    }
   }
   return host.root
 }
