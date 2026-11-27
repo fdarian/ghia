@@ -7,7 +7,7 @@
 //! (`isWindowClosed`) because the App goes on running for the windows that are left.
 //!
 //! A window that closed takes the state that is keyed by it: the per-window maps of host element
-//! ids (`window_map`) and the sync handler route.
+//! ids (`window_map`). Its sync handler route goes too, once GPUI has dropped the window.
 
 use std::cell::{Cell, RefCell};
 
@@ -44,7 +44,7 @@ pub(crate) fn note_app_ended() {
     ENDED.set(true);
     let open: Vec<WindowId> = OPEN.with(|open| open.borrow().iter().copied().collect());
     for window in open {
-        closed(window);
+        forget(window);
     }
 }
 
@@ -83,7 +83,7 @@ pub(crate) fn update_error_in(cx: &gpui::App, window: WindowId, message: String)
     if is_listed(cx, window) {
         return Error::from_reason(WINDOW_BUSY);
     }
-    closed(window);
+    forget(window);
     Error::from_reason(message)
 }
 
@@ -228,7 +228,8 @@ pub(crate) fn observe_closes(cx: &mut gpui::App) {
     .detach();
 }
 
-/// A window closed: it is no longer open, and nothing is kept for it.
+/// A window closed: it is no longer open and its per-window state goes. It keeps its sync handler binding, which the
+/// caller removes: `observe_closes` does so after GPUI has dropped the window, `forget` at once.
 pub(crate) fn closed(window: WindowId) {
     OPEN.with(|open| open.borrow_mut().remove(&window));
     crate::renderer::forget_scroll_state(window);
@@ -243,6 +244,12 @@ pub(crate) fn closed(window: WindowId) {
     crate::text::inline_focus::forget_window(window);
     crate::editing::caret::forget_window(window);
     crate::automation::drop_window(window);
+}
+
+/// Closes a window GPUI already dropped, so nothing of it is left to drop and its sync handler binding goes at once.
+pub(crate) fn forget(window: WindowId) {
+    closed(window);
+    crate::events::sync_dispatch::unbind_window(window);
 }
 
 #[cfg(test)]

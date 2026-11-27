@@ -271,7 +271,7 @@ fn tear_down_window(cx: &mut gpui::VisualTestAppContext, state: TestWindow, run_
     close_test_window(cx, state.window, run_main_queue);
     #[cfg(not(target_os = "macos"))]
     let _ = run_main_queue;
-    crate::window_set::closed(state.window.window_id());
+    crate::window_set::forget(state.window.window_id());
 }
 
 /// Closes the macOS window of a test context while its app is alive.
