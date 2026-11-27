@@ -88,15 +88,6 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
     keyboardFocusDim,
     onUncaughtError,
   })
-  if (!injected && host.renderer instanceof GpuixRenderer && !host.loop) {
-    host.loop = startFrameLoop(host.renderer, {
-      ...frameLoop,
-      onTerminated: () => {
-        if (typeof process !== "undefined") process.exit(0)
-      },
-      onError: (error) => console.error("[gpuix-solid] frame error", error),
-    })
-  }
   if (
     isWebBuild &&
     host.renderer instanceof GpuixRenderer &&
@@ -111,6 +102,17 @@ export function render(code: () => JSX.Element, options: RenderOptions = {}): Ro
   }
   if (debugFrameOverlay) host.renderer.setDebugFrameOverlay?.(debugFrameOverlay)
   host.root.render(code)
+  // After the mount, not before: the loop's first tick draws the window, and
+  // started earlier it presents an empty frame (~50 ms) before the content.
+  if (!injected && host.renderer instanceof GpuixRenderer && !host.loop) {
+    host.loop = startFrameLoop(host.renderer, {
+      ...frameLoop,
+      onTerminated: () => {
+        if (typeof process !== "undefined") process.exit(0)
+      },
+      onError: (error) => console.error("[gpuix-solid] frame error", error),
+    })
+  }
   return host.root
 }
 

@@ -415,13 +415,6 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     throw new Error("GPUIX renderer is not initialized")
   }
   installRuntimeErrorHandlers()
-  if (!injected && host instanceof GpuixRenderer && !slot.loop) {
-    slot.loop = startFrameLoop(host, {
-      onTerminated: () => {
-        if (typeof process !== "undefined") process.exit(0)
-      },
-    })
-  }
   if (
     isWebBuild &&
     host instanceof GpuixRenderer &&
@@ -446,6 +439,15 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     keyboardFocusDim,
   }
   const root = mountRoot({ slot, node, options: slot.lastOptions })
+  // After the mount, not before: the loop's first tick draws the window, and
+  // started earlier it presents an empty frame (~50 ms) before the content.
+  if (!injected && host instanceof GpuixRenderer && !slot.loop) {
+    slot.loop = startFrameLoop(host, {
+      onTerminated: () => {
+        if (typeof process !== "undefined") process.exit(0)
+      },
+    })
+  }
   console.log(remount ? "[gpuix] remount complete" : "[gpuix] mount complete")
   return root
 }
