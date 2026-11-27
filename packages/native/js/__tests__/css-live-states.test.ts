@@ -235,4 +235,46 @@ describe.skipIf(!hasNativeTestRenderer)("pointer and focus states outside the su
     expect(renderer.getBuildCounters().elementsRematched).toBe(0)
     renderer.dispose()
   })
+  it("tells the sheets about a focus requested in the commit that mounts the element", () => {
+    const renderer = new TestRenderer({
+      width: 400,
+      height: 400,
+      dispatchEvent: () => {},
+      dispatchSyncEvent: () => ({ defaultPrevented: false, propagationStopped: false }),
+    })
+    renderer.clockPause()
+    renderer.setInlineDraws(false)
+    renderer.applyBatch(
+      encodeWireBatchForTest([
+        ["createElement", 1, "div"],
+        ["setRoot", 1],
+        ["setStyleSheet", 900, ".form:focus-within .label { opacity: 0.5 }"],
+        ["setAdoptedStyleSheets", [900]],
+        ...element(10, 1, "div", "form", sized(10, 200, 60)),
+        ...element(11, 10, "input", "field", [...sized(11, 100, 20), ...focusable(11)]),
+        ...element(12, 10, "div", "label", sized(12, 100, 20)),
+      ])
+    )
+    // The same commit: the handle of the input does not exist until the frame that draws it.
+    expect(renderer.focusElement(11)).toBe(true)
+    renderer.drawFrame()
+    expect(opacity(renderer, 12), "the first frame already has the focus").toBe(0.5)
+    renderer.dispose()
+  })
+
+  it("takes the focus state back from a focused control that became disabled", () => {
+    const renderer = mount(".menu:focus-within .item { opacity: 0.6 }", [
+      ...element(20, 1, "div", "menu", sized(20, 200, 60)),
+      ...element(21, 20, "input", "field", sized(21, 100, 20)),
+      ...element(22, 20, "div", "item", sized(22, 100, 20)),
+    ])
+    focus(renderer, 21)
+    expect(opacity(renderer, 22)).toBe(0.6)
+    renderer.setInlineDraws(false)
+    renderer.applyBatch(encodeWireBatchForTest([["setCustomProp", 21, "disabled", true]]))
+    renderer.drawFrame()
+    expect(opacity(renderer, 22), "a disabled control is no longer focused").toBeUndefined()
+    expect(renderer.getRetainMismatches()).toEqual([])
+    renderer.dispose()
+  })
 })

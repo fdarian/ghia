@@ -10669,18 +10669,21 @@ impl gpui::Render for GpuixView {
             self.pending_focus_element = Some(PendingFocus::new(id, window, cx));
         }
 
-        self.sync_live_states(window);
-
         // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.
         let tree_arc = self.tree.clone();
+        {
+            // Before the live states: a `focus()` requested in the commit that made the element and the
+            // blur of a control that lost focusability land here, and the sheets must read the result.
+            let tree = tree_arc.lock().unwrap();
+            self.sync_focus_handles(&tree, window, cx);
+        }
+        self.sync_live_states(window);
+
         let tree = tree_arc.lock().unwrap();
         self.keyframes.set_sheet(&tree.sheets.keyframes);
         let callback = self.event_callback.clone();
         // What this build reports of the elements is read from the tree as it stands.
         tree.relevance.note_transforms_captured();
-
-        // Sync focus handles before building elements.
-        self.sync_focus_handles(&tree, window, cx);
 
         // Ensure custom element instances are destroyed when their IDs disappear.
         self.custom_registry

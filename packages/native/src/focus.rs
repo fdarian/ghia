@@ -960,7 +960,9 @@ impl GpuixView {
     /// outside their subject (`.menu:focus-within .item`, `.peer:focus ~ .y`). It runs at the start
     /// of a build, before anything reads the tree, so the elements it restyles are drawn in this
     /// frame; the pointer is told as it moves (`listeners::sync_live_pointer`), and the focus is only
-    /// known to have moved when the build notices it. A document with no such selector pays one check.
+    /// known to have moved when the build notices it. It runs after `sync_focus_handles`, which is
+    /// what applies a pending `focus()` and the blur of a control that lost focusability, so the
+    /// chain it reads is the one this frame draws. A document with no such selector pays one check.
     pub(crate) fn sync_live_states(&mut self, window: &gpui::Window) {
         let tree_arc = self.tree.clone();
         let mut tree = tree_arc.lock().unwrap();
