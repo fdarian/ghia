@@ -10106,8 +10106,10 @@ impl GpuixView {
     }
 
     /// Whether the tick at `now` can be drawn by building the units that hold what changed, and
-    /// which they are, see `Retain::preview`. Changes nothing: what the frame takes when it reads
-    /// the measurements, links and commands of the animations stays for it.
+    /// which they are, see `Retain::preview`. Changes nothing of the animations: what the frame takes
+    /// when it reads the measurements, links and commands of the animations stays for it. It does
+    /// consume the hand-over of a caret from the window to the page (`caret::hand_over`) and marks
+    /// the owners of the caret due, so the frame that follows builds them.
     ///
     /// The motions run as `sync_motion_states` last left them: a patcher steps them before it
     /// builds a unit, which nothing here depends on, since a motion starts or retargets only
@@ -10127,7 +10129,9 @@ impl GpuixView {
     }
 
     /// Reads everything the build takes besides the tree, as the frame at `now` would find it (changing
-    /// nothing, see [`Self::preview_tick`]) and gives it to `read`, with whether a `layout` glide is in flight.
+    /// nothing of the animations, see [`Self::preview_tick`]) and gives it to `read`, with whether a
+    /// `layout` glide is in flight. The one change is the caret hand-over (`caret::hand_over`), which is
+    /// consumed here and sets the due flags of the caret's owners, as the frame would.
     pub(crate) fn with_sources<R>(
         &self,
         window: &gpui::Window,

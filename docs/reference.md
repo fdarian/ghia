@@ -4468,13 +4468,14 @@ The focused caret stays solid during edits and then blinks every 500ms while
 idle. The window blinks it, with no frame of the page. On macOS the caret is a layer
 that the system's compositor animates (a blink costs no GPU work and no JS wake)
 unless the window has a native view (`<webview>`, `<nativeview>`), the caret is in an
-effect group, a text clip or under a transform or an opacity below 1, a rounded
+effect group (an opacity below 1 always makes one), a text clip or under a transform
+beyond a translation (a translate keeps it on the layer), a rounded
 corner of its clip cuts it, or something drawn after it overlaps it. Whatever is
 drawn after it counts by its reach: a box, a native view, and an effect group (an
 `opacity` below 1 or a `filter` that makes one) by its clip grown by what its
 filters spread, so an unrelated group elsewhere on the page keeps it on the layer and
 one whose blur reaches it does not. Off the layer, the window draws a caret under a
-transform, an opacity or something that overlaps it lit or dark with a present of its
+transform beyond a translation or something that overlaps it lit or dark with a present of its
 own that draws nothing else. Only a caret in an effect group, a text clip or a window
 with a native view is repainted by the page at each phase (a tick that repaints only
 the input, and only when the caret changes phase, so a tick of an animation
