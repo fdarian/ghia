@@ -5544,9 +5544,11 @@ browser (`@solidjs/router`, TanStack Router, React Router) runs unchanged on the
   where a name that is a member (`getItem`, `length`) reads as the member. `setItem` throws `QuotaExceededError` when the keys and values
   would hold more than 5 MiB of UTF-16 code units (5 * 1024 * 1024).
 - **`localStorage`** is the same `Storage`, kept in `~/Library/Application Support/<appId>/Local Storage/localStorage.json`.
-  The file is read when `localStorage` is first used and written whole after every change (to a temporary file that is renamed
-  over it, synchronously, since the API is), so a crash leaves the old content or the new. A change that cannot be written
-  throws its error and is undone; a file that is not a JSON object of strings throws, naming the file. There is one file per
+  The file is read when `localStorage` is first used. A change updates memory at once and the file is written whole (to a
+  temporary file that is fsynced and renamed over it) once for a burst of changes, from a task the first one queues, as a
+  browser persists storage after the call returns; the process exit and the close of the last window write what is still
+  waiting, so a crash leaves the old content or the new and a quit loses nothing. A write that fails is logged and tried again by
+  the next change or the exit flush; a file that is not a JSON object of strings throws, naming the file. There is one file per
   app id and no `storage` event: Ghia has one document. Two processes with the same app id overwrite each other.
 - **The app id** is the `appId` option of `ghia()` (a directory name: no slash), and by default the `name` of the
   `package.json` in the Vite root (`@scope/app` is `scope-app`). `ghia dev` and a built app (`ghia build`, compiled or not)

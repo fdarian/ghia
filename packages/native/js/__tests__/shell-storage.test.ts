@@ -7,6 +7,7 @@ import {
   APP_ID_KEY,
   createFileStorage,
   createMemoryStorage,
+  flushStorage,
   localStoragePath,
   STORAGE_QUOTA,
   Storage,
@@ -100,7 +101,9 @@ describe("a file-backed Storage", () => {
     rmSync(directory, { recursive: true, force: true })
   })
 
-  it("persists every change and loads it again", () => {
+  const afterTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+  it("persists every change after the task and loads it again", async () => {
     const path = localStoragePath(directory, "my-app")
     expect(path).toBe(join(directory, "Library", "Application Support", "my-app", "Local Storage", "localStorage.json"))
     const first = createFileStorage(path)
@@ -108,13 +111,53 @@ describe("a file-backed Storage", () => {
     first.setItem("a/b", "c")
     first.setItem("gone", "x")
     first.removeItem("gone")
+    expect(existsSync(path)).toBe(false)
+    await afterTask()
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ theme: "dark", "a/b": "c" })
     const second = createFileStorage(path)
     expect(second.getItem("theme")).toBe("dark")
     expect(second.length).toBe(2)
     second.clear()
+    await afterTask()
     expect(createFileStorage(path).length).toBe(0)
     expect(readdirSync(join(path, ".."))).toEqual(["localStorage.json"])
+  })
+
+  it("writes once for any number of changes in one task, and again for a later one", async () => {
+    const fs = process.getBuiltinModule("node:fs") as typeof import("node:fs")
+    const rename = vi.spyOn(fs, "renameSync")
+    const fsync = vi.spyOn(fs, "fsyncSync")
+    try {
+      const storage = createFileStorage(join(directory, "burst", "localStorage.json"))
+      for (let at = 0; at < 100; at += 1) storage.setItem(`k${at}`, `v${at}`)
+      expect(storage.length).toBe(100)
+      expect(storage.getItem("k99")).toBe("v99")
+      expect(rename).toHaveBeenCalledTimes(0)
+      await afterTask()
+      expect(rename).toHaveBeenCalledTimes(1)
+      expect(fsync).toHaveBeenCalledTimes(1)
+      await afterTask()
+      expect(rename).toHaveBeenCalledTimes(1)
+      storage.setItem("later", "1")
+      await afterTask()
+      expect(rename).toHaveBeenCalledTimes(2)
+      expect(Object.keys(JSON.parse(readFileSync(join(directory, "burst", "localStorage.json"), "utf8")))).toHaveLength(101)
+    } finally {
+      rename.mockRestore()
+      fsync.mockRestore()
+    }
+  })
+
+  it("flushStorage writes what is waiting, before the task and so on exit, and the exit hook is flushStorage", () => {
+    const on = vi.spyOn(process, "on")
+    const path = join(directory, "exit", "localStorage.json")
+    const storage = createFileStorage(path)
+    on.mockRestore()
+    storage.setItem("unsaved", "1")
+    expect(existsSync(path)).toBe(false)
+    flushStorage()
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ unsaved: "1" })
+    expect(process.listeners("exit")).toContain(flushStorage)
   })
 
   it("starts empty without a file and rejects one that is not a JSON object of strings", () => {
@@ -130,13 +173,14 @@ describe("a file-backed Storage", () => {
     expect(() => createFileStorage(path)).toThrow(/object of strings/)
   })
 
-  it("flushes the temporary file to disk before it renames it over the file", () => {
+  it("flushes the temporary file to disk before it renames it over the file", async () => {
     const fs = process.getBuiltinModule("node:fs") as typeof import("node:fs")
     const order: string[] = []
     const fsync = vi.spyOn(fs, "fsyncSync").mockImplementation(() => void order.push("fsync"))
     const rename = vi.spyOn(fs, "renameSync").mockImplementation(() => void order.push("rename"))
     try {
       createFileStorage(join(directory, "f", "localStorage.json")).setItem("k", "v")
+      await afterTask()
     } finally {
       fsync.mockRestore()
       rename.mockRestore()
@@ -144,27 +188,28 @@ describe("a file-backed Storage", () => {
     expect(order).toEqual(["fsync", "rename"])
   })
 
-  it("removes the temporary file when the write fails", () => {
+  it("removes the temporary file when the write fails, reports it, and writes again on the next change", async () => {
     const path = join(directory, "dir", "localStorage.json")
     const storage = createFileStorage(path)
     storage.setItem("kept", "1")
+    await afterTask()
     // A directory where the file was: the rename of the temporary file over it fails.
     rmSync(path)
     mkdirSync(path)
-    expect(() => storage.setItem("lost", "2")).toThrow()
-    expect(readdirSync(join(directory, "dir"))).toEqual(["localStorage.json"])
-    expect(storage.getItem("lost")).toBeNull()
-  })
-
-  it("undoes a change that could not be written", () => {
-    const path = join(directory, "dir", "localStorage.json")
-    const storage = createFileStorage(path)
-    storage.setItem("kept", "1")
-    rmSync(join(directory, "dir"), { recursive: true })
-    writeFileSync(join(directory, "dir"), "a file where the directory should be")
-    expect(() => storage.setItem("lost", "2")).toThrow()
-    expect(storage.getItem("lost")).toBeNull()
-    expect(storage.getItem("kept")).toBe("1")
+    const report = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      storage.setItem("lost", "2")
+      await afterTask()
+      expect(report).toHaveBeenCalledTimes(1)
+      expect(readdirSync(join(directory, "dir"))).toEqual(["localStorage.json"])
+      expect(storage.getItem("lost")).toBe("2")
+      rmSync(path, { recursive: true })
+      storage.setItem("more", "3")
+      await afterTask()
+      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ kept: "1", lost: "2", more: "3" })
+    } finally {
+      report.mockRestore()
+    }
   })
 })
 
@@ -188,6 +233,7 @@ describe("localStorage of an app id", () => {
     Reflect.set(globalThis, APP_ID_KEY, "demo-app")
     const first = await import("../shell/storage.js")
     first.getLocalStorage().setItem("token", "abc")
+    first.flushStorage()
     const file = join(directory, "Library", "Application Support", "demo-app", "Local Storage", "localStorage.json")
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ token: "abc" })
     vi.resetModules()

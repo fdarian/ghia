@@ -5,7 +5,7 @@ const CONSTRUCT = Symbol("Storage")
 /** Browsers allow about 5 MiB per origin, counted in UTF-16 code units of keys and values. */
 export const STORAGE_QUOTA = 5 * 1024 * 1024
 
-/** Called with the whole map after each change; it throws when the change cannot be kept, and the change is undone. */
+/** Called after each change; the map is the live one, so a caller that defers reads it when it writes. */
 export type StoragePersist = (items: ReadonlyMap<string, string>) => void
 
 interface StorageState {
@@ -33,15 +33,9 @@ function sizeOf(key: string, value: string): number {
   return key.length + value.length
 }
 
-function persisted(state: StorageState, change: () => void, undo: () => void): void {
+function changed(state: StorageState, change: () => void): void {
   change()
-  if (state.persist === undefined) return
-  try {
-    state.persist(state.items)
-  } catch (error) {
-    undo()
-    throw error
-  }
+  state.persist?.(state.items)
 }
 
 /** The Web Storage interface: string keys and values, with the items readable as properties of the object. */
@@ -91,19 +85,10 @@ export class Storage {
     if (grown > STORAGE_QUOTA) {
       throw namedError("QuotaExceededError", `Failed to execute 'setItem' on 'Storage': Setting the value of '${name}' exceeded the quota.`)
     }
-    const before = state.size
-    persisted(
-      state,
-      () => {
-        state.items.set(name, text)
-        state.size = grown
-      },
-      () => {
-        if (previous === undefined) state.items.delete(name)
-        else state.items.set(name, previous)
-        state.size = before
-      }
-    )
+    changed(state, () => {
+      state.items.set(name, text)
+      state.size = grown
+    })
   }
 
   removeItem(key: string): void {
@@ -112,36 +97,19 @@ export class Storage {
     const name = `${key}`
     const previous = state.items.get(name)
     if (previous === undefined) return
-    const before = state.size
-    persisted(
-      state,
-      () => {
-        state.items.delete(name)
-        state.size -= sizeOf(name, previous)
-      },
-      () => {
-        state.items.set(name, previous)
-        state.size = before
-      }
-    )
+    changed(state, () => {
+      state.items.delete(name)
+      state.size -= sizeOf(name, previous)
+    })
   }
 
   clear(): void {
     const state = stateOf(this)
     if (state.items.size === 0) return
-    const previous = new Map(state.items)
-    const before = state.size
-    persisted(
-      state,
-      () => {
-        state.items.clear()
-        state.size = 0
-      },
-      () => {
-        for (const entry of previous) state.items.set(entry[0], entry[1])
-        state.size = before
-      }
-    )
+    changed(state, () => {
+      state.items.clear()
+      state.size = 0
+    })
   }
 }
 
@@ -248,30 +216,76 @@ function dirname(path: string): string {
   return path.slice(0, path.lastIndexOf("/"))
 }
 
+/** Writes of every file storage still waiting for their task; the exit hook and a closed window flush them. */
+const pendingWrites = new Set<() => void>()
+let exitHookInstalled = false
+
 /**
- * A storage backed by the JSON file at `path`: read once now, and written whole after every change, to a temporary file that
- * is renamed over it, so a crash leaves the old content or the new. The write is synchronous because the API is.
+ * Writes what the file storages hold that is not on disk yet. Called when the process exits and when the last window closes,
+ * so nothing written before quit is lost.
+ */
+export function flushStorage(): void {
+  for (const flush of [...pendingWrites]) {
+    try {
+      flush()
+    } catch (error) {
+      console.error("[ghia] localStorage could not be written", error)
+    }
+  }
+}
+
+function writeAtomically(fs: NodeFs, path: string, items: ReadonlyMap<string, string>): void {
+  fs.mkdirSync(dirname(path), { recursive: true })
+  const temporary = `${path}.${process.pid}.tmp`
+  try {
+    const descriptor = fs.openSync(temporary, "w")
+    try {
+      fs.writeFileSync(descriptor, JSON.stringify(Object.fromEntries(items)))
+      // Without it a power loss after the rename can leave the new name on a file with no content.
+      fs.fsyncSync(descriptor)
+    } finally {
+      fs.closeSync(descriptor)
+    }
+    fs.renameSync(temporary, path)
+  } catch (error) {
+    fs.rmSync(temporary, { force: true })
+    throw error
+  }
+}
+
+/**
+ * A storage backed by the JSON file at `path`: read once now, and written whole to a temporary file that is renamed over it,
+ * so a crash leaves the old content or the new. A change updates memory at once and the write (with its fsync) goes out once
+ * for a burst of changes, from a task queued by the first; a browser also persists storage after the call returns. A write
+ * that fails is reported to the console and tried again by the next change or the exit flush.
  */
 export function createFileStorage(path: string): Storage {
   const fs = nodeFs()
   const items = readItems(fs, path)
-  return new Storage(CONSTRUCT, items, (current) => {
-    fs.mkdirSync(dirname(path), { recursive: true })
-    const temporary = `${path}.${process.pid}.tmp`
+  let queued = false
+  let current: ReadonlyMap<string, string> = items
+  const flush = () => {
+    pendingWrites.delete(flush)
     try {
-      const descriptor = fs.openSync(temporary, "w")
-      try {
-        fs.writeFileSync(descriptor, JSON.stringify(Object.fromEntries(current)))
-        // Without it a power loss after the rename can leave the new name on a file with no content.
-        fs.fsyncSync(descriptor)
-      } finally {
-        fs.closeSync(descriptor)
-      }
-      fs.renameSync(temporary, path)
+      writeAtomically(fs, path, current)
     } catch (error) {
-      fs.rmSync(temporary, { force: true })
+      pendingWrites.add(flush)
       throw error
     }
+  }
+  if (!exitHookInstalled) {
+    exitHookInstalled = true
+    process.on("exit", flushStorage)
+  }
+  return new Storage(CONSTRUCT, items, (live) => {
+    current = live
+    pendingWrites.add(flush)
+    if (queued) return
+    queued = true
+    setTimeout(() => {
+      queued = false
+      if (pendingWrites.has(flush)) flushStorage()
+    }, 0)
   })
 }
 

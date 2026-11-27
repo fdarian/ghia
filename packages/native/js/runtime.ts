@@ -6,6 +6,7 @@ import { automationRequested } from "./automation/env.js"
 import { bindClipboard } from "./clipboard.js"
 import { bindEyeDropper } from "./eyedropper.js"
 import { bindLinkOpener } from "./shell/open-link.js"
+import { flushStorage } from "./shell/storage.js"
 import { forgetWindowSource } from "./events/window-target.js"
 import { detachRenderer } from "./detached-renderer.js"
 import { closeWebAnimations } from "./web-animations.js"
@@ -135,6 +136,7 @@ type FrameLoopRenderer = Pick<GpuixRenderer, "requiresTick" | "tick"> &
  *  released for the renderer to be collectable. */
 function windowClosed(renderer: FrameLoopRenderer, options: FrameLoopOptions): void {
   renderer.setSyncEventHandler?.(null)
+  flushStorage()
   options.onTerminated?.()
 }
 
