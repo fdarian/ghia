@@ -113,22 +113,27 @@ describe.skipIf(!hasNativeTestRenderer)("@solidjs/router's <Router> on window.hi
       expect(app!.renderer.getAllText().join("")).toContain("home")
     })
 
-    it("a link the router leaves alone is followed by the default action: a fragment navigates, another origin only warns", async () => {
+    it("a link the router leaves alone is followed by the default action: a fragment navigates, another origin opens in the system, a same-origin page only warns", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
       try {
         mountLinks(() => (
           <>
             <a href="#section" rel="external" style={linkStyle}>fragment</a>
             <a href="https://example.com/x" style={linkStyle}>elsewhere</a>
+            <a href="/page" rel="external" style={linkStyle}>external page</a>
           </>
         ))
         await clickAt(10, 10)
         expect(location.hash).toBe("#section")
         expect(location.pathname).toBe("/")
         await clickAt(10, 36)
+        expect(app!.renderer.openedUrls()).toEqual(["https://example.com/x"])
+        expect(warn).not.toHaveBeenCalled()
+        await clickAt(10, 62)
         expect(location.href).toBe("http://localhost/#section")
+        expect(app!.renderer.openedUrls()).toEqual(["https://example.com/x"])
         expect(warn).toHaveBeenCalledTimes(1)
-        expect(String(warn.mock.calls[0]![0])).toContain("https://example.com/x")
+        expect(String(warn.mock.calls[0]![0])).toContain("http://localhost/page")
       } finally {
         warn.mockRestore()
       }

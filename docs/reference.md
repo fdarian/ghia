@@ -5511,12 +5511,18 @@ browser (`@solidjs/router`, TanStack Router, React Router) runs unchanged on the
   Setting `window.location` is setting `location.href`.
 - **A fragment navigation works as it does in a browser.** `location.hash = 'x'`, `assign('#x')`, `href = '#x'` and
   `replace('#x')` (and a URL that differs from the current one in its fragment only) change the URL at once, add a history entry
-  (`replace()` replaces the current one), and fire `popstate` and then `hashchange` in a later task when the fragment changed.
-  Setting `hash` to `''` leaves an empty fragment (`http://localhost/#`), which `location.hash` reads as `''`.
-- **Any other navigation throws.** Assigning a URL with another path, query or origin, setting `pathname`, `search`, `host`
-  and the like, and `reload()` would load a document, which Ghia has not: they throw a `DOMException` named `NotSupportedError`
-  whose message says to use `history.pushState`. A URL that does not parse throws `SyntaxError`.
-  A click on an `<a href>` follows the same rule ([the `<a>` tag](#the-a-tag)): a fragment link navigates, any other link only warns.
+  (`replace()` replaces the current one), and fire `popstate` at once, then `hashchange` in a later task when the fragment changed
+  (a navigation to the current URL with a fragment fires `popstate` only). Setting `hash` to the fragment it already has does
+  nothing: no entry, no event, and `history.state` stays. Setting `hash` to `''` leaves an empty fragment (`http://localhost/#`),
+  which `location.hash` reads as `''`.
+- **Another origin opens in the system.** Assigning an `http:`, `https:`, `mailto:` or `tel:` URL of another origin to `href`,
+  `assign()` or `replace()` hands it to the system's default handler, as a click on a link does ([the `<a>` tag](#the-a-tag));
+  the document and `location` stay where they are.
+- **Any other navigation throws.** Assigning a URL with another path or query, or of another scheme, setting `pathname`,
+  `search` and the like, and `reload()` would load a document, which Ghia has not: they throw a `DOMException` named
+  `NotSupportedError` whose message says to use `history.pushState`. A URL that does not parse throws `SyntaxError`.
+  A click on an `<a href>` follows the same rules ([the `<a>` tag](#the-a-tag)): a fragment link navigates, a link to another
+  origin opens in the system, and any other link only warns.
 - **`history`** is a session history in memory: a list of entries of `{ url, state }`, kept for the life of the process.
   `length`, `state`, `scrollRestoration` (`'auto'` or `'manual'`, stored; other values are ignored) and
   `pushState(state, unused, url?)` and `replaceState(state, unused, url?)`, which fire no event. `state` is cloned with
@@ -5525,7 +5531,7 @@ browser (`@solidjs/router`, TanStack Router, React Router) runs unchanged on the
   current one.
 - **`back()`, `forward()` and `go(n)` traverse in a later task**, not synchronously, and `n` counts from the entry that is
   current when the task runs. Past either end they do nothing. A traversal fires `popstate` with the entry's `state`,
-  and then `hashchange` (`oldURL`, `newURL`) when the fragment of the URL changed. `go(0)` does nothing, where a browser reloads.
+  and then `hashchange` (`oldURL`, `newURL`) when the fragment of the URL changed; each traversal makes a new copy of the state, so `history.state` after it is not the object an earlier read returned. `go(0)`, `go(NaN)` and `go(Infinity)` do nothing, where a browser reloads.
 - **`popstate` and `hashchange`** go to `window`: `addEventListener` and `onpopstate` / `onhashchange` both work. The events
   are `PopStateEvent` (`state`) and `HashChangeEvent` (`oldURL`, `newURL`); neither bubbles nor can be cancelled, and `target` is `window`.
 - **`sessionStorage`** is a `Storage` in memory, for the life of the process. A `Storage` has `getItem`, `setItem`, `removeItem`,

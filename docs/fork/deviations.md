@@ -429,7 +429,7 @@ How sheets work is in [stylesheets.md](stylesheets.md); the behaviour is in [ref
 - **There is no `storage` event.** It fires in the other documents of an origin, and a Ghia app has one. Two processes with the same app id do not see each other's writes: each reads the file once and rewrites it whole, so the last writer wins.
 - **`localStorage` is a file in `~/Library/Application Support/<appId>/`, and in memory without an app id.** A browser keeps it per origin in its profile. With no `appId` option and no `name` in the project's `package.json` (a script, a test) nothing persists.
 - **The initial URL is `http://localhost/`**, where a page has the URL it was loaded from. The origin is fixed, so a `pushState` URL of another origin throws `SecurityError`.
-- **`hashchange` and `popstate` fire for any change of fragment on a traversal and on a fragment navigation, in a task that follows the call** (a `setTimeout(0)`); a browser queues them in its own task source. `history.length` has no cap (a browser keeps about 50 entries), and `scrollRestoration` is one value for the history, not one per entry.
+- **`hashchange` fires in a task that follows the call, and `popstate` on a traversal does too** (a `setTimeout(0)`); a browser queues them in its own task source. `popstate` on a fragment navigation is synchronous, as in a browser. `history.length` has no cap (a browser keeps about 50 entries), and `scrollRestoration` is one value for the history, not one per entry.
 - **There is no `document.location`, `document.URL` or `document.baseURI`.** Only `window.location` is installed.
 
 ### Drag regions (`appRegion`), from Electron
