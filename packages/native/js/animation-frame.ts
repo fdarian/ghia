@@ -85,17 +85,6 @@ export class FrameList {
     }
   }
 
-  /** Takes the waiting callbacks out of `other` into this list, under the handles they were given. */
-  adopt(other: FrameList): void {
-    for (const [handle, callback] of other.callbacks) this.callbacks.set(handle, callback)
-    other.callbacks.clear()
-    if (this.callbacks.size > 0) this.ask()
-  }
-
-  get isEmpty(): boolean {
-    return this.callbacks.size === 0
-  }
-
   private ask(): void {
     const source = this.source
     if (this.asked || this.callbacks.size === 0 || source === undefined || source.requestAnimationFrame === undefined) return

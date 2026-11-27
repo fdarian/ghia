@@ -162,19 +162,4 @@ describe("a window's frame list", () => {
     frames.request(() => {})
     expect(gone.state.asks).toBe(0)
   })
-
-  it("takes the callbacks another list waited with, under their handles", () => {
-    const waiting = new FrameList()
-    const order: string[] = []
-    const handle = waiting.request(() => order.push("waited"))
-    const frames = new FrameList()
-    const window = windowSource()
-    frames.attach(window.source)
-    frames.adopt(waiting)
-    expect(window.state.asks).toBe(1)
-    frames.cancel(handle + 1000)
-    frames.run(0, report)
-    expect(order).toEqual(["waited"])
-    expect(waiting.isEmpty).toBe(true)
-  })
 })
