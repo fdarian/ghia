@@ -271,6 +271,7 @@ describeNative("the rows of a list translated by a scroll", { timeout: TIMEOUT }
       renderer.setInlineDraws(true)
       const frames: unknown[] = []
       const translated: boolean[] = []
+      const edited = scroll(renderer).reasons.Edited
       for (const [index, by] of [3, 5, 8, -2, 6].entries()) {
         const before = scroll(renderer).patched
         wheel(renderer, { x: 180, y: 60, by })
@@ -284,7 +285,7 @@ describeNative("the rows of a list translated by a scroll", { timeout: TIMEOUT }
       renderer.setInlineDraws(true)
       const inner = renderer.findByTestId("inner-1")
       const whole = { ...seen(renderer, `inner-whole-${translate}`, [[20, 10]]), inner: renderer.getScrollOffset(inner.id) }
-      return { frames, translated, whole, counters: scroll(renderer), top }
+      return { frames, translated, whole, counters: scroll(renderer), top, edited }
     } finally {
       opened.unmount()
     }
@@ -294,7 +295,7 @@ describeNative("the rows of a list translated by a scroll", { timeout: TIMEOUT }
     const on = scriptedInner(true)
     const off = scriptedInner(false)
     expect(on.translated, "every step came after the script moved the scroller").toEqual([false, false, false, false, false])
-    expect(on.counters.reasons.Edited, "the translate was held for the scroller gpui does not know").toBeGreaterThan(0)
+    expect(on.counters.reasons.Edited - on.edited, "each of the five steps was held for the scroller gpui does not know").toBe(5)
     expect(on.frames).toEqual(off.frames)
     expect(on.whole).toEqual(off.whole)
     expect(on.whole.inner, "the inner scroller is where the script put it").toEqual([0, on.top])

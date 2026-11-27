@@ -1097,7 +1097,9 @@ the patcher turns it on with `Window::set_contained_patches`.
 - **What the splice and the rewrite changed.** The anchor is built flat, so the patch registers other counts than the recording: gpui
   splices the ranges of the anchor into the frame (`PatchDecline::Splice` when it cannot) instead of declining `Operations`,
   `Hitboxes` and `Registrations`. An anchor that holds roots (text, boxes with children) and a keyed swap of the content with
-  another number of elements are patched. gpui then rewrites the recording of the anchor from the patch
+  another number of elements are patched. A bar of a `div` scroller in the anchor (its thumb is noted for the scroll patch) goes with the splice: the
+  thumbs the patch's own paint noted take the place of the ones the part held, and the splice declines (`PatchDecline::Splice`) only for a bar the patch did
+  not paint, or a list's. gpui then rewrites the recording of the anchor from the patch
   (`rewrittenRecordings`), which is what lets the next commit patch it again. A root that published (every host element of Ghia
   reports its box through a layout probe) keeps its rewritten recording when it has an `on_replay` hook, as a frame built
   whole accepts for the recording (zed `c4590da472`), so consecutive commits in an anchor are all patches. Ghia reads the outcome after
@@ -1359,9 +1361,8 @@ first wheel after a commit, slice 3's.
 
 ### A `div` scroller (slice D1a)
 
-A wheel over a `div` scroller (`overflow: auto` or `scroll`, one with a `ScrollHandle`) used to draw a whole frame (`notify_scroll_only`, which
-no tick follows). Now `Div`'s wheel listeners also say `Window::note_scroll_moved(view)` (the same mark as a list's), and the draw that follows
-classifies the frame as a list's is: a pure move of what the scroller's roots recorded is drawn as a translate, builds nothing, and shifts the
+A wheel over a `div` scroller (`overflow: auto` or `scroll`, one with a `ScrollHandle`) is classified like a list's: `Div`'s wheel listeners say
+`Window::note_scroll_moved(view)` (the same mark as a list's), and the draw that follows classifies the frame as a list's is: a pure move of what the scroller's roots recorded is drawn as a translate, builds nothing, and shifts the
 scroller's pixels on both axes (`ShiftPlan` takes `shift.x` too). Code: zed `window/scroll_patch/div.rs`; the wiring in `elements/div.rs`.
 
 - **Runs.** The relocatable roots painted inside the scroller are runs, as the rows of a list are, numbered by the order they are prepainted in. A
@@ -1422,8 +1423,12 @@ scroller's pixels on both axes (`ShiftPlan` takes `shift.x` too). Code: zed `win
 
 Tests: zed `window/scroll_patch_div_tests.rs` (the translate is the frame built whole for the box that holds the rows, with a hitbox, rows in the flow,
 rows with no hitbox and rows not culled; each cause; the thumb; the verifier; the anchoring; the owner told), `scrollbar.rs`, `retain.rs`
-(`a_frame_that_only_moves_the_rows_of_a_list_asks_for_the_sources_a_tick_asks_for`), and react `scroll-patch-div.test.tsx` (every step a translate,
-pictures, boxes, hit points, clicks, `scroll` events and `scrollTop`, a culled child that comes into reach, the scrollbar, the verifier).
+(`a_frame_that_only_moves_the_rows_of_a_list_asks_for_the_sources_a_tick_asks_for`; `a_translate_notes_the_scroller_it_moved_and_not_another_so_the_next_frame_finds_the_other_moved`),
+and react `scroll-patch-div.test.tsx` (every step a translate, pictures, boxes, hit points, clicks, `scroll` events and `scrollTop`, a culled child that comes
+into reach, the scrollbar, the verifier). A scroller inside a row that script moved: zed `a_scroller_inside_a_root_is_no_scroller_of_the_frame_shown` (the gate
+is given the key of the one scroller the wheel moved, and the scroller in the root is not noted as the frame shown's), and react `scroll-patch-div.test.tsx`
+(`script moved a scroller inside a row`, written from the `scroll` event, which the gate holds as `Edited`, or between two steps, which the recording of the row holds as
+`NotRelocatable.unmovable`) and `scroll-patch-translate.test.tsx` (the same for the rows of a list, five steps held as `Edited`).
 
 ### What kept the stack app's ticks whole (slice D1b)
 
@@ -1458,7 +1463,7 @@ or the hover that follows it); the declines of the apply (`applyDeclines`) and `
 
 **The end of the scroll.** The hover follows once the wheel is quiet. For rows in a `div` scroller that are not lifted (in the flow) that frame is a patch of the
 two rows now: the patch of a root that a translate moved compares its tape with the recorded one moved by how far the translate moved it
-(`moved_row`), which was only a list row's before, so a root in a scroller was `Rejected` and the frame built whole. For lifted rows (TanStack's, absolute) it is
+(`moved_row`), for a root in a `div` scroller as for a list's row. For lifted rows (TanStack's, absolute) it is
 still a frame built whole after a `Relocated` decline of the hover patch, which is the engine's (`region` of `prepare_unit` needs `Placement::InPlace`) and costs one
 frame per scroll. For a list the follow at the end of a scroll whose rows left the frame (the row the hover was on is no longer built) is a patch of the row it enters
 when the commit's frames were drawn before the wheel went quiet, as `scroll-patch-hover.test.tsx` asserts (the commit's frame is the one built whole, the follow one patch and no

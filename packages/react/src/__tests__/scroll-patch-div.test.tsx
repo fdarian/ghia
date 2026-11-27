@@ -586,9 +586,15 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
    * A page that keeps two scrollers in step moves one from the `scroll` event of the other, with no commit: the `scrollTop` it writes
    * is instant. The scroller inside a row is `overflow: hidden`, so the row is retained and the scroller is recorded inside it; gpui does not
    * know it, and a translate of the outer scroller would leave it where the frame shown had it (and hide it from the frame built whole after).
-   * A wheel step after the script moved it is a frame built whole: the gate holds the translate as `Edited` when the script ran in a
-   * `scroll` event, and the recording of the row cannot be moved either way.
-   * What is pinned here is that, and what the page shows.
+   * A wheel step after the script moved it is a frame built whole, by one of two paths:
+   * - `event`: the script runs in the `scroll` event of a step, which `tick` delivers before it draws the step's frame, so that draw finds
+   *   the scroller moved and the gate holds the translate as `Edited`: all 5 steps.
+   * - `before`: the script writes between two steps, and the test renderer draws a window that is dirty before it delivers an input
+   *   (`flush_if_dirty` begins every `nativeSimulate*`), so the write is drawn in a frame of its own before the wheel arrives. That frame
+   *   records the new offset, the gate finds nothing moved (no `Edited`), and what holds the step is the recording of the row, which cannot
+   *   be moved (`NotRelocatable.unmovable`). A live window that is written and wheeled in one turn draws once and is the `event` path.
+   * The rows are `transform`ed as the mailbox's are; rows placed by `top` hold the steps the same way. What is pinned here is that, and what
+   * the page shows.
    */
   function steppedInner(translate: boolean, move: "event" | "before") {
     const opened = open(translate, "transform", false, { inner: true })
@@ -599,6 +605,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       opened.render(<Page log={opened.log} layout="transform" bar={false} inner salt={1} />)
       renderer.drawFrame()
       let top = 0
+      const before = { edited: scroll(renderer).reasons.Edited, unmovable: scroll(renderer).held["NotRelocatable.unmovable"] }
       if (move === "event") opened.log.onScroll = () => void (opened.log.inners[1].scrollTop = top += 9)
       const innerOffset = () => renderer.getScrollOffset(renderer.findByTestId("inner-1").id)
       const translated: boolean[] = []
@@ -612,6 +619,10 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
         renderer.dispatchNativeEvents()
         frames.push({ ...seen(renderer, points), inner: innerOffset() })
       }
+      const held = {
+        edited: scroll(renderer).reasons.Edited - before.edited,
+        unmovable: scroll(renderer).held["NotRelocatable.unmovable"] - before.unmovable,
+      }
       renderer.drawFrame()
       const settled = { ...seen(renderer, points), inner: innerOffset() }
       // A commit that changes nothing of the rows draws a frame built whole: the inner scroller is where the script put it.
@@ -620,7 +631,7 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       renderer.dispatchNativeEvents()
       renderer.drawFrame()
       const whole = { ...seen(renderer, points), inner: innerOffset() }
-      return { translated, frames, settled, whole, counters: scroll(renderer), top }
+      return { translated, frames, settled, whole, counters: scroll(renderer), top, held }
     } finally {
       opened.unmount()
     }
@@ -632,8 +643,12 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       const off = steppedInner(false, move)
       expect(on.top).toBeGreaterThan(0)
       expect(on.translated, "no step is a translate: the scroller in the row is gpui's unknown, or its row is a recording gpui cannot move").toEqual([false, false, false, false, false])
-      // A write made before the wheel is held by the recording of the row (`NotRelocatable.unmovable`), not by the gate.
-      if (move === "event") expect(on.counters.reasons.Edited, "the gate found the scroller moved").toBeGreaterThan(0)
+      if (move === "event") {
+        expect(on.held.edited, "the gate found the scroller moved in each step").toBe(5)
+      } else {
+        expect(on.held.edited, "the write was drawn before the wheel, so the gate found nothing moved").toBe(0)
+        expect(on.held.unmovable, "the recording of the row is what holds each step").toBeGreaterThan(0)
+      }
       expect(on.frames).toEqual(off.frames)
       expect(on.settled).toEqual(off.settled)
       expect(on.whole).toEqual(off.whole)

@@ -6644,6 +6644,8 @@ mod tests {
         let key = page.scrolls[&2].scroll_key();
         assert!(page.retain.sources_changed(&page.sources(), Some(key)), "the scroll of the other is an edit");
         page.retain.note_scrolls_translated(&page.scrolls, key);
+        assert_eq!(page.retain.seen.scrolls[&2], offset_bits(&page.scrolls[&2]), "the scroller the translate moved is the frame shown's now");
+        assert_ne!(page.retain.seen.scrolls[&3], offset_bits(&page.scrolls[&3]), "the other keeps the offset the frame shown had");
         assert!(page.retain.sources_changed(&page.sources(), Some(key)), "a translate does not show it");
         assert_eq!(page.preview(&[], false), Err(Unpatchable::Sourced), "and the next frame finds it moved");
     }
