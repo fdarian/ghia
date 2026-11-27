@@ -65,6 +65,8 @@ pub(crate) fn drag_operation(drop_effect: &str) -> Result<gpui::DragOperation, S
 struct ActiveContext {
     window: *mut Window,
     app: *mut App,
+    /// The window `window` points at, so a call can tell whether it is for the window being dispatched.
+    window_id: gpui::WindowId,
 }
 
 thread_local! {
@@ -110,10 +112,12 @@ struct ScopeGuard {
 impl ScopeGuard {
     fn enter(window: &mut Window, app: &mut App) -> Self {
         IN_SYNC_CALL.with(|depth| depth.set(depth.get() + 1));
+        let window_id = window.window_handle().window_id();
         let previous = ACTIVE.with(|active| {
             active.replace(Some(ActiveContext {
                 window,
                 app,
+                window_id,
             }))
         });
         Self { previous }
@@ -132,6 +136,12 @@ impl Drop for ScopeGuard {
         ACTIVE.with(|active| active.set(self.previous.take()));
         IN_SYNC_CALL.with(|depth| depth.set(depth.get() - 1));
     }
+}
+
+/// Whether the window being dispatched by the in-flight sync call is `window`. False when there is
+/// none, and while a call made on it is running (see [`with_active_window`]).
+pub(crate) fn active_window_is(window: gpui::WindowId) -> bool {
+    ACTIVE.with(|active| active.get().is_some_and(|active| active.window_id == window))
 }
 
 /// Runs `f` against the window and app that are dispatching the in-flight sync
@@ -259,6 +269,47 @@ pub(crate) fn update_root_view<R>(
     .unwrap_or_else(|| Err(NESTED.to_string()))
 }
 
+/// [`update_root_view`] for the root view of `window`, which is not the window being dispatched
+/// when a handler of one window calls a renderer of another. That one is updated through the app
+/// the dispatch holds: the window being dispatched is out of it, every other is in it.
+pub(crate) fn update_view_of<R>(
+    window: gpui::WindowHandle<GpuixView>,
+    update: impl FnOnce(&mut GpuixView, &mut Window, &mut gpui::Context<GpuixView>) -> R,
+) -> Result<R, String> {
+    if active_window_is(window.window_id()) {
+        return update_root_view(update);
+    }
+    with_active_window(|_, cx| window.update(cx, update).map_err(|error| error.to_string()))
+        .unwrap_or_else(|| Err(NESTED.to_string()))
+}
+
+/// [`update_root_view_or_defer`] for the root view of `window`, see [`update_view_of`].
+pub(crate) fn update_view_of_or_defer(
+    window: gpui::WindowHandle<GpuixView>,
+    update: impl FnOnce(&mut GpuixView, &mut Window, &mut gpui::Context<GpuixView>) + 'static,
+) -> Result<(), String> {
+    if active_window_is(window.window_id()) {
+        return update_root_view_or_defer(update);
+    }
+    update_view_of(window, update)
+}
+
+/// [`update_active_window`] for `window`, see [`update_view_of`].
+pub(crate) fn update_window_of<R>(
+    window: gpui::WindowHandle<GpuixView>,
+    update: impl FnOnce(&mut Window, &mut App) -> R,
+) -> Result<R, String> {
+    if active_window_is(window.window_id()) {
+        return update_active_window(update);
+    }
+    with_active_window(|_, cx| {
+        gpui::AnyWindowHandle::from(window)
+            .update(cx, move |_view, window, cx| update(window, cx))
+            .map_err(|error| error.to_string())
+    })
+    .unwrap_or_else(|| Err(NESTED.to_string()))
+}
+
 /// Like `update_root_view` for a change that returns nothing: when the view is
 /// held it runs once the input being dispatched has returned it.
 pub(crate) fn update_root_view_or_defer(
@@ -322,7 +373,7 @@ pub(crate) fn invalidate_root_view(dirty: crate::retained_tree::Dirty) -> Result
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub(crate) use backend::{native_call, outermost_native_call, register, SyncDispatchResult, SyncHandlerOwner};
+pub(crate) use backend::{native_call, outermost_native_call, register, unbind_window, SyncDispatchResult, SyncHandlerOwner};
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod backend {
@@ -380,6 +431,12 @@ mod backend {
         pub(crate) fn bind_window(&self, window: gpui::WindowId) {
             WINDOWS.with(|windows| windows.borrow_mut().insert(window, self.id));
         }
+    }
+
+    /// Stops routing input of a window that closed.
+    pub(crate) fn unbind_window(window: gpui::WindowId) {
+        // `try_with`: a window can close while the thread's locals are being torn down.
+        let _ = WINDOWS.try_with(|windows| windows.borrow_mut().remove(&window));
     }
 
     impl Drop for SyncHandlerOwner {

@@ -8,12 +8,12 @@
 //! child is built transparent, so it never shows at a guessed size.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use gpui::WindowId;
 
 use crate::retained_tree::{RetainedElement, RetainedTree};
 use crate::style::{AnchorAxis, DimensionValue, StyleDesc};
+use crate::window_map::WindowMap;
 
 #[derive(Clone, Copy, Default)]
 struct AnchorInfo {
@@ -23,7 +23,7 @@ struct AnchorInfo {
 }
 
 thread_local! {
-    static ANCHORS: RefCell<HashMap<u64, AnchorInfo>> = RefCell::new(HashMap::new());
+    static ANCHORS: RefCell<WindowMap<AnchorInfo>> = RefCell::new(WindowMap::default());
 }
 
 /// Every longhand of a style that is a `DimensionValue` and takes `anchor-size()`.
@@ -51,10 +51,10 @@ macro_rules! anchor_slots {
 }
 
 /// Records the trigger's border-box size. Returns whether it changed.
-pub(crate) fn record(anchored_id: u64, size: (i32, i32)) -> bool {
+pub(crate) fn record(window: WindowId, anchored_id: u64, size: (i32, i32)) -> bool {
     ANCHORS.with(|anchors| {
         let mut anchors = anchors.borrow_mut();
-        let info = anchors.entry(anchored_id).or_default();
+        let info = anchors.of_mut(window).entry(anchored_id).or_default();
         let changed = info.size != Some(size);
         info.size = Some(size);
         changed
@@ -66,12 +66,12 @@ pub(crate) fn record(anchored_id: u64, size: (i32, i32)) -> bool {
 /// screen builds at the right size in its first frame.
 pub(crate) fn begin_build(window: WindowId, tree: &RetainedTree, anchored: &RetainedElement) {
     let painted = ANCHORS
-        .with(|anchors| anchors.borrow().get(&anchored.id).is_none_or(|info| info.size.is_none()))
+        .with(|anchors| anchors.borrow().get(window, anchored.id).is_none_or(|info| info.size.is_none()))
         .then(|| painted_trigger_size(window, tree, anchored))
         .flatten();
     ANCHORS.with(|anchors| {
         let mut anchors = anchors.borrow_mut();
-        let info = anchors.entry(anchored.id).or_default();
+        let info = anchors.of_mut(window).entry(anchored.id).or_default();
         info.used = false;
         if info.size.is_none() {
             info.size = painted;
@@ -97,19 +97,23 @@ fn painted_trigger_size(
     Some((bounds.width.round() as i32, bounds.height.round() as i32))
 }
 
-pub(crate) fn uses_anchor_size(anchored_id: u64) -> bool {
-    ANCHORS.with(|anchors| anchors.borrow().get(&anchored_id).is_some_and(|info| info.used))
+pub(crate) fn uses_anchor_size(window: WindowId, anchored_id: u64) -> bool {
+    ANCHORS.with(|anchors| anchors.borrow().get(window, anchored_id).is_some_and(|info| info.used))
 }
 
-pub(crate) fn forget(anchored_id: u64) {
-    ANCHORS.with(|anchors| {
-        anchors.borrow_mut().remove(&anchored_id);
-    });
+/// Call before building a frame of `window`: an anchored element that was destroyed since is
+/// forgotten. (Its own teardown has no window to name.)
+pub(crate) fn begin_frame(window: WindowId, exists: impl Fn(u64) -> bool) {
+    ANCHORS.with(|anchors| anchors.borrow_mut().of_mut(window).retain(|id, _| exists(*id)));
+}
+
+pub(crate) fn forget_window(window: WindowId) {
+    ANCHORS.with(|anchors| anchors.borrow_mut().forget(window));
 }
 
 /// `style` with every `anchor-size()` replaced by the trigger's size, or `None` when it
 /// has none.
-pub(crate) fn resolve(anchored_id: u64, style: &StyleDesc) -> Option<StyleDesc> {
+pub(crate) fn resolve(window: WindowId, anchored_id: u64, style: &StyleDesc) -> Option<StyleDesc> {
     let uses_anchor_size = anchor_slots!(style, &)
         .into_iter()
         .any(|value| matches!(value, Some(DimensionValue::AnchorSize(_))))
@@ -127,7 +131,7 @@ pub(crate) fn resolve(anchored_id: u64, style: &StyleDesc) -> Option<StyleDesc> 
 
     let size = ANCHORS.with(|anchors| {
         let mut anchors = anchors.borrow_mut();
-        let info = anchors.entry(anchored_id).or_default();
+        let info = anchors.of_mut(window).entry(anchored_id).or_default();
         info.used = true;
         info.size
     });
@@ -206,40 +210,44 @@ mod tests {
         );
     }
 
+    fn w() -> WindowId {
+        WindowId::from(1)
+    }
+
     #[test]
     fn leaves_styles_without_anchor_size_alone() {
-        assert_eq!(resolve(1, &style_with(Some(DimensionValue::Pixels(5.0)), None)), None);
+        assert_eq!(resolve(w(), 1, &style_with(Some(DimensionValue::Pixels(5.0)), None)), None);
     }
 
     #[test]
     fn is_transparent_until_the_trigger_has_been_measured() {
         let style = style_with(anchor(AnchorAxis::Width), None);
-        let resolved = resolve(900, &style).unwrap();
+        let resolved = resolve(w(), 900, &style).unwrap();
         assert_eq!(resolved.width, None);
         assert_eq!(resolved.opacity, Some(0.0));
-        forget(900);
+        forget_window(w());
     }
 
     #[test]
     fn resolves_either_axis_against_the_recorded_size() {
-        assert!(record(901, (120, 30)));
-        assert!(!record(901, (120, 30)));
+        assert!(record(w(), 901, (120, 30)));
+        assert!(!record(w(), 901, (120, 30)));
         let style = style_with(anchor(AnchorAxis::Width), anchor(AnchorAxis::Height));
-        let resolved = resolve(901, &style).unwrap();
+        let resolved = resolve(w(), 901, &style).unwrap();
         assert_eq!(resolved.width, Some(DimensionValue::Pixels(120.0)));
         assert_eq!(resolved.min_height, Some(DimensionValue::Pixels(30.0)));
         assert_eq!(resolved.opacity, None);
-        assert!(uses_anchor_size(901));
+        assert!(uses_anchor_size(w(), 901));
         let mut tree = RetainedTree::new();
         tree.create_element(901, "anchored".to_string());
         begin_build(WindowId::from(1), &tree, &tree.elements[&901]);
-        assert!(!uses_anchor_size(901));
-        forget(901);
+        assert!(!uses_anchor_size(w(), 901));
+        forget_window(w());
     }
 
     #[test]
     fn resolves_margins_and_insets() {
-        record(902, (120, 30));
+        record(w(), 902, (120, 30));
         let style = StyleDesc {
             margin: Some(Sides::all(DimensionValue::AnchorSize(AnchorAxis::Width))),
             margin_top: anchor(AnchorAxis::Height),
@@ -252,7 +260,7 @@ mod tests {
             left: anchor(AnchorAxis::Width),
             ..Default::default()
         };
-        let resolved = resolve(902, &style).unwrap();
+        let resolved = resolve(w(), 902, &style).unwrap();
         let width = Some(DimensionValue::Pixels(120.0));
         let height = Some(DimensionValue::Pixels(30.0));
         assert_eq!(resolved.margin, width.clone().map(Sides::all));
@@ -265,7 +273,7 @@ mod tests {
         assert_eq!(resolved.bottom, height);
         assert_eq!(resolved.left, width);
         assert_eq!(resolved.opacity, None);
-        forget(902);
+        forget_window(w());
     }
 
     #[test]
@@ -278,15 +286,15 @@ mod tests {
             ..Default::default()
         };
         let tree = mounted(905, None);
-        record(905, (120, 30));
+        record(w(), 905, (120, 30));
         begin_build(WindowId::from(1), &tree, &tree.elements[&905]);
-        let resolved = resolve(905, &style).unwrap();
+        let resolved = resolve(w(), 905, &style).unwrap();
         assert_eq!(
             resolved.margin_inline,
             Some(Pair { start: DimensionValue::Pixels(120.0), end: DimensionValue::Pixels(2.0) })
         );
         assert_eq!(resolved.inset_block, Some(Pair::both(DimensionValue::Pixels(30.0))));
-        forget(905);
+        forget_window(w());
     }
 
     #[test]
@@ -295,11 +303,11 @@ mod tests {
             margin_left: anchor(AnchorAxis::Width),
             ..Default::default()
         };
-        let resolved = resolve(903, &style).unwrap();
+        let resolved = resolve(w(), 903, &style).unwrap();
         assert_eq!(resolved.margin_left, None);
         assert_eq!(resolved.opacity, Some(0.0));
-        assert!(uses_anchor_size(903));
-        forget(903);
+        assert!(uses_anchor_size(w(), 903));
+        forget_window(w());
     }
 
     fn mounted(anchored: u64, parent_style: Option<&str>) -> RetainedTree {
@@ -319,24 +327,24 @@ mod tests {
         let tree = mounted(911, None);
         paint(910, 140.4, 29.6);
         begin_build(WindowId::from(1), &tree, &tree.elements[&911]);
-        let resolved = resolve(911, &style_with(anchor(AnchorAxis::Width), anchor(AnchorAxis::Height))).unwrap();
+        let resolved = resolve(w(), 911, &style_with(anchor(AnchorAxis::Width), anchor(AnchorAxis::Height))).unwrap();
         assert_eq!(resolved.width, Some(DimensionValue::Pixels(140.0)));
         assert_eq!(resolved.min_height, Some(DimensionValue::Pixels(30.0)));
         assert_eq!(resolved.opacity, None);
         // The placement that measures the same size has nothing to rebuild for.
-        assert!(!record(911, (140, 30)));
-        forget(911);
+        assert!(!record(w(), 911, (140, 30)));
+        forget_window(w());
     }
 
     #[test]
     fn a_placement_measurement_beats_the_painted_size() {
         let tree = mounted(921, None);
-        record(921, (200, 50));
+        record(w(), 921, (200, 50));
         paint(920, 140.0, 30.0);
         begin_build(WindowId::from(1), &tree, &tree.elements[&921]);
-        let resolved = resolve(921, &style_with(anchor(AnchorAxis::Width), None)).unwrap();
+        let resolved = resolve(w(), 921, &style_with(anchor(AnchorAxis::Width), None)).unwrap();
         assert_eq!(resolved.width, Some(DimensionValue::Pixels(200.0)));
-        forget(921);
+        forget_window(w());
     }
 
     #[test]
@@ -347,17 +355,17 @@ mod tests {
         paint(929, 77.0, 20.0);
         paint(930, 5.0, 5.0);
         begin_build(WindowId::from(1), &tree, &tree.elements[&931]);
-        let resolved = resolve(931, &style_with(anchor(AnchorAxis::Width), None)).unwrap();
+        let resolved = resolve(w(), 931, &style_with(anchor(AnchorAxis::Width), None)).unwrap();
         assert_eq!(resolved.width, Some(DimensionValue::Pixels(77.0)));
-        forget(931);
+        forget_window(w());
     }
 
     #[test]
     fn stays_transparent_when_the_trigger_has_not_painted() {
         let tree = mounted(941, None);
         begin_build(WindowId::from(1), &tree, &tree.elements[&941]);
-        let resolved = resolve(941, &style_with(anchor(AnchorAxis::Width), None)).unwrap();
+        let resolved = resolve(w(), 941, &style_with(anchor(AnchorAxis::Width), None)).unwrap();
         assert_eq!(resolved.opacity, Some(0.0));
-        forget(941);
+        forget_window(w());
     }
 }

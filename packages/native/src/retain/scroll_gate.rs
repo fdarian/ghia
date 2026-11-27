@@ -130,7 +130,7 @@ impl GpuixView {
             if current != revision {
                 return Some(ScrollPatchReason::Edited);
             }
-            if crate::scroll::animating() || crate::scrollbar::needs_frames() {
+            if crate::scroll::animating_in(window.window_handle().window_id()) || crate::scrollbar::needs_frames(window.window_handle().window_id()) {
                 return Some(ScrollPatchReason::ScrollAnimation);
             }
             // A translate builds nothing, so it would leave what runs where the last frame left it.
@@ -146,7 +146,7 @@ impl GpuixView {
             if view.read(cx).sources_besides_scroll_changed(window) {
                 return Some(ScrollPatchReason::Edited);
             }
-            crate::scrollbar::container_bar_stale().then_some(ScrollPatchReason::Thumb)
+            crate::scrollbar::container_bar_stale(window.window_handle().window_id()).then_some(ScrollPatchReason::Thumb)
         })));
     }
 }

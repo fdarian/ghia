@@ -22,12 +22,14 @@
 //! [`plan_thumb`] and [`move_thumb`].
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{StatefulInteractiveElement as _, Styled as _};
+use rustc_hash::FxHashMap;
 use web_time::Instant;
+
+use crate::window_map::WindowMap;
 
 use crate::scroll::Overflow;
 use crate::style::StyleDesc;
@@ -484,8 +486,12 @@ struct HoldTimer {
 }
 
 thread_local! {
-    static STATES: RefCell<HashMap<u64, Rc<RefCell<State>>>> = RefCell::new(HashMap::new());
-    static FRAME: Cell<u64> = const { Cell::new(0) };
+    static STATES: RefCell<WindowMap<Rc<RefCell<State>>>> = RefCell::new(WindowMap::default());
+    /// The frames each window began. A bar is kept while it was built in the last frame of its own
+    /// window, which another window's frames in between do not change.
+    static FRAMES: RefCell<FxHashMap<gpui::WindowId, u64>> = RefCell::new(FxHashMap::default());
+    /// Counts the draws of every window together: the passes of one draw follow each other, so
+    /// two draws never interleave and a bar compares only against the draw it is in.
     static DRAW: Cell<u64> = const { Cell::new(0) };
     static NOW: Cell<Option<Instant>> = const { Cell::new(None) };
     static CLOCK: RefCell<Option<crate::automation::AutomationClock>> = const { RefCell::new(None) };
@@ -497,6 +503,7 @@ thread_local! {
 /// from, the style the bars take and the pass of the draw it is (1 for the first build). Drops the
 /// bars of scrollers that were not built last frame, and with them the timers they waited on.
 pub(crate) fn begin_frame(
+    window: gpui::WindowId,
     now: Instant,
     clock: &crate::automation::AutomationClock,
     scroller: ScrollerStyle,
@@ -508,13 +515,28 @@ pub(crate) fn begin_frame(
     if pass <= 1 {
         DRAW.set(DRAW.get() + 1);
     }
-    let frame = FRAME.get() + 1;
-    FRAME.set(frame);
+    let frame = FRAMES.with(|frames| {
+        let mut frames = frames.borrow_mut();
+        let frame = frames.entry(window).or_default();
+        *frame += 1;
+        *frame
+    });
     STATES.with(|states| {
         states
             .borrow_mut()
+            .of_mut(window)
             .retain(|_, state| state.borrow().seen + 1 >= frame);
     });
+}
+
+fn frame_of(window: gpui::WindowId) -> u64 {
+    FRAMES.with(|frames| frames.borrow().get(&window).copied().unwrap_or_default())
+}
+
+/// Drops the bars of a window that closed, and the timers they waited on.
+pub(crate) fn forget_window(window: gpui::WindowId) {
+    STATES.with(|states| states.borrow_mut().forget(window));
+    FRAMES.with(|frames| frames.borrow_mut().remove(&window));
 }
 
 fn now() -> Instant {
@@ -550,18 +572,18 @@ fn clock_now() -> Instant {
 }
 
 /// Whether a bar of the last frame asked for another frame: it fades, grows or settles its gutter.
-pub(crate) fn needs_frames() -> bool {
-    STATES.with(|states| states.borrow().values().any(|state| state.borrow().needs_frames_of_a_build()))
+pub(crate) fn needs_frames(window: gpui::WindowId) -> bool {
+    STATES.with(|states| states.borrow().of(window).values().any(|state| state.borrow().needs_frames_of_a_build()))
 }
 
 /// Whether a bar of a scroll container (a list's are planned, see [`plan_thumb`]) was painted at
 /// an alpha or a thickness that the clock has since changed. A frame that moves the rows builds no
 /// bar, so it would leave the end of its hold, or the thickening, unseen.
-pub(crate) fn container_bar_stale() -> bool {
+pub(crate) fn container_bar_stale(window: gpui::WindowId) -> bool {
     let now = clock_now();
-    let frame = FRAME.get();
+    let frame = frame_of(window);
     STATES.with(|states| {
-        states.borrow().values().any(|state| {
+        states.borrow().of(window).values().any(|state| {
             let st = state.borrow();
             st.seen == frame && !st.list && st.stale_at(now)
         })
@@ -571,10 +593,10 @@ pub(crate) fn container_bar_stale() -> bool {
 /// Whether a bar of the last frame was painted at an alpha or a thickness that the clock has since
 /// changed: its hold ended, or the pointer's thickening ran on. A tick that built only a unit would
 /// leave the bar as the frame before drew it.
-pub(crate) fn stale_at(now: Instant) -> bool {
-    let frame = FRAME.get();
+pub(crate) fn stale_at(window: gpui::WindowId, now: Instant) -> bool {
+    let frame = frame_of(window);
     STATES.with(|states| {
-        states.borrow().values().any(|state| {
+        states.borrow().of(window).values().any(|state| {
             let st = state.borrow();
             st.seen == frame && st.stale_for_a_build(now)
         })
@@ -659,14 +681,15 @@ impl State {
     }
 }
 
-pub(crate) fn state_for(id: u64) -> Rc<RefCell<State>> {
-    STATES.with(|states| states.borrow_mut().entry(id).or_default().clone())
+pub(crate) fn state_for(window: gpui::WindowId, id: u64) -> Rc<RefCell<State>> {
+    STATES.with(|states| states.borrow_mut().of_mut(window).entry(id).or_default().clone())
 }
 
 /// Gives a scroll container its bars, if its style does not turn them off, and the room for them
 /// that a classic bar takes. `overflow` is the container's, per axis (x, then y).
 pub(crate) fn attach<E: gpui::Styled + gpui::StatefulInteractiveElement>(
     el: E,
+    window: gpui::WindowId,
     id: u64,
     source: Source,
     style: &StyleDesc,
@@ -677,7 +700,7 @@ pub(crate) fn attach<E: gpui::Styled + gpui::StatefulInteractiveElement>(
     if look.hidden() {
         return el;
     }
-    let state = state_for(id);
+    let state = state_for(window, id);
     let el = reserve(el, &state, look, overflow);
     overlay(el, state, source, look)
 }
@@ -686,6 +709,7 @@ pub(crate) fn attach<E: gpui::Styled + gpui::StatefulInteractiveElement>(
 /// it and take no room.
 pub(crate) fn attach_to_list<E: gpui::StatefulInteractiveElement>(
     el: E,
+    window: gpui::WindowId,
     id: u64,
     source: Source,
     style: &StyleDesc,
@@ -695,7 +719,7 @@ pub(crate) fn attach_to_list<E: gpui::StatefulInteractiveElement>(
     if look.hidden() {
         return el;
     }
-    overlay(el, state_for(id), source, look)
+    overlay(el, state_for(window, id), source, look)
 }
 
 /// The bars are the element's overlay, so its `clipPath` and its hitbox parent chain cut them too.
@@ -905,7 +929,7 @@ fn prepaint(
     cx: &gpui::App,
 ) {
     let mut st = state.borrow_mut();
-    st.seen = FRAME.get();
+    st.seen = frame_of(window.window_handle().window_id());
     st.list = matches!(source, Source::List(..));
     let now = now();
     let (_, offset) = source.extent();

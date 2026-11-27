@@ -2391,7 +2391,7 @@ impl TestGpuixRenderer {
                 Some(handle) => crate::scroll_write::ScrollerState::Container(handle),
                 None => crate::scroll_write::ScrollerState::Unbuilt,
             };
-            crate::scroll_write::lays_out_first(crate::scroll_write::metrics_current(window), id, state, top, behavior)
+            crate::scroll_write::lays_out_first(window.window_handle().window_id(), crate::scroll_write::metrics_current(window), id, state, top, behavior)
         })?;
         if lays_out_first {
             window_call(|window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) })?;
@@ -2426,8 +2426,8 @@ impl TestGpuixRenderer {
         let id = to_element_id(element_id)?;
         let index = index as usize;
         let offset = offset_in_item.unwrap_or(0.0) as f32;
-        update_view_or_defer(move |view, _window, _cx| {
-            if view.scroll_virtual_list_to_item(id, index, offset) {
+        update_view_or_defer(move |view, window, _cx| {
+            if view.scroll_virtual_list_to_item(window.window_handle().window_id(), id, index, offset) {
                 return;
             }
             if let Some(handle) = view.scroll_handles.get(&id) {
@@ -3073,7 +3073,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_scroll_offset(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
-        if crate::scroll_write::has_pending_container(id) {
+        if crate::scroll_write::has_pending_container(test_window_id()?, id) {
             window_call(|window, cx| { crate::renderer::settle_pending_layout(window, cx); window.draw_if_scroll_metrics_dirty(cx) })?;
         }
         update_view(|view, _window, _cx| {
