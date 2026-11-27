@@ -302,14 +302,15 @@ impl<'a> Emitter<'a> {
         });
     }
 
-    /// A `click`, which also has to reach a label with no listener, a submit button and a checkbox
-    /// or radio: whether they activate something is decided after the event ran.
+    /// A `click`, which also has to reach a label with no listener, a submit button, a checkbox
+    /// or radio and a link: whether they activate something is decided after the event ran.
     fn emit_click(&mut self, target: u64, fields: Fields) {
         let activates = || {
             let path = event_path(self.tree, target);
             crate::accessibility::label::activated_control(self.tree, &path).is_some()
                 || crate::forms::submission_by_click(self.tree, &path).is_some()
                 || crate::custom_elements::input_choice::is_activated_by(self.tree, &path)
+                || crate::html::is_followed_by(self.tree, &path)
         };
         if path_listens(self.tree, target, "click")
             || self.requests.window_listens("click")
@@ -1565,6 +1566,27 @@ mod tests {
 
         dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 1])));
         let output = dispatch(&mut state, &tree, &up(0, 1, chain_of(&[3, 1])));
+        assert!(output.events.is_empty());
+    }
+
+    #[test]
+    fn a_click_on_a_link_is_emitted_with_no_listener_and_one_on_an_anchor_without_href_is_not() {
+        let mut tree = RetainedTree::new();
+        crate::batch::test_json::apply(
+            &mut tree,
+            r#"[["createElement",1,"div"],["setRoot",1],
+                ["createElement",2,"a"],["appendChild",1,2],["setCustomProp",2,"href","https://example.com/"],
+                ["createElement",3,"span"],["appendChild",2,3],
+                ["createElement",4,"a"],["appendChild",1,4]]"#,
+        )
+        .unwrap();
+        let mut state = PointerState::default();
+        dispatch(&mut state, &tree, &down(0, 1, chain_of(&[3, 2, 1])));
+        let output = dispatch(&mut state, &tree, &up(0, 1, chain_of(&[3, 2, 1])));
+        assert_eq!(names(&output), ["click@3"]);
+
+        dispatch(&mut state, &tree, &down(0, 1, chain_of(&[4, 1])));
+        let output = dispatch(&mut state, &tree, &up(0, 1, chain_of(&[4, 1])));
         assert!(output.events.is_empty());
     }
 

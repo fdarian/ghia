@@ -2960,6 +2960,18 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Records a request to open a link in the system's handler, which a test window must not make.
+    /// `getOpenedUrls` has the requests, in order.
+    #[napi]
+    pub fn open_url(&self, url: String) -> Result<()> {
+        window_call(|_window, cx| crate::open_url::record(cx, &url))?.map_err(Error::from_reason)
+    }
+
+    #[napi]
+    pub fn get_opened_urls(&self) -> Result<Vec<String>> {
+        window_call(|_window, cx| crate::open_url::recorded(cx))
+    }
+
     /// Make the fonts in a TrueType or OpenType file usable by `fontFamily`.
     #[napi]
     pub fn register_font(&self, data: Buffer) -> Result<()> {

@@ -4800,6 +4800,21 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Opens an `http:`, `https:`, `mailto:` or `tel:` URL with the system's default handler. Any other
+    /// scheme is an error.
+    #[napi]
+    pub fn open_url(&self, url: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(move |_view, _window, cx| crate::open_url::open(cx, &url))?
+            .map_err(Error::from_reason);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = url;
+            Err(Error::from_reason("Opening a link in the system's handler is only implemented on macOS"))
+        }
+    }
+
     /// Make the fonts in a TrueType or OpenType file (or a collection) usable by
     /// `fontFamily`, under the family names the file declares. Call it before
     /// the text that names the family is first laid out: a family that did not

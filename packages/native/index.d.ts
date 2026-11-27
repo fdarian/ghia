@@ -629,6 +629,11 @@ export declare class GpuixRenderer {
    */
   requestSubmit(elementId: number, submitterId?: number | undefined | null): void
   /**
+   * Opens an `http:`, `https:`, `mailto:` or `tel:` URL with the system's default handler. Any other
+   * scheme is an error.
+   */
+  openUrl(url: string): void
+  /**
    * Make the fonts in a TrueType or OpenType file (or a collection) usable by
    * `fontFamily`, under the family names the file declares. Call it before
    * the text that names the family is first laid out: a family that did not
@@ -1467,6 +1472,12 @@ export declare class TestGpuixRenderer {
   getNativeviewAttachSize(elementId: number): NativeviewSize | null
   /** Makes the window refuse native surfaces (`false`), as a platform that cannot compose does. */
   setNativeSurfacesAvailable(available: boolean): void
+  /**
+   * Records a request to open a link in the system's handler, which a test window must not make.
+   * `getOpenedUrls` has the requests, in order.
+   */
+  openUrl(url: string): void
+  getOpenedUrls(): Array<string>
   /** Make the fonts in a TrueType or OpenType file usable by `fontFamily`. */
   registerFont(data: Buffer): void
   /**

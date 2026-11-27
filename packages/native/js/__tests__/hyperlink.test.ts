@@ -4,6 +4,7 @@ import { defineDomMembers } from "../dom-members.js"
 import { followLinkOnClick, clickActivatesLink } from "../events/link-activation.js"
 import { followLinkAfterClick } from "../events/activation.js"
 import { MouseEvent } from "../events/classes.js"
+import { bindLinkOpener } from "../shell/open-link.js"
 import "../dom-globals.js"
 
 class FakeEl extends HTMLElement {
@@ -207,6 +208,8 @@ describe("the URL members of a link", () => {
 describe("following a link on a click", () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
   const heard: string[] = []
+  const opened: string[] = []
+  bindLinkOpener({ openUrl: (url) => void opened.push(url) })
   const onHash = (event: Event) => heard.push(`${(event as HashChangeEvent).oldURL} -> ${(event as HashChangeEvent).newURL}`)
 
   beforeEach(() => {
@@ -217,6 +220,7 @@ describe("following a link on a click", () => {
   afterEach(() => {
     window.removeEventListener("hashchange", onHash)
     heard.length = 0
+    opened.length = 0
     warn.mockClear()
   })
 
@@ -240,14 +244,37 @@ describe("following a link on a click", () => {
     expect(location.hash).toBe("#in")
   })
 
-  it("another URL goes to openLinkExternally, which warns once per URL and navigates nowhere", () => {
-    followLinkOnClick([link("/b")])
-    followLinkOnClick([link("/b")])
+  it("a link to another origin is opened by the system, once for each click", () => {
     followLinkOnClick([link("https://example.com/")])
+    followLinkOnClick([link("https://example.com/")])
+    followLinkOnClick([link("http://localhost:8080/")])
+    followLinkOnClick([link("mailto:a@example.com")])
+    followLinkOnClick([link("tel:+15551234")])
+    expect(opened).toEqual(["https://example.com/", "https://example.com/", "http://localhost:8080/", "mailto:a@example.com", "tel:+15551234"])
+    expect(location.href).toBe("http://localhost/dir/page")
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("a same-origin link that is not a fragment is not followed, and warns once per URL", () => {
+    followLinkOnClick([link("/b")])
+    followLinkOnClick([link("/b")])
+    followLinkOnClick([link("http://localhost/c?d=1")])
+    expect(opened).toEqual([])
     expect(location.href).toBe("http://localhost/dir/page")
     expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([
       expect.stringContaining("http://localhost/b"),
-      expect.stringContaining("https://example.com/"),
+      expect.stringContaining("http://localhost/c?d=1"),
+    ])
+  })
+
+  it("javascript: does nothing, and a scheme the system is not given is warned about", () => {
+    followLinkOnClick([link("javascript:alert(1)")])
+    followLinkOnClick([link("file:///etc/passwd")])
+    followLinkOnClick([link("slack://open")])
+    expect(opened).toEqual([])
+    expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining("file:///etc/passwd"),
+      expect.stringContaining("slack://open"),
     ])
   })
 

@@ -43,6 +43,7 @@ import type {
   WindowKeyEventHandlers,
 } from "./host.js"
 import { bindClipboard } from "./clipboard.js"
+import { bindLinkOpener } from "./shell/open-link.js"
 import { runEditingComposition, runEditingInput, type EditingCompositionStep } from "./editing/input.js"
 import { forgetElementSource, forgetWindowSource } from "./events/window-target.js"
 import { detachRenderer } from "./detached-renderer.js"
@@ -263,6 +264,7 @@ interface NativeTestRendererApi
   promptForPaths(options?: PathPromptOptions): Promise<string[] | null>
   writeClipboard(items: ClipboardData[]): void
   readClipboard(): ClipboardData[]
+  getOpenedUrls(): string[]
   flush(): void
   flushIfDirty(): void
   drainEvents(): EventPayload[]
@@ -728,6 +730,8 @@ export class TestRenderer implements NativeRenderer {
   /** The test window's own clipboard. It never touches the system's. */
   readonly writeClipboard: NonNullable<NativeRenderer["writeClipboard"]>
   readonly readClipboard: NonNullable<NativeRenderer["readClipboard"]>
+  /** Records the request: a test window never starts the system's browser. `openedUrls` has what was asked for. */
+  readonly openUrl: NonNullable<NativeRenderer["openUrl"]>
   readonly setWindowSelectionChange: NonNullable<
     NativeRenderer["setWindowSelectionChange"]
   >
@@ -772,6 +776,7 @@ export class TestRenderer implements NativeRenderer {
     this.promptForPaths = this.native.promptForPaths.bind(this.native)
     this.writeClipboard = this.native.writeClipboard.bind(this.native)
     this.readClipboard = this.native.readClipboard.bind(this.native)
+    this.openUrl = this.native.openUrl.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
     this.setWindowEventListeners = this.native.setWindowEventListeners.bind(
       this.native
@@ -796,6 +801,7 @@ export class TestRenderer implements NativeRenderer {
     )
     this.native.setSyncEventHandler((event) => this.dispatchSyncEvent(event))
     bindClipboard(this)
+    bindLinkOpener(this)
   }
 
   /** Asks the window for its next frame's steps, which run the `requestAnimationFrame` callbacks. */
@@ -2080,6 +2086,11 @@ export class TestRenderer implements NativeRenderer {
     this.native.requestSubmit(elementId, submitterId)
     this.dispatchNativeEvents()
     this.native.flushIfDirty()
+  }
+
+  /** The URLs links asked the system to open, in order. */
+  openedUrls(): string[] {
+    return this.native.getOpenedUrls()
   }
 
   registerFont(bytes: Buffer | Uint8Array): void {
