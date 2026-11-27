@@ -46,9 +46,11 @@ const SHEET = `
   }
   .row { width: 150px; height: ${ROW}px; flex-shrink: 0; color: #ffffff; background-color: #223344; border-bottom: 1px solid #112233 }
   .row:hover { color: #ff0000; background-color: #664422 }
+  .vrow { --c1: #223344; --c2: #664422; --c3: #ffffff; --c4: #ff0000; width: 150px; height: ${ROW}px; flex-shrink: 0; color: var(--c3); background-color: var(--c1) }
+  .vrow:hover { color: var(--c4); background-color: var(--c2) }
 `
 
-type Variant = "v4" | "v3" | "sheet" | "icon" | "icon-own" | "icon-fill" | "gradient" | "all"
+type Variant = "v4" | "v3" | "sheet" | "sheet-vars" | "icon" | "icon-own" | "icon-fill" | "gradient" | "all"
 
 const REST = "#223344"
 const TINT = "#443322"
@@ -75,6 +77,13 @@ function Icon(props: { variant: Variant; filled: boolean }) {
 }
 
 function Row(props: { index: number; variant: Variant; seen: string[]; tint: boolean }) {
+  if (props.variant === "sheet-vars") {
+    return (
+      <div testId={`row-${props.index}`} className="vrow transition-colors">
+        {`row-${props.index}`}
+      </div>
+    )
+  }
   if (props.variant === "sheet") {
     return (
       <div testId={`row-${props.index}`} className="row transition-colors">
@@ -126,7 +135,7 @@ function Page(props: { variant: Variant; seen: string[] }) {
   tintRows = (next) => flushSync(() => setTinted(next))
   return (
     <>
-      {props.variant === "sheet" ? <style>{SHEET}</style> : null}
+      {props.variant === "sheet" || props.variant === "sheet-vars" ? <style>{SHEET}</style> : null}
       <div
         testId="column"
         style={{
@@ -317,7 +326,9 @@ describeNative("a hover whose element has Tailwind's transition-colors", { timeo
   })
 
   for (const instant of INSTANTS.filter((instant) => ["enter-6", "enter-12", "leave-6"].includes(instant.name))) {
-    for (const variant of ["gradient", "all"] as const) {
+    // `sheet-vars` is Tailwind v4's own output for the colours (`background-color: var(--color-...)`): a `var()` in a colour is
+    // a frame built whole (`restyles_beyond_hover`) whatever the transition is, and shows what patching off shows.
+    for (const variant of ["gradient", "all", "sheet-vars"] as const) {
       it(`shows what patching off shows at ${instant.name}, with ${variant}`, async () => {
         const on = await pictureAt(variant, true, instant)
         const off = await pictureAt(variant, false, instant)

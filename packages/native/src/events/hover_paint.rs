@@ -594,6 +594,53 @@ mod tests {
     }
 
     #[test]
+    fn tailwinds_transition_colors_is_a_transition_of_colours() {
+        let list = "color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to";
+        let held = |json: &str| {
+            let style = crate::css::var_substitution::parse(json.as_bytes()).unwrap();
+            let (tree, id) = tree_of(style.clone());
+            hover_paints_only(&tree, id, &style)
+        };
+        let v4 = format!(
+            r##"{{"color":"#fff","backgroundColor":"#223344","transitionProperty":"{list}","transitionTimingFunction":"var(--tw-ease, var(--default-transition-timing-function))","transitionDuration":"var(--tw-duration, var(--default-transition-duration))","hover":{{"color":"red","backgroundColor":"#eee"}}}}"##
+        );
+        assert!(held(&v4), "v4, with a duration and a timing function that are var()");
+        assert!(hover_paints(&format!(
+            r##"{{"color":"#fff","backgroundColor":"#223344","transitionProperty":"{list}","transitionDuration":"150ms","hover":{{"color":"red","backgroundColor":"#eee"}}}}"##
+        )));
+        // A duration that is a var() and no list names the properties `all`.
+        assert!(!held(
+            r##"{"backgroundColor":"#223344","transitionDuration":"var(--d)","hover":{"backgroundColor":"#eee"}}"##
+        ));
+        assert!(!held(
+            r##"{"backgroundColor":"#223344","transitionProperty":"var(--p)","transitionDuration":"1s","hover":{"backgroundColor":"#eee"}}"##
+        ));
+        assert!(!hover_paints(&format!(
+            r##"{{"backgroundColor":"#223344","transitionProperty":"{list}, width","transitionDuration":"1s","hover":{{"backgroundColor":"#eee"}}}}"##
+        )));
+    }
+
+    #[test]
+    fn a_colour_an_icon_below_inherits_is_paint_only_under_a_transition_of_fill() {
+        let parent = style(r##"{"color":"blue","hover":{"color":"red"}}"##);
+        let (tree, id) = with_child(parent.clone(), style(r##"{"transitionProperty":"color, fill, stroke","transitionDuration":"1s"}"##));
+        assert!(hover_paints_only(&tree, id, &parent));
+        let (tree, id) = with_child(parent.clone(), style(r##"{"transitionProperty":"fill, stroke-width","transitionDuration":"1s"}"##));
+        assert!(!hover_paints_only(&tree, id, &parent), "a stroke width changes more than a colour");
+    }
+
+    #[test]
+    fn a_transition_of_a_paint_does_not_make_an_element_restyle_beyond_a_hover() {
+        let (tree, id) = tree_of(style(
+            r##"{"backgroundColor":"#fff","transitionProperty":"fill, stroke, --tw-gradient-to","transitionDuration":"1s","hover":{"backgroundColor":"#eee"}}"##,
+        ));
+        let element = &tree.elements[&id];
+        let hover = element.style.as_deref().map(paint_hover_of);
+        let (colors, lengths) = (ColorContext::root(Scheme::Light), LengthContext::initial(0.0, 0.0));
+        assert!(!may_lift_in_any_state(element, hover, &colors, &lengths));
+    }
+
+    #[test]
     fn a_custom_property_a_hover_sets_may_feed_anything() {
         assert!(!hover_paints(r##"{"backgroundColor":"#fff","hover":{"backgroundColor":"#eee","--x":"1px"}}"##));
     }

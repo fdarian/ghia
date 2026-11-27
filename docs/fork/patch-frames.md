@@ -725,12 +725,36 @@ style with `@container` rules.
 
 **A transition of colours is paint, any other is not** (`motion::transitions_only_colours`, one predicate for every site). A hover
 that paints starts a transition only on a property it changes, and when the element's `transition` names colours and nothing else
-(`background-color`, `color`, the border, outline and text-decoration colours, or none) the transition is one a patch runs: the
+(`background-color`, `color`, the border, outline and text-decoration colours, the paints `fill`, `stroke`, `stop-color` and `flood-color`, or none) the transition is one a patch runs: the
 patch builds the root, which starts it, and the ticks of the run build the root again. A list that can run on anything else is
-`Whole`: `all`, `opacity` (a run of an opacity or a transform starts as a frame that re-layers), a size, an SVG attribute, a
-`var()` in a `transition*` declaration. That is read of the element, of the refinement and, when `color` changes, of every element below
+`Whole`: `all`, `opacity` (a run of an opacity or a transform starts as a frame that re-layers), a size, an SVG attribute that is
+not a paint (`stroke-width`, `r`, `d`), a `var()` in `transition` or `transition-property`. That is read of the element, of the refinement and, when `color` changes, of every element below
 (`Paints::UnlessTransitionBelow`), and an element whose list is colours only does not count as one a state restyles beyond a hover
 (`restyles_beyond_hover`, so it is no reason for a root to lift).
+
+**Tailwind's `transition-colors`** (v4: `color, background-color, border-color, outline-color, text-decoration-color, fill, stroke,
+--tw-gradient-from, --tw-gradient-via, --tw-gradient-to`, with `transition-duration: var(--tw-duration, var(--default-transition-duration))`
+and a `var()` timing function; v3 the colours, `fill` and `stroke` with literal times) is a list of colours:
+
+- **`fill` and `stroke` are colours.** A hover restyles a `StyleDesc` and never an SVG attribute, and a paint changes no box, so a
+  hover cannot start a transition of one: it only starts a transition on a property it changes, and the attributes of a shape
+  are written by a commit of the app, which is no hover. A hover that changes `color` reaches an `<svg>` with `currentColor`
+  paint through the `color` of the context, and a `currentColor` computes to itself (no transition of `fill` starts, as in a
+  browser): the icon follows the colour showing at each tick of the `color` run, and is repainted with it. A transition of `fill`
+  that a commit starts on a shape, under a root that a hover patches, is the one of
+  the one of an `<svg>` whose shapes run a paint-only animation (a unit; an SVG attribute never `changes_layout`). `stroke-width`, `r`, `d` and the other attributes of a shape are not colours.
+- **A custom property matches nothing.** Ghia transitions no custom property, registered by `@property` or not (see [deviations](deviations.md#stylesheets)), so a `--tw-gradient-from` in the list names no
+  property and starts nothing; a hover that changes one is not paint-only (a custom property is not in the list of
+  `differs_by_paint_only`) and is a frame built whole, which shows what a patch would (the gradient is the same at every instant;
+  a browser with the `@property` registration fades the stops, Ghia swaps them).
+- **A `var()` in the duration, the timing function, the delay or the behavior says how a transition runs, not on what.** Only a
+  `var()` in `transition` or `transition-property` leaves the list unknown (`var_substitution::holds_key`). With no list written
+  (`transition-duration: var(--d)` alone) the properties are `all`, so that is not colours.
+- **What stays whole.** A `var()` in a colour (v4's own `background-color: var(--color-blue-500)`, `color: var(--color-white)`)
+  makes the element one that `restyles_beyond_hover` (`StyleDesc::holds_var_declarations`: what a `var()` resolves to is not read
+  before the build), so a root that holds it is not recorded for a patch and the hover is a frame built whole, whatever the
+  transition says (`sheet-vars` in `hover-transition-tailwind.test.tsx` pins that it shows what patching off shows). A stylesheet
+  of v4 with its theme colours is therefore not patched yet; literal colours (v3, or a compiled theme) are.
 
 **The ticks of the run.** The build of a patch's unit records nothing (`Retain::suspend`), so what it found running on each element
 it built is collected by `Retain::dynamic_bits(id, bits)` and handed to `Retain::land_patch` when the patch is drawn
@@ -1787,6 +1811,13 @@ come at the frames a per-frame tick gives them, and `getAnimations()` reads the 
   20 ticks into the run and into the leave is what patching off draws, and the picture at 6 is neither of the ends (also under the verifier,
   with 0 mismatches); `all` and `opacity` leave the hover a frame built whole; a colour a child with a transition inherits is a patched hover
   (the engine starts a colour transition from the element's own change, not from an inherited one) that shows what patching off shows.
+- react `hover-transition-tailwind.test.tsx`: Tailwind's `transition-colors` (v4 with `var()` duration and timing, as inline style and from
+  a stylesheet, and v3) on a row with a hover that changes the colour and the background is a patched hover, 12 patched ticks, one that
+  ends it, none after, and the same on the leave, with a row that holds an `<svg>` icon painted with `currentColor`, an icon with the
+  list on itself, and an icon whose shape has `transition: fill` that a commit changes under the run; `transitionrun` and
+  `transitionend` fire at 0 and 208 ms; the pictures at seven instants are what patching off draws (also under the verifier, with 0
+  mismatches); a gradient whose `--tw-gradient-from` the hover changes, a list with `all` and v4's `var()` colours are frames built whole
+  that show the same.
 - react `hover-patch.test.tsx`: a paint-only hover, one that changes the padding and one that a `pointerenter` listener hears,
   over a virtual list and a plain column, cross the rows and back: the picture, the boxes, what is under the pointer and the cursor
   are what patching off draws (also under the verifier, with 0 mismatches), a tick is asked for only by the first, and the listener
