@@ -4465,14 +4465,16 @@ and on Enter in an `<input>` (see [The input and change events](#the-input-and-c
 does not reject an edit like a browser-controlled input.
 
 The focused caret stays solid during edits and then blinks every 500ms while
-idle. It stops scheduling repaint frames on blur, while the window is
-inactive and while the caret cannot be seen (scrolled out of its scroller, or
-outside the window or a clip); the field still takes text there, and blinks again
-once a frame brings it back. The blink is a tick that repaints only the input, and only when the
-caret changes phase (a tick of an animation elsewhere leaves the caret as it was
-painted, as Chrome does), so a field costs a page with a running animation nothing:
-an idle one, a focused one and one outside its clip leave every tick of the
-animation patched. Override its colour through the
+idle. The window blinks it, with no frame of the page: on macOS, in a window with
+no native view (`<webview>`, `<nativeview>`) and with nothing drawn over the caret,
+it is a layer that the system's compositor animates, so a blink costs no GPU work and
+no JS wake; otherwise gpui draws it lit or dark with a present of its own that
+draws nothing else. Only a caret in an effect group, a text clip or a window with a
+native view is repainted by the page at each phase (a tick that repaints only the
+input, and only when the caret changes phase, so a tick of an animation elsewhere
+leaves the caret as it was painted, as Chrome does). A blur, an inactive window and a
+caret that cannot be seen (scrolled out of its scroller, or outside the window or a clip)
+show no caret and ask for no frame; the field still takes text there. Override its colour through the
 shared native theme:
 
 ```tsx
@@ -4732,8 +4734,8 @@ const stop = collectGarbageWhenIdle() // checks every 5s, collects after two qui
 It uses `Bun.gc(true)`, or `gc()` where Node runs with `--expose-gc`, and does
 nothing in a runtime that has neither. Quiet means no mutation batch reached a
 renderer and the process is under half a core. The batch count decides, not CPU
-alone, because a focused text field blinks its caret in native code and redraws
-twice a second. Pass `activity`, `collect`, `checkMs`, `quietChecks` or
+alone, because a focused text field in a window that cannot blink its caret by itself
+redraws it twice a second. Pass `activity`, `collect`, `checkMs`, `quietChecks` or
 `busyCpu` to change what it watches or how often.
 
 ### Input in a search pill
@@ -6408,7 +6410,7 @@ rebuilds that continuity at paint time instead. The mechanism is ported from
 
 ## Editable content
 
-A `contenteditable` element is an editing surface as on the web, so an editor written for the DOM (Lexical is the one tested) runs unchanged: it hears `beforeinput`, edits the DOM, reads a live `Selection` and `Range`, and handles `copy` and `paste` itself. Ghia follows Chrome on macOS, and each part below ends with what differs from it, listed in [deviations](./fork/deviations.md#editing). `<input>` and `<textarea>` are not editing hosts: they edit themselves ([Text input](#text-input)). The mechanisms are in [editing.md](./fork/editing.md).
+A `contenteditable` element is an editing surface as on the web, so an editor written for the DOM (Lexical is the one tested) runs unchanged: it hears `beforeinput`, edits the DOM, reads a live `Selection` and `Range`, and handles `copy` and `paste` itself. Ghia follows Chrome on macOS, and each part below ends with what differs from it, listed in [deviations](./fork/deviations.md#editing). `<input>` and `<textarea>` are not editing hosts: they edit themselves ([Text input](#text-input)). The mechanisms are in [editing.md](./fork/editing.md). The caret of a collapsed selection in a focused host blinks as an input's does ([Text input](#text-input)) and is painted above the text of its paragraph, as in Chrome.
 
 ### Editing hosts
 
