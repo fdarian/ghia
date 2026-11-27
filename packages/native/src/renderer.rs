@@ -9723,7 +9723,9 @@ impl GpuixView {
         cx: &mut gpui::App,
     ) -> Option<Vec<String>> {
         let tree_arc = self.tree.clone();
-        let tree = tree_arc.lock().unwrap();
+        let mut tree = tree_arc.lock().unwrap();
+        let unheld = pseudo.and_then(|pseudo| tree.unheld_pseudo_style(id, pseudo));
+        let tree = tree;
         let callback = self.event_callback.clone();
         let activation = self.activation();
         let pointer_state = self.pointer.clone();
@@ -9744,7 +9746,7 @@ impl GpuixView {
             scroller: None,
         };
         let mut ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), start);
-        crate::css::computed_style::read(&mut ctx, window, id, boxes, pseudo)
+        crate::css::computed_style::read(&mut ctx, window, id, boxes, pseudo, unheld.as_ref())
     }
 
     /// Builds the subtree of `id` for gpui, which asked for it while it laid out or prepainted the

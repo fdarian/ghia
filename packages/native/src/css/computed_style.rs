@@ -12,7 +12,7 @@
 
 use gpui::{Pixels, Size};
 use napi::{Error, Result};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::automation::ElementBounds;
 use crate::css::custom_properties::CustomProperties;
@@ -108,13 +108,15 @@ pub(crate) fn pseudo_of(name: Option<String>) -> Result<Option<crate::css::sheet
 /// document. `pseudo` asks for its `::before` or `::after`: the style the rules for the box declare,
 /// on what the box inherits from its element; one no rule matches has what Chrome reports for a
 /// pseudo-element the element does not have, the values it inherits and the initial value of every
-/// other property.
+/// other property. `unheld` is the style of a box the element holds none of
+/// (`RetainedTree::unheld_pseudo_style`).
 pub(crate) fn read(
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     id: u64,
     boxes: &Boxes,
     pseudo: Option<crate::css::sheet::Pseudo>,
+    unheld: Option<&Arc<StyleDesc>>,
 ) -> Option<Vec<String>> {
     let tree = ctx.tree;
     if !is_connected(tree, id) {
@@ -131,7 +133,7 @@ pub(crate) fn read(
             parent.lays_out_items = crate::layout::display::lays_out_items(element_style.display.as_deref());
             ctx.inherited =
                 ctx.inherited.clone().descend_with_custom(Some(&element_style), element.has_inert_prop(), element_custom);
-            match element.pseudo_style(which) {
+            match element.pseudo_style(which).or(unheld) {
                 Some(declared) => {
                     let (style, custom) = pseudo_style_at_read(ctx, element, declared);
                     let content = style.content.as_ref().map(|content| {

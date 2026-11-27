@@ -34,8 +34,9 @@ use crate::style::StyleDesc;
 
 use super::cascade::MatchedRules;
 use super::document::{StyleSheets, SKIP_LOG_LIMIT};
-use super::index::RuleBody;
+use super::index::{RuleBody, Target};
 use super::share::Found;
+use super::view::{SiblingPositions, TreeView};
 
 /// The generated boxes of an element that a rule can style.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
@@ -308,6 +309,30 @@ impl RetainedTree {
             element.set_pseudo_matches(new);
             self.sync_generated(id);
         }
+    }
+
+    /// The style the rules declare for the box `pseudo` of `id` when the element has no box held
+    /// (`pseudo_style` is `None`): no rule gives the box `content`, so the flush did not match it,
+    /// and what `getComputedStyle` reads is the rules that only style it (`*, ::before, ::after {
+    /// box-sizing: border-box }`), matched now. `None` when no rule matches.
+    pub(crate) fn unheld_pseudo_style(&mut self, id: u64, pseudo: Pseudo) -> Option<Arc<StyleDesc>> {
+        let element = self.elements.get(&id)?;
+        if element.pseudo_style(pseudo).is_some() || !self.sheets.index.has_rules_for(pseudo) || !element.is_matchable() {
+            return None;
+        }
+        let css = element.css();
+        let (element_id, classes) = css.map_or((None, &[][..]), |css| (css.id, &css.classes[..]));
+        let target = Target::Box(pseudo);
+        if !self.sheets.index.may_match(element_id, classes, target) {
+            return None;
+        }
+        let positions = SiblingPositions::default();
+        let found = self.sheets.index.matching(&TreeView::new(self, id, &positions), element_id, classes, target);
+        if found.is_empty() {
+            return None;
+        }
+        let matched = self.sheets.interner.intern(&self.sheets.index, found);
+        self.sheets.cascaded(&mut self.styles, &matched, None)
     }
 
     /// The attribute `lower_name` of `id` changed: a box whose `content` reads it shows another text.

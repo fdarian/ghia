@@ -22,7 +22,7 @@ use crate::retained_tree::RetainedElement;
 use super::atoms::Atom;
 use super::document::StyleSheets;
 use super::matching::ElementView;
-use super::pseudo::Pseudo;
+use super::index::Target;
 use super::states::RuleMatch;
 use super::view::TreeView;
 
@@ -118,7 +118,7 @@ impl StyleSharing {
         view: &TreeView<'_>,
         id: Option<Atom>,
         classes: &[Atom],
-        target: Option<Pseudo>,
+        target: Target,
     ) -> Found {
         let index = &sheets.index;
         if !index.shares() {
@@ -175,14 +175,14 @@ impl StyleSharing {
         view: &TreeView<'_>,
         id: Option<Atom>,
         classes: &[Atom],
-        target: Option<Pseudo>,
+        target: Target,
     ) {
         #[cfg(test)]
         KEY_BUILDS.with(|count| count.set(count.get() + 1));
         let key = &mut self.key;
         key.clear();
         // The same element asks for its box's rules with the same features.
-        key.push(target.map_or(0, |pseudo| 1 + pseudo.index() as u8));
+        key.push(target.key());
         let is_svg = element.is_svg();
         key.push(u8::from(is_svg));
         push_atom(key, view.tag());

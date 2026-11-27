@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use super::{counts, Doc, ROOT};
+use super::{counts, full_matches, key_builds, reset_full_matches, Doc, ROOT};
 use crate::color::Scheme;
 use crate::css::content::{ComputedItem, Content};
 use crate::css::media_query::MediaEnvironment;
@@ -17,6 +17,11 @@ fn pseudo_style(doc: &Doc, id: u64, pseudo: Pseudo) -> Option<Arc<StyleDesc>> {
 
 fn color(doc: &Doc, id: u64, pseudo: Pseudo) -> Option<String> {
     pseudo_style(doc, id, pseudo)?.color.clone()
+}
+
+/// The color of a box no rule gave `content`, which `getComputedStyle` matches when it is asked.
+fn unheld_color(doc: &mut Doc, id: u64, pseudo: Pseudo) -> Option<String> {
+    doc.tree.unheld_pseudo_style(id, pseudo)?.color.clone()
 }
 
 /// What the box holds as the rules declare it, `None` for no box.
@@ -153,7 +158,8 @@ fn a_rule_with_a_list_of_selectors_styles_each_target() {
     doc.flush();
     assert_eq!(doc.color(div), Some("red"));
     assert_eq!(color(&doc, div, BEFORE).as_deref(), Some("red"));
-    assert_eq!(color(&doc, div, AFTER).as_deref(), Some("red"));
+    assert_eq!(color(&doc, div, AFTER), None, "no rule gives it content: it is read when asked for");
+    assert_eq!(unheld_color(&mut doc, div, AFTER).as_deref(), Some("red"));
     assert_eq!(text(&doc, div, BEFORE).as_deref(), Some("x"));
 }
 
@@ -169,6 +175,40 @@ fn a_universal_box_rule_reaches_every_element_and_the_boxes_are_shared() {
     }
     let first = doc.tree.elements[&elements[0]].pseudo_matches().unwrap().clone();
     assert!(elements.iter().all(|id| Arc::ptr_eq(&first, doc.tree.elements[id].pseudo_matches().unwrap())), "one value for equal matches");
+}
+
+#[test]
+fn a_universal_box_rule_without_content_adds_no_matching_to_any_element() {
+    // Tailwind's preflight: `*, ::before, ::after { ... }` declares no `content`.
+    let preflight = "*, ::before, ::after { opacity: 0.5 }";
+    let flush = |sheet: &str| {
+        let mut doc = Doc::new();
+        let rows: Vec<u64> = (0..40).map(|at| doc.classed("div", ROOT, if at % 2 == 0 { "row" } else { "odd row" })).collect();
+        doc.style_element(ROOT, sheet);
+        reset_full_matches();
+        doc.flush();
+        (doc, rows, full_matches(), key_builds())
+    };
+    let (_, _, without, without_keys) = flush("* { opacity: 0.5 } .row { color: red }");
+    let (mut doc, rows, with, with_keys) = flush(&format!("{preflight} .row {{ color: red }}"));
+    assert_eq!(with, without, "the boxes cost no match: the rules for them have no `content` to give one");
+    assert_eq!(with_keys, without_keys, "nor a key of the memo");
+    assert!(rows.iter().all(|id| doc.tree.elements[id].pseudo_matches().is_none()), "no element holds a box");
+    assert_eq!(doc.tree.unheld_pseudo_style(rows[0], BEFORE).and_then(|style| style.opacity), Some(0.5), "it is read when asked for");
+}
+
+#[test]
+fn a_universal_box_rule_without_content_styles_the_boxes_a_content_rule_made() {
+    let mut doc = Doc::new();
+    let plain = doc.classed("div", ROOT, "plain");
+    let marked = doc.classed("div", ROOT, "marked");
+    doc.style_element(ROOT, "*, ::before, ::after { color: red } .marked::before { content: \"x\" }");
+    doc.flush();
+    assert!(doc.tree.elements[&plain].pseudo_matches().is_none());
+    assert_eq!(text(&doc, marked, BEFORE).as_deref(), Some("x"));
+    assert_eq!(color(&doc, marked, BEFORE).as_deref(), Some("red"), "the rule that gave no content still styles the box");
+    assert!(doc.tree.elements[&marked].pseudo_matches().unwrap().side(AFTER).is_none(), "the other box has no rule that gives it content");
+    assert_eq!(unheld_color(&mut doc, plain, AFTER).as_deref(), Some("red"));
 }
 
 #[test]
@@ -398,7 +438,8 @@ fn a_box_rule_without_content_marks_no_element_to_draw() {
     let before = revision(&doc, div);
     doc.tree.set_attribute(div, "class", Some("a on".into()));
     doc.flush();
-    assert_eq!(color(&doc, div, BEFORE).as_deref(), Some("blue"));
+    assert!(doc.tree.elements[&div].pseudo_matches().is_none(), "no rule gives a box content, so none is matched");
+    assert_eq!(unheld_color(&mut doc, div, BEFORE).as_deref(), Some("blue"), "and what is read is current");
     assert_eq!(revision(&doc, div), before, "no box has content, so nothing is drawn differently");
 }
 
@@ -434,6 +475,19 @@ mod generated {
         assert_eq!(doc.tree.elements[&made.children[0]].content.as_deref(), Some("x"));
         assert_eq!(doc.tree.elements[&after].style.as_deref().and_then(|style| style.display.as_deref()), Some("block"));
         assert!(is_generated(before) && owner_of(before) == owner && state_owner(made.children[0]) == owner);
+    }
+
+    #[test]
+    fn an_element_with_no_content_for_a_box_to_be_in_has_none() {
+        let mut doc = Doc::new();
+        let metadata: Vec<u64> = ["style", "script", "template", "title"].into_iter().map(|tag| doc.element(tag, ROOT)).collect();
+        let div = doc.element("div", ROOT);
+        doc.style_element(ROOT, "*::before { content: \"x\" }");
+        doc.flush();
+        assert!(doc.tree.elements.contains_key(&box_id(div, BEFORE)));
+        for id in metadata {
+            assert!(!doc.tree.elements.contains_key(&box_id(id, BEFORE)), "{}", doc.tree.elements[&id].element_type);
+        }
     }
 
     #[test]

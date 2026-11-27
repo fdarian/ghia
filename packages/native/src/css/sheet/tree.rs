@@ -20,6 +20,7 @@ use super::cascade::MatchedRules;
 use super::has::Presence;
 use super::invalidation::Reach;
 use super::live_states::LiveInputs;
+use super::index::Target;
 use super::pseudo::Pseudo;
 use super::share::{Found, StyleSharing};
 use super::tree_states::TreeStates;
@@ -623,7 +624,7 @@ impl RetainedTree {
         let mut found_pseudos: Vec<(u64, [Found; 2])> = Vec::new();
         let positions = SiblingPositions::default();
         let mut sharing = StyleSharing::default();
-        let pseudos = self.sheets.index.has_pseudo_rules();
+        let pseudos = self.sheets.index.has_content_rules();
         for (id, connected) in restyle {
             crate::perf_counters::element_rematched();
             let Some(element) = self.elements.get(&id) else {
@@ -632,9 +633,9 @@ impl RetainedTree {
             let css = element.css();
             let (element_id, classes) = css.map_or((None, &[][..]), |css| (css.id, &css.classes[..]));
             let matchable = connected && element.is_matchable();
-            let matched = if matchable && self.sheets.index.may_match(element_id, classes, None) {
+            let matched = if matchable && self.sheets.index.may_match(element_id, classes, Target::Element) {
                 let view = TreeView::new(self, id, &positions);
-                sharing.matching(&self.sheets, element, &view, element_id, classes, None)
+                sharing.matching(&self.sheets, element, &view, element_id, classes, Target::Element)
             } else {
                 Found::Own(Vec::new())
             };
@@ -646,13 +647,19 @@ impl RetainedTree {
             // An element that has boxes is asked again when the rules for them are gone.
             if pseudos || had_boxes {
                 let boxes = Pseudo::BOTH.map(|pseudo| {
-                    let target = Some(pseudo);
-                    if matchable && self.sheets.index.has_rules_for(pseudo) && self.sheets.index.may_match(element_id, classes, target) {
-                        let view = TreeView::new(self, id, &positions);
-                        sharing.matching(&self.sheets, element, &view, element_id, classes, target)
-                    } else {
-                        Found::Own(Vec::new())
+                    let index = &self.sheets.index;
+                    // No rule that gives the box `content` matches: the element has no box, and the
+                    // rules that only style one are read when `getComputedStyle` asks for it.
+                    let gate = Target::Content(pseudo);
+                    if !(matchable && index.has_content_rules_for(pseudo) && index.may_match(element_id, classes, gate)) {
+                        return Found::Own(Vec::new());
                     }
+                    let view = TreeView::new(self, id, &positions);
+                    let with_content = sharing.matching(&self.sheets, element, &view, element_id, classes, gate);
+                    if sharing.is_empty(&with_content) || !index.has_rules_without_content_for(pseudo) {
+                        return with_content;
+                    }
+                    sharing.matching(&self.sheets, element, &view, element_id, classes, Target::Box(pseudo))
                 });
                 if had_boxes || boxes.iter().any(|found| !sharing.is_empty(found)) {
                     found_pseudos.push((id, boxes));

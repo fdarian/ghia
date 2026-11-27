@@ -118,6 +118,29 @@ impl Buckets {
     }
 }
 
+/// What a match of the rules is for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Target {
+    Element,
+    /// Every rule that styles the generated box, `content` or not.
+    Box(Pseudo),
+    /// The rules for the generated box that declare `content`: the ones that decide it has any.
+    /// An element none of them matches has no box to build, so the rest are not matched for it
+    /// (a universal `*, ::before, ::after { ... }` without `content` costs the elements nothing).
+    Content(Pseudo),
+}
+
+impl Target {
+    /// What tells a match for one target from a match for another in the sharing memo.
+    pub(super) fn key(self) -> u8 {
+        match self {
+            Target::Element => 0,
+            Target::Box(pseudo) => 1 + pseudo.index() as u8,
+            Target::Content(pseudo) => 3 + pseudo.index() as u8,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct RuleIndex {
     pub rules: Vec<IndexedRule>,
@@ -125,6 +148,11 @@ pub struct RuleIndex {
     elements: Buckets,
     /// The selectors that end in `::before` and in `::after`, filed by their originating element.
     pseudos: [Buckets; 2],
+    /// The selectors of `pseudos` whose rule declares `content`, in the same order.
+    content_pseudos: [Buckets; 2],
+    /// Whether a box has a rule that declares no `content`, which the match of the box adds to the
+    /// ones that do.
+    extra_pseudos: [bool; 2],
     unlayered_rank: u32,
     pub invalidation: Invalidation,
     /// Whether any selector is self-contained: otherwise nothing is shared and the memo is skipped.
@@ -148,13 +176,21 @@ impl RuleIndex {
         let mut attributes = Attributes::default();
         for rule in rules {
             let number = u32::try_from(index.rules.len()).expect("fewer than 2^32 rules");
+            let declares_content = rule.body.normal.iter().chain(&rule.body.important).any(|declaration| declaration.key == "content");
             for (position, (selector, _)) in rule.body.selectors.iter().enumerate() {
                 index.invalidation.read(selector);
                 attributes.read(selector);
                 let self_contained = is_self_contained(selector, style, &mut self_contained_lists);
                 index.shares |= self_contained;
                 let entry = Entry { rule: number, selector: position as u32, self_contained };
-                index.buckets_mut(selector.pseudo).add(selector, entry);
+                index.buckets_mut(selector.pseudo.map_or(Target::Element, Target::Box)).add(selector, entry);
+                if let Some(pseudo) = selector.pseudo {
+                    if declares_content {
+                        index.content_pseudos[pseudo.index()].add(selector, entry);
+                    } else {
+                        index.extra_pseudos[pseudo.index()] = true;
+                    }
+                }
             }
             if rule.body.selectors.iter().any(|(selector, _)| selector.pseudo.is_some()) {
                 super::pseudo::read_content_attributes(&rule.body, &mut index.content_attributes);
@@ -185,17 +221,19 @@ impl RuleIndex {
         }
     }
 
-    fn buckets(&self, target: Option<Pseudo>) -> &Buckets {
+    fn buckets(&self, target: Target) -> &Buckets {
         match target {
-            None => &self.elements,
-            Some(pseudo) => &self.pseudos[pseudo.index()],
+            Target::Element => &self.elements,
+            Target::Box(pseudo) => &self.pseudos[pseudo.index()],
+            Target::Content(pseudo) => &self.content_pseudos[pseudo.index()],
         }
     }
 
-    fn buckets_mut(&mut self, target: Option<Pseudo>) -> &mut Buckets {
+    fn buckets_mut(&mut self, target: Target) -> &mut Buckets {
         match target {
-            None => &mut self.elements,
-            Some(pseudo) => &mut self.pseudos[pseudo.index()],
+            Target::Element => &mut self.elements,
+            Target::Box(pseudo) => &mut self.pseudos[pseudo.index()],
+            Target::Content(_) => unreachable!("the rules for a box that have content are filed along with the others"),
         }
     }
 
@@ -204,15 +242,27 @@ impl RuleIndex {
         !self.pseudos[pseudo.index()].is_empty()
     }
 
-    /// Whether any rule styles a generated box.
-    pub fn has_pseudo_rules(&self) -> bool {
-        Pseudo::BOTH.into_iter().any(|pseudo| self.has_rules_for(pseudo))
+    /// Whether any rule for the generated box `pseudo` declares `content`: without one no element
+    /// has the box.
+    pub fn has_content_rules_for(&self, pseudo: Pseudo) -> bool {
+        !self.content_pseudos[pseudo.index()].is_empty()
+    }
+
+    /// Whether any rule for a generated box declares `content`.
+    pub fn has_content_rules(&self) -> bool {
+        Pseudo::BOTH.into_iter().any(|pseudo| self.has_content_rules_for(pseudo))
+    }
+
+    /// Whether the box `pseudo` has rules that do not declare `content`, which style a box a rule
+    /// that does has made.
+    pub fn has_rules_without_content_for(&self, pseudo: Pseudo) -> bool {
+        self.extra_pseudos[pseudo.index()]
     }
 
     /// Whether any rule can match an element with this id and these classes: not when every rule
     /// is keyed by an id or a class and the element has neither. `target` is the element, or one
     /// of its generated boxes.
-    pub fn may_match(&self, id: Option<Atom>, classes: &[Atom], target: Option<Pseudo>) -> bool {
+    pub fn may_match(&self, id: Option<Atom>, classes: &[Atom], target: Target) -> bool {
         self.buckets(target).may_match(id, classes)
     }
 
@@ -226,7 +276,7 @@ impl RuleIndex {
         element: &E,
         id: Option<Atom>,
         classes: &[Atom],
-        target: Option<Pseudo>,
+        target: Target,
     ) -> Vec<RuleMatch> {
         self.matching_in_full(element, id, classes, target).0
     }
@@ -238,7 +288,7 @@ impl RuleIndex {
         element: &E,
         id: Option<Atom>,
         classes: &[Atom],
-        target: Option<Pseudo>,
+        target: Target,
     ) -> (Vec<RuleMatch>, bool) {
         super::share::count_full_match();
         let buckets = self.buckets(target);
