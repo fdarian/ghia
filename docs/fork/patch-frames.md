@@ -1417,15 +1417,17 @@ pictures, boxes, hit points, clicks, `scroll` events and `scrollTop`, a culled c
 
 D1a left the stack app at 0 translates of 720. Three things held it, and one of them is not the wheel's.
 
-1. **The hover is not deferred by the wheel's frame but followed after the commit.** A wheel over a `div` does not follow the hover (`follows_build` is
-   `no` for a frame whose only cause is the scroll offset, as for a list), and the translates leave it where it was. What follows it is the frame
-   after a **batch tick**: TanStack's commit for the rows the offset needs changes the tree, and a frame that changed the page follows the hover
-   at the next frame ([scroll.md](scroll.md#the-hover-under-a-still-pointer)). In the stack app 356 ticks of 720 carry a batch, and every
-   one of the 299 ticks whose pointer chain changed comes right after one (272 of them carry no batch of their own: none of the 364 ticks without a
-   batch has a changed pointer chain unless the tick before carried a batch). A list has the same rule (the 51 `Edited` of the plain mailbox are its commits and the hover
-   tick after each) and fewer commits. That tick is a hover that paints, with a wheel step in it: the hover patch declines `Relocated`
-   (`Placement::Deferred`: TanStack's rows are lifted, the patch paints a lifted root in its region only when it is put where it was recorded,
-   and the roots a translate moved are not), and the frame is built whole. Not changed in this slice: see "Open" below.
+1. **The hover followed the commit, not the wheel.** A wheel over a `div` did not follow the hover (`follows_build` is `no` for a frame whose only
+   cause is the scroll offset, as for a list), and the translates leave it where it was. What followed it was the frame after a **batch tick**:
+   TanStack's commit for the rows the offset needs changes the tree, and a frame that changed the page followed the hover at the next frame. In the
+   stack app 356 ticks of 720 carry a batch, and every one of the 299 ticks whose pointer chain changed came right after one (272 of them carry no
+   batch of their own). A list had the same rule (the 51 `Edited` of the plain mailbox are its commits and the hover tick after each) and fewer
+   commits. That tick was a hover that paints with a wheel step in it: the hover patch declines `Relocated` (`Placement::Deferred`: TanStack's rows
+   are lifted, the patch paints a lifted root in its region only when it is put where it was recorded, and the roots a translate moved are not), so
+   the frame was built whole.
+   **Decided (coordinator, option a): while a wheel is in flight a build that changed the page does not make the hover follow** (`HoverAfterScroll::after_build`
+   ignores `build_changed` while the wheel's deadline is pending); it follows when the wheel is quiet. Lists and divs alike, as Chrome holds the hover
+   during a scroll. Every ordinary tick of the stack app is then a translate (362 of 720); what is left is the 356 batch ticks (D2).
 2. **`Retain::seen.scrolls`** is the offsets of the frame shown after a translate (above).
 3. **`NotRelocatable.unrooted`** (above).
 
@@ -1436,23 +1438,25 @@ D1a left the stack app at 0 translates of 720. Three things held it, and one of 
 | D1a (`cba5569a`) | 0 of 720 | 12.22M | 10.34M | 10.20M | 13.46M |
 | + `seen.scrolls` after a translate | 0 of 720 | 12.23M | 10.36M | 10.20M | 13.38M |
 | + the lifted children of a root are the root's | 92 of 720 (the no-batch ticks that do not follow a commit) | 11.97M | 10.28M | 10.19M | 13.42M |
-| the same, with the hover following no build (an experiment, not kept) | 362 of 720 (every no-batch tick) | 10.73M | 9.50M | 6.12M | 14.22M |
+| + the hover held while a wheel is in flight | 362 of 720 (every no-batch tick) | 10.62M to 10.73M | 9.53M | 6.12M | 13.66M to 14.03M |
 
 A translated tick costs 6.3M to 6.4M in the stack app (the list's is 3.5M to 5M; the roots are ~24 rows of 140 operations each, and a div
 scroller's translate also moves what the box that holds them has). The first reason for the others is `Edited` for every one (the batch,
 or the hover that follows it); the declines of the apply (`applyDeclines`) and `mispredicted` are 0.
 
-**Open.** The remaining 272 ticks translate if the hover does not follow a build that a wheel in flight asked for (the commit of the rows it
-scrolled to): the hover would follow when the wheel is quiet (500 ms) or when a build changes the page for another reason. That is a change of the
-behaviour described in [scroll.md](scroll.md#the-hover-under-a-still-pointer) (`a_build_that_changed_the_page_follows_and_one_that_did_not_waits`
-pins "a commit follows", mid-wheel), for lists as well. The other way is for the tick that follows to be a hover patch and a translate in
-one draw (`translate_follows` does it for a list): the patch of a lifted root that a translate moved (`Relocated`, `region` of `prepare_unit`
-needs `Placement::InPlace`) is the engine's. Both are D1b's open choice, with the batch ticks (356, D2) the other half of the stack app.
+**The end of the scroll.** The hover follows once the wheel is quiet. For rows in a `div` scroller that are not lifted (in the flow) that frame is a patch of the
+two rows now: the patch of a root that a translate moved compares its tape with the recorded one moved by how far the translate moved it
+(`moved_row`), which was only a list row's before, so a root in a scroller was `Rejected` and the frame built whole. For lifted rows (TanStack's, absolute) it is
+still a frame built whole after a `Relocated` decline of the hover patch, which is the engine's (`region` of `prepare_unit` needs `Placement::InPlace`) and costs one
+frame per scroll. For a list the follow at the end of a scroll whose rows left the frame (the row the hover was on is no longer built) is a frame built whole as well
+(`PendingView`), where the follow after a commit used to be a patch: not found, and `scroll-patch-hover.test.tsx` no longer asserts it.
 
 Tests: zed `scroll_patch_div_tests.rs` (`what_a_root_built_in_the_frame_hands_to_a_context_of_its_own_is_the_roots`: the roots rebuilt in the
 frame shown, then a translate that is the frame built whole), `retain.rs` (`a_scroller_whose_content_a_frame_moved_in_place_is_where_the_next_frame_finds_it`),
 react `scroll-patch-div.test.tsx` (rows with a hover colour and a pointer that stays through wheel steps that cross row borders, the hover at the end
-of the scroll, a tick after translates, rows that come in with a wheel step, plain and under the verifier). The two react cases that
+of the scroll (a patch for rows in the flow), commits with every wheel step that leave the hover and its `pointerenter` and `pointerleave` until the wheel is quiet, a tick after
+translates, rows that come in with a wheel step, plain and under the verifier), `hover-after-scroll.test.tsx` (a commit or a transition while a wheel runs, in a list and a
+scroller), `hover_after_scroll.rs`. The two react cases that
 concern the two fixes pass with the fixes taken out: only the stack app discriminates them, as the table above does.
 
 ### Rows that come in and leave (slice G3)

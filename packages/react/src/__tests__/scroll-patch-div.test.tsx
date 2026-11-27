@@ -34,21 +34,23 @@ const VSYNC = 16
 /** `transform`: TanStack Virtual's rows, absolute at the top of the box that holds them and moved by a `translateY`. */
 type Layout = "absolute" | "flow" | "transform"
 
-type Log = { scrolls: number[][]; clicks: number[] }
+type Log = { scrolls: number[][]; clicks: number[]; hovers: string[] }
 
 /**
  * `hover`: each row takes another background under the pointer. `count`: how many rows the page has. `rich`: rows as the mailbox of
  * ghia-bench makes them, with positioned boxes in each (an avatar, a column of two lines that an ellipsis cuts): what a row hands to the
  * stacking context of its own is not painted where its parent's children are.
  */
-type Options = { hover?: boolean; count?: number; rich?: boolean }
+type Options = { hover?: boolean; count?: number; rich?: boolean; events?: boolean }
 
-function Page({ log, layout, bar, hover, rich, count = COUNT }: { log: Log; layout: Layout; bar: boolean } & Options) {
+function Page({ log, layout, bar, hover, rich, events, count = COUNT }: { log: Log; layout: Layout; bar: boolean } & Options) {
   const rows = Array.from({ length: count }, (_, index) => (
     <div
       key={index}
       testId={`row-${index}`}
       onClick={() => log.clicks.push(index)}
+      onPointerEnter={events ? () => log.hovers.push(`enter ${index}`) : undefined}
+      onPointerLeave={events ? () => log.hovers.push(`leave ${index}`) : undefined}
       style={{
         position: layout === "flow" ? undefined : "absolute",
         top: layout === "absolute" ? index * ROW : layout === "transform" ? 0 : undefined,
@@ -95,7 +97,7 @@ function Page({ log, layout, bar, hover, rich, count = COUNT }: { log: Log; layo
 }
 
 function open(translate: boolean, layout: Layout, bar = false, options: Options = {}) {
-  const log: Log = { scrolls: [], clicks: [] }
+  const log: Log = { scrolls: [], clicks: [], hovers: [] }
   const root = createTestRoot({ width: 300, height: 200 })
   const renderer = root.renderer
   renderer.clockPause()
@@ -364,6 +366,100 @@ describeNative("the content of a div scroller moved by a wheel", { timeout: TIME
       expect(on.log.scrolls).toEqual(off.log.scrolls)
     })
   }
+
+  /** Wheel steps with no frame asking the page for anything else, then the end of the scroll: the frames the end draws. */
+  function endOfScroll(translate: boolean, layout: Layout) {
+    const { renderer, unmount } = open(translate, layout, false, { hover: true })
+    try {
+      renderer.nativeSimulateMouseMove(...pointer)
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      renderer.drawFrame()
+      tick(renderer, 4, pointer[0])
+      tick(renderer, -4, pointer[0])
+      for (const step of crossing) tick(renderer, step, pointer[0])
+      const patched = renderer.getPatchCounters().patchedFrames
+      const painted = renderer.getPaintedFrameCount()
+      renderer.advanceTime(500)
+      renderer.dispatchNativeEvents()
+      for (let frame = 0; frame < 3; frame++) renderer.drawFrame()
+      return {
+        patched: renderer.getPatchCounters().patchedFrames - patched,
+        whole: renderer.getPaintedFrameCount() - painted,
+        picture: picture(renderer),
+      }
+    } finally {
+      unmount()
+    }
+  }
+
+  unverified("follows the hover at the end of a scroll over rows in the flow by a patch of the two rows, not a frame built whole", () => {
+    const on = endOfScroll(true, "flow")
+    const off = endOfScroll(false, "flow")
+    expect(on.whole).toBe(0)
+    expect(on.patched).toBeGreaterThanOrEqual(1)
+    expect(on.picture).toEqual(off.picture)
+  })
+
+  /**
+   * Each wheel step has a commit with it, as TanStack Virtual's scroll handler makes one for the rows the offset needs. The commit is
+   * part of the scroll: the hover (and the `pointerenter` and `pointerleave` of the rows) follows when the wheel is quiet.
+   */
+  function commitsUnderStill(translate: boolean, layout: Layout) {
+    const { renderer, unmount, log, render } = open(translate, layout, false, { hover: true, events: true, count: 20 })
+    try {
+      renderer.nativeSimulateMouseMove(...pointer)
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      renderer.drawFrame()
+      tick(renderer, 4, pointer[0])
+      tick(renderer, -4, pointer[0])
+      log.hovers.length = 0
+      let count = 20
+      for (const step of [15, 15, 15, 15, 15]) {
+        renderer.clockAdvance(VSYNC)
+        renderer.advanceTime(VSYNC)
+        renderer.nativeSimulateScrollWheel(pointer[0], pointer[1], 0, step)
+        renderer.dispatchNativeEvents()
+        count += 1
+        render(<Page log={log} layout={layout} bar={false} count={count} hover events />)
+        renderer.drawFrame()
+      }
+      const during = { hovers: [...log.hovers], picture: picture(renderer) }
+      renderer.advanceTime(500)
+      for (let frame = 0; frame < 3; frame++) {
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+      }
+      renderer.dispatchNativeEvents()
+      return { during, hovers: [...log.hovers], picture: picture(renderer), boxes: boxes(renderer), under: renderer.getElementsAt(...pointer) }
+    } finally {
+      unmount()
+    }
+  }
+
+  for (const layout of ["absolute", "flow"] as const) {
+    unverified(`holds the hover over the commits of a scroll over ${layout} rows and follows when the wheel is quiet`, () => {
+      const on = commitsUnderStill(true, layout)
+      const off = commitsUnderStill(false, layout)
+      expect(on.during.hovers, "the commits leave the hover where the pointer put it").toEqual([])
+      expect(on.hovers, "the boundary events fire once, from the row the pointer was on to the one under it").toEqual(["leave 1", "enter 3"])
+      expect(off.hovers).toEqual(on.hovers)
+      expect(on.during.picture).toEqual(off.during.picture)
+      expect(on.picture, "the hover colour moved to the row under the pointer").not.toEqual(on.during.picture)
+      expect(on.picture).toEqual(off.picture)
+      expect(on.boxes).toEqual(off.boxes)
+      expect(on.under).toEqual(off.under)
+    })
+  }
+
+  it("follows the hover as the build does under the verifier, after commits", () => {
+    if (!verifying) return
+    for (const layout of ["absolute", "flow"] as const) {
+      const on = commitsUnderStill(true, layout)
+      expect(on.hovers).toEqual(["leave 1", "enter 3"])
+    }
+  })
 
   unverified("does not decline the tick after translates for the scroll they made", () => {
     const { renderer, unmount } = open(true, "absolute", false, { hover: true })
