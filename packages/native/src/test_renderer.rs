@@ -1388,7 +1388,7 @@ impl TestGpuixRenderer {
     /// Counts as if the exclusions named here were lifted, to see which are worth lifting first:
     /// `paint-reporter`, `highlight`, `custom-element`, `svg`, `virtual-list`,
     /// `collapsed-table`, `display-contents`, `anchored`, `sticky`, `fixed`, `scroller`,
-    /// `overflow-hidden`, `layout-animation`, `atomic-inline`, `label`. Nothing is reused.
+    /// `layout-animation`, `unstable-layout`. Nothing is reused.
     #[napi]
     pub fn set_retain_lift(&self, names: Vec<String>) -> Result<()> {
         self.update_view(move |view, _window, _cx| view.retain.lift(&names))?.map_err(Error::from_reason)

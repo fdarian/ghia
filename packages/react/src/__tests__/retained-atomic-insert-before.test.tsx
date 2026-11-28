@@ -1,9 +1,8 @@
 /// Absolute rows placed with `top`, each holding a paragraph with an atomic inline (`display: inline-block`) in the
-/// middle of it, with something inserted before them. An atomic inline keeps the rows that hold it from being retained
-/// roots (`Exclusion::AtomicInline`), so every frame builds them and the verifier has no replay to compare with a
-/// build: this holds that the text in the boxes is copied in document order, and that nothing about it is recorded
-/// wrongly. How a position inside a box of a paragraph of a root is rebased is held by the unit tests in
-/// `text/selection.rs`.
+/// middle of it, with something inserted before them. The rows are retained roots, so the frames after the insertion
+/// replay them where they were recorded (the verifier compares each with a build): this holds that the text in the boxes
+/// is copied in document order, and that nothing about it is recorded wrongly. How a position inside a box of a paragraph
+/// of a root is rebased is held by the unit tests in `text/selection.rs`.
 
 import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
@@ -60,12 +59,12 @@ function setup(slots: number[]) {
     renderer.flush()
     return { copied: renderer.getSelectedText() }
   }
-  return { ...root, dragAcross, counters: () => renderer.getRetainedCounters() }
+  return { ...root, dragAcross, settle, counters: () => renderer.getRetainedCounters() }
 }
 
 describeNative("rows that hold an atomic inline, with something inserted before them", () => {
   it("keep the document order of the text in the box, as a build writes it", () => {
-    const { renderer, dragAcross, counters, unmount } = setup(range(2, 14))
+    const { renderer, render, settle, dragAcross, counters, unmount } = setup(range(2, 14))
     try {
       const steps = [
         { from: 2, shown: range(1, 14), to: 7 },
@@ -77,6 +76,14 @@ describeNative("rows that hold an atomic inline, with something inserted before 
         const dragged = dragAcross(step.from, step.shown, step.to)
         expect(dragged.copied, label).toBe(range(step.from, step.to + 1).map(line).join("\n"))
       }
+      const copied = renderer.getSelectedText()
+      // A frame that changes the selection builds every row. The selection stays as it is here, rows are inserted before the
+      // ones recorded and they are replayed where they are: the text in the boxes is read back from the recordings.
+      const replays = counters().replays
+      render(<Rows slots={range(0, 14)} />)
+      settle()
+      expect(counters().replays - replays, "the rows are replayed after the insert").toBeGreaterThan(0)
+      expect(renderer.getSelectedText()).toBe(copied)
       const end = counters()
       expect(end.mismatches, renderer.getRetentionMismatches().join("\n")).toBe(0)
     } finally {

@@ -11637,10 +11637,12 @@ fn retained_root(
         retained = retained.lift_z(z);
     }
     if skip.patch_root {
-        retained = if skip.box_root { retained.patchable_relayout() } else { retained.patchable() };
-        ctx.retain.add_patch_root(crate::retain::Unit { id, env: patch_root_env });
-        if skip.box_root {
-            ctx.retain.note_box_root(id);
+        if ctx.retain.registers_skipped_patch_root(ctx.tree, id) {
+            retained = if skip.box_root { retained.patchable_relayout() } else { retained.patchable() };
+            ctx.retain.add_patch_root(crate::retain::Unit { id, env: patch_root_env });
+            if skip.box_root {
+                ctx.retain.note_box_root(id);
+            }
         }
     } else if skip.box_root {
         retained = retained.patchable_relayout();

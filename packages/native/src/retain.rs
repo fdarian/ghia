@@ -204,8 +204,6 @@ pub(crate) enum Exclusion {
     /// glide starts where a commit moved it; whether a glide runs is asked of a tick by
     /// [`Retain::preview`], not recorded.
     LayoutAnimation,
-    /// Built as part of a paragraph's line.
-    AtomicInline,
     /// `position: absolute`, an intrinsic width keyword or a natural width: gpui's layout
     /// rewrites the box after it is requested, so the layout nodes it left are not the next
     /// frame's to use.
@@ -213,7 +211,7 @@ pub(crate) enum Exclusion {
 }
 
 impl Exclusion {
-    const ALL: [Exclusion; 14] = [
+    const ALL: [Exclusion; 13] = [
         Self::PaintReporter,
         Self::Highlight,
         Self::CustomElement,
@@ -226,7 +224,6 @@ impl Exclusion {
         Self::Fixed,
         Self::Scroller,
         Self::LayoutAnimation,
-        Self::AtomicInline,
         Self::UnstableLayout,
     ];
 
@@ -255,7 +252,6 @@ impl Exclusion {
             Self::Fixed => "fixed",
             Self::Scroller => "scroller",
             Self::LayoutAnimation => "layout-animation",
-            Self::AtomicInline => "atomic-inline",
             Self::UnstableLayout => "unstable-layout",
         }
     }
@@ -2904,6 +2900,25 @@ impl Retain {
         self.plan.patch_root_ids.contains(&id)
     }
 
+    /// Whether the patch root `id`, which the frame skipped, is registered as one. gpui builds a root late when it cannot
+    /// replay it, and the roots in it that nothing changed are skipped by that build; a frame built whole builds them inside
+    /// the patch root and records none, so a patch of one would name a retained root that the frame built whole after it (the
+    /// verifier's reference, or the next frame) does not make. Such a root, with a registered patch root above it, is none.
+    /// Only a late build skips inside a patch root, so the walk up is for those.
+    pub(crate) fn registers_skipped_patch_root(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
+        if !self.deferred {
+            return true;
+        }
+        let mut up = tree.elements.get(&id).and_then(|element| element.parent);
+        while let Some(above) = up {
+            if self.plan.patch_root_ids.contains(&above) {
+                return false;
+            }
+            up = tree.elements.get(&above).and_then(|element| element.parent);
+        }
+        true
+    }
+
     /// Keeps the root that a patch repaints, for the ticks that follow the frame.
     pub(crate) fn add_patch_root(&mut self, unit: Unit) {
         if self.reference {
@@ -3161,9 +3176,7 @@ impl Retain {
         let moved = self.nodes.get(parent as usize).is_some_and(|parent| {
             parent.moved || self.deltas.scrolled.contains(&parent.id)
         });
-        let exclusion = if entry.atomic_root {
-            self.unless_lifted(Exclusion::AtomicInline)
-        } else if entry.anchor_scope {
+        let exclusion = if entry.anchor_scope {
             self.unless_lifted(Exclusion::Anchored)
         } else if entry.inherited.highlight.is_some() {
             self.unless_lifted(Exclusion::Highlight)
@@ -4799,6 +4812,30 @@ mod tests {
         // The walk from 4 used to stop at 3, which the frame before had left in `unbuilt`.
         frame_of(&mut retain, &tree, &[4], &[1, 2]);
         assert_eq!(sorted(&retain.deltas.spine), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_patch_root_a_late_build_skipped_inside_a_patch_root_is_not_registered() {
+        // 1 > 2 > 3, and 4 beside 2: 1 is a registered patch root whose late build skips 2, 3 and 4.
+        let tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "div", None),
+            (3, Some(2), "div", None),
+            (4, Some(1), "div", None),
+            (5, None, "div", None),
+        ]);
+        let mut retain = Retain::new();
+        retain.set_planning(true);
+        retain.plan.patch_root_ids.insert(1);
+        // A frame that skips a root enters nothing in it, so what it skips is registered whatever is above it.
+        assert!(retain.registers_skipped_patch_root(&tree, 3));
+        retain.begin_deferred(false, false);
+        assert!(!retain.registers_skipped_patch_root(&tree, 2), "2 is in the patch root 1");
+        assert!(!retain.registers_skipped_patch_root(&tree, 3), "3 is below 2, which is below 1");
+        assert!(!retain.registers_skipped_patch_root(&tree, 4));
+        assert!(retain.registers_skipped_patch_root(&tree, 5), "5 has no patch root above it");
+        assert!(retain.registers_skipped_patch_root(&tree, 1), "a root is not above itself");
+        retain.finish_deferred();
     }
 
     #[test]
@@ -6783,12 +6820,12 @@ mod tests {
         for _ in 0..2 {
             page.frame(&[], false, |page| {
                 page.element(1, None, |page| {
-                    page.element(2, Some(true), |page| page.retain.exclude(Exclusion::AtomicInline));
+                    page.element(2, Some(true), |page| page.retain.exclude(Exclusion::Sticky));
                 });
             });
         }
         assert_eq!(page.ids(), Vec::<u64>::new());
-        assert_eq!(page.preview(&[], false), Err(Unpatchable::Refused(Refusal::Excluded(Exclusion::AtomicInline))));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Refused(Refusal::Excluded(Exclusion::Sticky))));
     }
 
     #[test]
@@ -6922,7 +6959,7 @@ mod tests {
     #[test]
     fn a_refusal_is_counted_under_a_key_that_names_it() {
         let keys: Vec<String> = [
-            Refusal::Excluded(Exclusion::AtomicInline),
+            Refusal::Excluded(Exclusion::Sticky),
             Refusal::ExcludedBelow(Exclusion::Svg),
             Refusal::Escapes,
             Refusal::Lifts,
@@ -6934,7 +6971,7 @@ mod tests {
         .to_vec();
         assert_eq!(
             keys,
-            ["Excluded:atomic-inline", "ExcludedBelow:svg", "Escapes", "Lifts", "Scrolls", "LayoutAnimation", "TooLarge"]
+            ["Excluded:sticky", "ExcludedBelow:svg", "Escapes", "Lifts", "Scrolls", "LayoutAnimation", "TooLarge"]
         );
     }
 
