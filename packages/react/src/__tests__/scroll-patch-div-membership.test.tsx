@@ -83,6 +83,8 @@ type Options = {
   firstRow?: number
   /** The scroller is scrolled to this many px before the steps. */
   scrollTo?: number
+  /** A line of text above the box that holds the rows, whose height (line-height normal) is a fraction, so the box is on no whole px. */
+  header?: boolean
 }
 
 function measureRow(log: Log, index: number, instance, read: boolean) {
@@ -158,6 +160,7 @@ function Page(props: { log: Log; layout: Layout } & Options) {
       }}
     >
       {props.sheet === undefined ? null : <style>{props.sheet}</style>}
+      {props.header ? <div testId="header">Rows below</div> : null}
       {layout !== "flow" && !props.inScroller ? (
         <div
           testId="inner"
@@ -644,6 +647,33 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
       expect(on.counters.mispredicted).toBe(0)
       expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
       // The boxes, getBoundingClientRect of the rows and the picture, bit for bit.
+      expect(on.frames).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.mismatches.join("\n")).toBe("")
+    })
+  }
+
+  // The origin of a row that comes in is read from the layout of the box that holds it and summed as taffy does, whatever is above that
+  // box (a header of a fractional height) and wherever the rows are: 2^17 px is crossed by the rows of the first, and 2^18 by the second.
+  for (const [firstRow, scale] of [[7_800, 1], [7_800, 2], [20_000, 1], [20_000, 2]] as const) {
+    it(`is a translate whose rows come in where the layout of the page puts them, below a header of a fractional height, from row ${firstRow} at a scale of ${scale}`, () => {
+      const rowHeight = 16.8
+      const options = { rowHeight, scale, firstRow, header: true, scrollTo: (firstRow + 3) * rowHeight }
+      const rowsFrom = (from: number) => Array.from({ length: 8 }, (_, index) => firstRow + from + index)
+      const first = rowsFrom(0)
+      const steps: RowStep[] = [
+        { by: 3, rows: rowsFrom(0).concat(firstRow + 8) },
+        { by: 5, rows: rowsFrom(1).concat(firstRow + 9) },
+        { by: 40, rows: rowsFrom(3).concat(firstRow + 11) },
+        { by: 8, rows: rowsFrom(4).concat(firstRow + 12) },
+        { by: -4, rows: rowsFrom(3).concat(firstRow + 12) },
+        { by: 6, rows: rowsFrom(5).concat(firstRow + 13) },
+        { by: -60, rows: rowsFrom(0) },
+      ]
+      const on = runRows(true, "absolute", first, steps, options)
+      const off = runRows(false, "absolute", first, steps, options)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
       expect(on.frames).toEqual(off.frames)
       expect(on.clicks).toEqual(off.clicks)
       expect(on.mismatches.join("\n")).toBe("")

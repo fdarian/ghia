@@ -122,7 +122,7 @@ impl ScrollGate {
                 Membership::default()
             } else {
                 let membership = accepts_removals.then(|| tree.pure_membership_since(revision)).flatten();
-                let Some(membership) = membership.and_then(|(removed, added)| self.membership(&tree, window_id, window.scale_factor(), cx, removed, added)) else {
+                let Some(membership) = membership.and_then(|(removed, added)| self.membership(&tree, window, cx, removed, added)) else {
                     return reason(ScrollPatchReason::Edited);
                 };
                 membership
@@ -153,8 +153,7 @@ impl ScrollGate {
     fn membership(
         &self,
         tree: &crate::retained_tree::RetainedTree,
-        window_id: gpui::WindowId,
-        scale: f32,
+        window: &gpui::Window,
         cx: &gpui::App,
         removed: Vec<(u64, u64)>,
         added: Vec<(u64, u64)>,
@@ -167,10 +166,10 @@ impl ScrollGate {
         }
         let survivors = tree.what_stays_of(&removed, &added)?;
         let left: Vec<u64> = removed.iter().map(|(child, _)| *child).collect();
-        if !removals_leave_the_rest(window_id, &removed) || !self.tapes.can_remove(&left, &survivors) {
+        if !removals_leave_the_rest(window.window_handle().window_id(), &removed) || !self.tapes.can_remove(&left, &survivors) {
             return None;
         }
-        let entered = super::entering::groups(tree, window_id, scale, &added)?;
+        let entered = super::entering::groups(tree, window, &added)?;
         // What stays beside what came or left is under another index among its siblings, and what the roots of a parent that got a
         // child wrote is in the order of the tree.
         let parents: FxHashSet<u64> = removed.iter().chain(&added).map(|(_, parent)| *parent).collect();
