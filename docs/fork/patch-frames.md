@@ -1362,8 +1362,9 @@ had no translate). A translate now edits the tree the frame shown sent (`window/
   scratch frame hung off the scratch builder's root, and hangs off the tree's node now): the first node after the block that lists the
   first of the rows' top children.
 - **What is not a translate:** the tree is checked before anything is written (`plan_scroll`, `applyDeclines.A11y`), after the rows that come
-  in were built and forgotten. Tests are named per item (unit = `window/a11y/scroll.rs`, window = `membership_patch_tests.rs`); each
-  unit test fails without its check (mutated one at a time):
+  in were built and forgotten. Tests are named per item (unit = `window/a11y/scroll.rs`, window = `membership_patch_tests.rs`). The checks of the
+  unit tests were each removed in turn and the tests failed (the focus, relation, author id, active descendant, order and block checks, and
+  the ask that a replay carries); the window tests were mutated for the ask only:
   - a row that leaves or comes in holds the focus (what it recorded, or the tree's focus on one of its nodes): unit. A focus in a row that
     stays is a translate: unit and window;
   - a row that comes in names a relation (`aria-labelledby` and the others resolve against the whole tree, which the scratch builder does
