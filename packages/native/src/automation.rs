@@ -283,9 +283,10 @@ impl ElementBounds {
     }
 
     /// The box without what moves with its matrix, which a patch publishes with the matrix: which way it faces, whether
-    /// prepaint culled it.
+    /// prepaint culled it. `finer` is left out as well: the 1/512 digit it keeps flips with a box moved by a replay, and nothing a
+    /// reader of the bounds sees depends on it.
     fn apart_from_transform(self) -> Self {
-        Self { culled: false, to_window: TransformationMatrix::unit(), faces_away: false, ..self }
+        Self { culled: false, to_window: TransformationMatrix::unit(), faces_away: false, finer: [0; 4], ..self }
     }
 
     /// The box `offset` away, in the single precision it is measured in, which is what painting

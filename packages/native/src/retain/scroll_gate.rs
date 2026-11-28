@@ -219,7 +219,7 @@ impl ScrollGate {
                         }),
                         available: gpui::size(gpui::AvailableSpace::Definite(gpui::px(placed.available_width as f32)), gpui::AvailableSpace::MinContent),
                         size: gpui::size(gpui::px(placed.size.0 as f32), gpui::px(placed.size.1 as f32)),
-                        origin: gpui::point(gpui::px(placed.origin.0 as f32), gpui::px(placed.origin.1 as f32)),
+                        origin: placed.origin,
                         scrolls: true,
                         lift_z: 0,
                     }

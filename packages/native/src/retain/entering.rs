@@ -10,8 +10,8 @@ use crate::style::{DimensionValue, StyleDesc};
 /// Where a child that came in is put, and what it is laid out in.
 #[derive(Clone)]
 pub(crate) struct Placed {
-    /// The top left of its box in the window, in the frame shown (the scroll has not moved it).
-    pub origin: (f64, f64),
+    /// Where its box is, as the layout of the page puts it (the scroll has not moved it).
+    pub origin: gpui::ScrollEnteredOrigin,
     pub size: (f64, f64),
     /// The width of the padding box of the parent, which the child is laid out in.
     pub available_width: f64,
@@ -64,7 +64,12 @@ pub(crate) fn groups(tree: &RetainedTree, window: gpui::WindowId, scale: f32, ad
             .map(|_| bounds.padding_left)
             .filter(|_| !right_to_left);
         let (x, y, width, height) = bounds.unquantized(scale);
-        let holder = (x + bounds.client_left, y + bounds.client_top, width - bounds.client_left - bounds.border_right, height - bounds.client_top - bounds.border_bottom);
+        let holder = Holder {
+            border_box: (x, y),
+            border: (bounds.client_left, bounds.client_top),
+            padding_box: (width - bounds.client_left - bounds.border_right, height - bounds.client_top - bounds.border_bottom),
+            scale,
+        };
         let mut at = 0;
         while at < siblings.len() {
             if !came(&siblings[at]) {
@@ -81,7 +86,7 @@ pub(crate) fn groups(tree: &RetainedTree, window: gpui::WindowId, scale: f32, ad
             };
             let children = siblings[first..at]
                 .iter()
-                .map(|id| Some((*id, placed(tree.elements.get(id)?, holder, auto_left)?)))
+                .map(|id| Some((*id, placed(tree.elements.get(id)?, &holder, auto_left)?)))
                 .collect::<Option<Vec<_>>>()?;
             groups.push(Group { parent, neighbor, follows, children });
         }
@@ -89,10 +94,25 @@ pub(crate) fn groups(tree: &RetainedTree, window: gpui::WindowId, scale: f32, ad
     Some(groups)
 }
 
-/// Where the absolute child `element` is put in its parent, whose padding box is `holder` (x, y, width, height), and the size it comes
-/// out at, if its style says both in lengths: nothing the layout of what holds it would decide, and inside the padding box, so that
-/// the scrollable overflow of what holds it stays.
-fn placed(element: &RetainedElement, holder: (f64, f64, f64, f64), auto_left: Option<f64>) -> Option<Placed> {
+/// The box of the parent as layout measured it, in the pixels of a window of `scale`.
+struct Holder {
+    /// The origin of the border box in the window of the frame shown.
+    border_box: (f64, f64),
+    /// The widths of the left and top borders.
+    border: (f64, f64),
+    /// The width and height of the padding box, which a percentage length of an absolute child is of.
+    padding_box: (f64, f64),
+    scale: f32,
+}
+
+/// Where the absolute child `element` is put in its parent, `holder`, and the size it comes out at, if its style says both in
+/// lengths: nothing the layout of what holds it would decide, and inside the padding box, so that the scrollable overflow of what
+/// holds it stays.
+///
+/// The origin is not summed here: taffy places the child at `border + top` from the border box of the holder, in single precision and
+/// in the coordinates of the page, and the sum with the large offset of a scroller far down is rounded to a coarser grid than the
+/// exact sum would be, so `gpui::ScrollEnteredOrigin::InHolder` hands the two parts to the window.
+fn placed(element: &RetainedElement, holder: &Holder, auto_left: Option<f64>) -> Option<Placed> {
     let style = element.style.as_deref()?;
     if !has_a_box_of_its_own_size(style) {
         return None;
@@ -102,17 +122,26 @@ fn placed(element: &RetainedElement, holder: (f64, f64, f64, f64), auto_left: Op
     if !named_left && !is_block_level(element, style) {
         return None;
     }
+    let (available_width, available_height) = holder.padding_box;
     let along = |value: &Option<DimensionValue>, of: f64| match value {
         Some(DimensionValue::Pixels(pixels)) => Some(*pixels),
         Some(DimensionValue::Percentage(fraction)) => Some(fraction * of),
         _ => None,
     };
-    let left = match style.left {
-        None | Some(DimensionValue::Auto) => auto_left?,
-        _ => along(&style.left, holder.2)?,
+    // The same length in device pixels, as single precision resolves it.
+    let scale = holder.scale;
+    let device = |value: &Option<DimensionValue>, of: f64| match value {
+        Some(DimensionValue::Pixels(pixels)) => Some(*pixels as f32 * scale),
+        Some(DimensionValue::Percentage(fraction)) => Some(*fraction as f32 * (of as f32 * scale)),
+        _ => None,
     };
-    let top = along(&style.top, holder.3)?;
-    let (width, height) = (along(&style.width, holder.2)?, along(&style.height, holder.3)?);
+    let (left, left_device) = match style.left {
+        None | Some(DimensionValue::Auto) => (auto_left?, auto_left? as f32 * scale),
+        _ => (along(&style.left, available_width)?, device(&style.left, available_width)?),
+    };
+    let top = along(&style.top, available_height)?;
+    let top_device = device(&style.top, available_height)?;
+    let (width, height) = (along(&style.width, available_width)?, along(&style.height, available_height)?);
     // A transform moves the box and what its parent scrolls over: it has to stay inside the padding box as well.
     let (moved_x, moved_y) = translation(style, (width, height))?;
     const SLACK: f64 = 0.01;
@@ -121,14 +150,17 @@ fn placed(element: &RetainedElement, holder: (f64, f64, f64, f64), auto_left: Op
         && top >= -SLACK
         && left_end >= -SLACK
         && top_end >= -SLACK
-        && left_end + width <= holder.2 + SLACK
-        && top_end + height <= holder.3 + SLACK
-        && left + width <= holder.2 + SLACK
-        && top + height <= holder.3 + SLACK;
+        && left_end + width <= available_width + SLACK
+        && top_end + height <= available_height + SLACK
+        && left + width <= available_width + SLACK
+        && top + height <= available_height + SLACK;
     (inside && width > 0.0 && height > 0.0).then_some(Placed {
-        origin: (holder.0 + left, holder.1 + top),
+        origin: gpui::ScrollEnteredOrigin::InHolder {
+            holder: gpui::point(holder.border_box.0, holder.border_box.1),
+            inside: gpui::point(holder.border.0 as f32 * scale + left_device, holder.border.1 as f32 * scale + top_device),
+        },
         size: (width, height),
-        available_width: holder.2,
+        available_width,
     })
 }
 

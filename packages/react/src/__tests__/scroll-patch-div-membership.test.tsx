@@ -79,6 +79,10 @@ type Options = {
   percentTop?: boolean
   /** The device pixels per px of the window. */
   scale?: number
+  /** The index of the first row the page can render: the rows `firstRow` to `firstRow + COUNT`, below a spacer as tall as the rows before them. */
+  firstRow?: number
+  /** The scroller is scrolled to this many px before the steps. */
+  scrollTo?: number
 }
 
 function measureRow(log: Log, index: number, instance, read: boolean) {
@@ -98,7 +102,9 @@ function measureRow(log: Log, index: number, instance, read: boolean) {
 function Page(props: { log: Log; layout: Layout } & Options) {
   const layout = props.layout
   const removed = props.removed ?? []
-  const rows = Array.from({ length: COUNT }, (_, index) => index)
+  const firstRow = props.firstRow ?? 0
+  const rowCount = firstRow + COUNT
+  const rows = Array.from({ length: COUNT }, (_, index) => firstRow + index)
     .filter((index) => !removed.includes(index))
     .filter((index) => props.present === undefined || props.present.includes(index))
     .map((index) => (
@@ -118,7 +124,7 @@ function Page(props: { log: Log; layout: Layout } & Options) {
           top:
             layout === "absolute"
               ? props.percentTop
-                ? `${((index * (props.rowHeight ?? ROW)) / (COUNT * (props.rowHeight ?? ROW))) * 100}%`
+                ? `${((index * (props.rowHeight ?? ROW)) / (rowCount * (props.rowHeight ?? ROW))) * 100}%`
                 : index * (props.rowHeight ?? ROW)
               : layout === "transform"
                 ? 0
@@ -155,7 +161,7 @@ function Page(props: { log: Log; layout: Layout } & Options) {
       {layout !== "flow" && !props.inScroller ? (
         <div
           testId="inner"
-          style={{ position: "relative", width: "100%", height: props.spacerHeight ?? COUNT * (props.rowHeight ?? ROW), ...(props.skipHolder ? { contentVisibility: "hidden" } : {}) }}
+          style={{ position: "relative", width: "100%", height: props.spacerHeight ?? rowCount * (props.rowHeight ?? ROW), ...(props.skipHolder ? { contentVisibility: "hidden" } : {}) }}
         >
           {rows}
         </div>
@@ -401,7 +407,7 @@ describeNative("a wheel step over a div scroller whose commit only takes rows ou
   })
 })
 
-type RowStep = { by: number; rows?: number[] }
+type RowStep = { by: number; rows?: number[]; /** What the page says besides, for this commit only: a frame built whole when it changes another element. */ page?: Options }
 
 /** What a test observes of the rows a step left in the tree: the box each reports, and what is under the points. */
 function seenRows(opened, present: number[]) {
@@ -427,6 +433,11 @@ function runRows(translate: boolean, layout: Layout, first: number[], steps: Row
   const opened = open(translate, layout, { ...options, present: first })
   const renderer = opened.renderer
   try {
+    if (options.scrollTo !== undefined) {
+      renderer.scrollTo(renderer.findByTestId("scroller").id, 0, options.scrollTo)
+      renderer.drawFrame()
+      renderer.drawFrame()
+    }
     renderer.nativeSimulateMouseMove(180, 60)
     renderer.dispatchNativeEvents()
     renderer.drawFrame()
@@ -447,9 +458,9 @@ function runRows(translate: boolean, layout: Layout, first: number[], steps: Row
     for (const step of steps) {
       const patched = scroll(renderer).patched
       wheel(step.by)
-      if (step.rows) {
-        present = step.rows
-        opened.render(<Page log={opened.log} layout={layout} {...options} present={present} />)
+      if (step.rows || step.page) {
+        present = step.rows ?? present
+        opened.render(<Page log={opened.log} layout={layout} {...options} {...step.page} present={present} />)
       }
       renderer.drawFrame()
       translated.push(scroll(renderer).patched > patched)
@@ -558,7 +569,7 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     expect(on.frames).toEqual(off.frames)
   })
 
-  unverified("is no translate when the rows are the children of the scroller itself, which does not scroll its own box", () => {
+  it("is no translate when the rows are the children of the scroller itself, which does not scroll its own box", () => {
     // The scroller is the box that places the rows, and its box stays where it is while the rows move in it: the origin a row comes in
     // at would miss the scroll offset. Rows of the first 100px (the scroller's box) are the ones that could be put down by a scroll.
     const all = Array.from({ length: 10 }, (_, index) => index)
@@ -578,6 +589,7 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     expect(on.frames).toEqual(off.frames)
     expect(on.clicks).toEqual(off.clicks)
     expect(on.counters.rowsBuilt - on.before.rowsBuilt, "no row is built by a translate").toBe(0)
+    expect(on.mismatches.join("\n")).toBe("")
   })
 
   for (const [what, options] of [
@@ -586,7 +598,7 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     ["rows of 16.75px, a percentage from the top, at a scale of 2", { rowHeight: 16.75, percentTop: true, scale: 2 }],
     ["rows of 17.3px, a percentage from the top, at a scale of 4", { rowHeight: 17.3, percentTop: true, scale: 4 }],
   ] as const) {
-    unverified(`is a translate whose rows come in where the layout of the page puts them, with ${what}`, () => {
+    it(`is a translate whose rows come in where the layout of the page puts them, with ${what}`, () => {
       const first = [0, 1, 2, 3, 4, 5, 6, 7]
       const rowsFrom = (from: number) => Array.from({ length: 8 }, (_, index) => from + index)
       const fractionalSteps: RowStep[] = [
@@ -605,8 +617,64 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
       expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
       expect(on.frames).toEqual(off.frames)
       expect(on.clicks).toEqual(off.clicks)
+      expect(on.mismatches.join("\n")).toBe("")
     })
   }
+
+  // Past 2^16 px the layout of the page sums in a coarser grid than the exact sum of the holder and the `top` of a row (the ulp of
+  // 336000 is 1/32), so a row that came in by a sum of exact lengths would be a rounding off the one the frame built whole has.
+  for (const scale of [1, 2]) {
+    it(`is a translate whose rows come in where the layout of the page puts them, far down a spacer past 2^16 px, at a scale of ${scale}`, () => {
+      const firstRow = 20_000
+      const rowHeight = 16.8
+      const options = { rowHeight, scale, firstRow, scrollTo: (firstRow + 3) * rowHeight }
+      const rowsFrom = (from: number) => Array.from({ length: 8 }, (_, index) => firstRow + from + index)
+      const first = rowsFrom(0)
+      const farSteps: RowStep[] = [
+        { by: 3, rows: rowsFrom(0).concat(firstRow + 8) },
+        { by: 5, rows: rowsFrom(1).concat(firstRow + 9) },
+        { by: 8, rows: rowsFrom(2).concat(firstRow + 10) },
+        { by: -4, rows: rowsFrom(1).concat(firstRow + 10) },
+        { by: 6, rows: rowsFrom(3).concat(firstRow + 11) },
+        { by: 2 },
+        { by: -12, rows: rowsFrom(0) },
+      ]
+      const on = runRows(true, "absolute", first, farSteps, options)
+      const off = runRows(false, "absolute", first, farSteps, options)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
+      // The boxes, getBoundingClientRect of the rows and the picture, bit for bit.
+      expect(on.frames).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.mismatches.join("\n")).toBe("")
+    })
+  }
+
+  it("replays and relocates a row a translate put in by the translates after it, and by a frame built whole", () => {
+    const first = [0, 1, 2, 3, 4, 5, 6, 7]
+    const rowsFrom = (from: number) => Array.from({ length: 8 }, (_, index) => from + index)
+    // Rows come in, a translate moves them (and takes some out), a frame built whole follows (the commit changes the scroller as well),
+    // then translates again over what that frame built.
+    const replaySteps: RowStep[] = [
+      { by: 3, rows: rowsFrom(0).concat(8) },
+      { by: 5, rows: rowsFrom(1).concat(9) },
+      { by: 4 },
+      { by: 6, rows: rowsFrom(2).concat(10), page: { tint: true } },
+      { by: 3, rows: rowsFrom(3).concat(11), page: { tint: true } },
+      { by: -7 },
+      { by: -9, rows: rowsFrom(0), page: { tint: true } },
+    ]
+    for (const options of [{ rowHeight: 16.8 }, { rowHeight: 16.75, percentTop: true, scale: 2 }, {}]) {
+      const on = runRows(true, "absolute", first, replaySteps, options)
+      const off = runRows(false, "absolute", first, replaySteps, options)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
+      expect(on.frames, JSON.stringify(options)).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.mismatches.join("\n")).toBe("")
+      if (!verifying) expect(on.translated, "only the commit that changes the scroller is a frame built whole").toEqual([true, true, true, false, true, true, true])
+    }
+  })
 
   unverified("is a frame built whole when the box that held the absolute rows holds none any more, and gets a row", () => {
     // A frame that found rows in the flow only forgets the box as a parent a scroll builds for: a row that comes in under it is a
