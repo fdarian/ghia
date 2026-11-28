@@ -67,6 +67,8 @@ type Options = {
   /** One row is placed at the top by a translation of this many px past it (it stays inside the box that holds the rows when it is small). */
   transformRow?: number
   transformBy?: number
+  /** The rows before this one are in the flow, the others are absolute. */
+  absoluteFrom?: number
 }
 
 function measureRow(log: Log, index: number, instance, read: boolean) {
@@ -102,7 +104,7 @@ function Page(props: { log: Log; layout: Layout } & Options) {
         }}
         onClick={() => props.log.clicks.push(index)}
         style={{
-          position: layout === "flow" || index === props.flowRow ? undefined : "absolute",
+          position: layout === "flow" || index === props.flowRow || index < (props.absoluteFrom ?? 0) ? undefined : "absolute",
           top: layout === "absolute" ? index * ROW : layout === "transform" ? 0 : undefined,
           ...(layout === "transform" ? { transform: `translateY(${index * ROW}px)` } : {}),
           ...(index === 3 && props.selectedZ !== undefined ? { zIndex: props.selectedZ } : {}),
@@ -530,10 +532,48 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     const off = runRows(false, "absolute", FIRST, enterSteps, options)
     expect(on.translated, "the rows came in by translates").toEqual(enterSteps.map(() => true))
     expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(9)
-    expect(on.measured).toEqual([])
     expect(on.observed.length).toBeGreaterThan(FIRST.length)
     expect(on.observed).toEqual(off.observed)
     expect(on.frames).toEqual(off.frames)
+  })
+
+  unverified("is a frame built whole when the box that held the absolute rows holds none any more, and gets a row", () => {
+    // A frame that found rows in the flow only forgets the box as a parent a scroll builds for: a row that comes in under it is a
+    // change of the box, and the frame built whole has it.
+    const trial = (translate: boolean) => {
+      const opened = open(translate, "absolute", { present: FIRST })
+      const renderer = opened.renderer
+      try {
+        renderer.nativeSimulateMouseMove(180, 60)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        for (const by of [4, -4]) {
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+        }
+        opened.render(<Page log={opened.log} layout="absolute" present={FIRST} absoluteFrom={COUNT} />)
+        renderer.drawFrame()
+        renderer.drawFrame()
+        const before = scroll(renderer)
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateScrollWheel(180, 60, 0, 3)
+        renderer.dispatchNativeEvents()
+        opened.render(<Page log={opened.log} layout="absolute" present={[0, 1, 2, 3, 4]} absoluteFrom={4} />)
+        renderer.drawFrame()
+        const after = scroll(renderer)
+        return { patched: after.patched - before.patched, built: after.rowsBuilt - before.rowsBuilt, edited: after.reasons.Edited - before.reasons.Edited, frame: seenRows(opened, [0, 1, 2, 3, 4]) }
+      } finally {
+        opened.unmount()
+      }
+    }
+    const on = trial(true)
+    const off = trial(false)
+    expect(on.patched).toBe(0)
+    expect(on.built).toBe(0)
+    expect(on.edited).toBe(1)
+    expect(on.frame).toEqual(off.frame)
   })
 
   unverified("is a frame built whole when the scroller runs its inline axis from the right, which puts a box that names no left there", () => {

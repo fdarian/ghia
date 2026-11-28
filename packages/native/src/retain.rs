@@ -686,8 +686,6 @@ impl Scroller {
 struct EntryStart {
     start: crate::renderer::BuildStart,
     shape: u64,
-    /// The frame that noted it, which notes it once.
-    epoch: u64,
 }
 
 /// An element a frame did not build, standing in for the record of its last build.
@@ -1311,8 +1309,6 @@ pub(crate) struct Retain {
     /// What the build of the children of an element that has absolute children inside a scroller started from, and the shape the
     /// element had: a frame that moves the content of the scroller builds the children that came in from it.
     entry_starts: FxHashMap<u64, EntryStart>,
-    /// How many frames began, for `entry_starts` to be noted once in each.
-    entry_frame: u64,
     /// The rows built since the last frame that looked, whose records are still wanted.
     rows_seen: FxHashSet<u64>,
     /// The rows the frame before asked for: the ones of them that this frame does not ask for are
@@ -1557,7 +1553,6 @@ impl Retain {
             row: false,
             row_parent_shape: 0,
             entry_starts: FxHashMap::default(),
-            entry_frame: 0,
             rows_seen: FxHashSet::default(),
             rows_before: FxHashSet::default(),
             row_candidates: false,
@@ -1724,7 +1719,6 @@ impl Retain {
         sources.tree.take_structure();
         self.prune(sources.tree);
         self.pass = sources.pass;
-        self.entry_frame += 1;
         self.layout_only = sources.layout_only;
         self.reference = sources.reference;
         self.unit = None;
@@ -2308,17 +2302,19 @@ impl Retain {
         self.plan.unrecorded.retain(|id| !gone.contains(id));
     }
 
-    /// Whether the frame being built has not noted what the children of `parent` are built from ([`Self::note_entry_start`]).
+    /// Whether the build of `parent` under way has not noted what its children are built from ([`Self::note_entry_start`]): every
+    /// build of an element begins with [`Self::forget_entry_start`], so a start that is noted was noted by this build.
     pub(crate) fn wants_entry_start(&self, parent: u64) -> bool {
-        self.entry_starts.get(&parent).is_none_or(|known| known.epoch != self.entry_frame)
+        !self.entry_starts.contains_key(&parent)
     }
 
     /// Notes what the children of `parent`, that are absolute and placed by it inside a `div` scroller, are built from.
     pub(crate) fn note_entry_start(&mut self, parent: u64, start: crate::renderer::BuildStart, shape: u64) {
-        self.entry_starts.insert(parent, EntryStart { start, shape, epoch: self.entry_frame });
+        self.entry_starts.insert(parent, EntryStart { start, shape });
     }
 
-    /// Forgets what the children of `parent` were built from, for a build of `parent` that finds children it is noted for again.
+    /// Forgets what the children of `parent` were built from, at the start of each build of `parent`: the children it builds note it again, so a
+    /// parent that has none (any more) is left with none.
     pub(crate) fn forget_entry_start(&mut self, parent: u64) {
         if !self.entry_starts.is_empty() {
             self.entry_starts.remove(&parent);

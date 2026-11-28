@@ -13432,6 +13432,7 @@ pub(crate) fn build_host_container(
         &mut ctx.inside_marker,
         list_marker.as_ref().and_then(|marker| marker.inside.clone().map(|room| (element.id, room))),
     );
+    forget_scroll_content_state(element, ctx);
     #[cfg_attr(target_family = "wasm", allow(unused_mut))]
     let (mut content, mut placements, containing_heights) = if skipped {
         // The trim passed down is meant for what is built below.
@@ -13697,6 +13698,14 @@ impl Placement {
     }
 }
 
+/// A parent that is no longer inside a `div` scroller, or no longer has an absolute child placed by it, is found out by a build that
+/// does not note it again: this runs for every build of the element, whatever it builds of its children (content skipped by
+/// `content-visibility` included).
+fn forget_scroll_content_state(element: &crate::retained_tree::RetainedElement, ctx: &mut BuildCtx) {
+    ctx.retain.forget_entry_start(element.id);
+    ctx.tree.forget_scroll_content_parent(element.id);
+}
+
 /// What a host element holds, in paint order, with the placement of each, and the cells its
 /// atomic inlines read the content height of the element from.
 fn build_content(
@@ -13730,10 +13739,6 @@ fn build_content(
         }
     }
 
-    // A parent that is no longer inside a `div` scroller, or no longer has an absolute child placed by it, is found out by a build
-    // that does not note it again.
-    ctx.retain.forget_entry_start(element.id);
-    ctx.tree.forget_scroll_content_parent(element.id);
     // Children. Consecutive inline children are one paragraph, see
     // `text::inline`; the rest are elements of their own.
     if !crate::layout::generated::childless(ctx.tree, element) {
@@ -14000,6 +14005,7 @@ fn build_contents_container(
         el = el.font_variations(variations);
     }
     let planned = (!crate::layout::generated::childless(ctx.tree, element)).then(|| crate::text::plan_cache::planned(ctx.tree, element));
+    forget_scroll_content_state(element, ctx);
     let (content, placements, containing_heights) =
         build_content(element, planned.as_ref().map_or(&[], |planned| &planned.children), ctx, window, cx);
     el = crate::text::atomic::report_containing_height(el, containing_heights);
