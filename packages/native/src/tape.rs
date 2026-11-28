@@ -2910,6 +2910,34 @@ mod tests {
     }
 
     #[test]
+    fn what_a_frame_that_moves_a_scrollers_content_was_going_to_do_is_settled_only_once_it_is_drawn() {
+        let window = WindowId::from(931);
+        crate::automation::forget_window(window);
+        let tapes = TapeStore::default();
+        tapes.begin_rows();
+        for row in [1, 2] {
+            built_row(&tapes, window, 100, row);
+        }
+        tapes.fold_rows(window);
+        let plan = || Membership { removed: vec![1], ..Membership::default() };
+
+        // The translate was declined: the next frames, built whole or classified, have the root as it was.
+        tapes.note_membership(plan());
+        tapes.fold_rows(window);
+        assert_eq!(crate::text::painted_text(window).len(), 2);
+        tapes.note_membership(plan());
+        tapes.settle_rows(window);
+        assert_eq!(crate::text::painted_text(window).len(), 2);
+        assert!(tapes.take_left().is_empty());
+
+        tapes.note_membership(plan());
+        assert!(tapes.settle_adopted(window));
+        assert_eq!(crate::text::painted_text(window).len(), 1);
+        assert_eq!(tapes.take_left(), [1]);
+        assert!(!tapes.settle_adopted(window), "it is settled once");
+    }
+
+    #[test]
     fn what_the_rows_that_came_in_wrote_is_read_where_their_rows_are_and_not_at_the_end() {
         let window = WindowId::from(926);
         crate::automation::forget_window(window);

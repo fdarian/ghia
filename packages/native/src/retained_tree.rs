@@ -4900,7 +4900,46 @@ mod tests {
         tree.take_dirty();
         tree.take_structure();
         tree.take_restyles();
+        tree.note_scroll_content_parent(2);
         tree
+    }
+
+    fn append_rows(tree: &mut RetainedTree, count: u64) {
+        let mut batch = String::from("[");
+        for id in 10..10 + count {
+            batch.push_str(&format!(r##"["createElement",{id},"div"],["setStyle",{id},{{"position":"absolute","top":{id}}}],["appendChild",2,{id}],"##));
+        }
+        batch.push_str("[\"setRoot\",1]]");
+        apply(tree, &batch);
+    }
+
+    #[test]
+    fn absolute_nodes_appended_to_a_positioned_box_outside_a_scroller_are_not_tracked() {
+        let mut tree = rows_in_a_positioned_box();
+        // The frame never found absolute children of the box in a scroller's content.
+        tree.scroll_content_parents.get_mut().clear();
+        let shown = tree.root_revision();
+        append_rows(&mut tree, 5_000);
+        assert!(tree.added.borrow().is_empty() && tree.added_ids.borrow().is_empty(), "no list to scan for a parent a scroll cannot build for");
+        assert_eq!(tree.pure_membership_since(shown), None);
+    }
+
+    #[test]
+    fn five_thousand_rows_put_in_a_scroller_are_tracked_without_a_scan_of_the_list_for_each() {
+        let mut tree = rows_in_a_positioned_box();
+        let shown = tree.root_revision();
+        let started = std::time::Instant::now();
+        append_rows(&mut tree, 5_000);
+        let membership = tree.pure_membership_since(shown).expect("rows that came in are a membership change");
+        assert_eq!((membership.0.len(), membership.1.len()), (0, 5_000));
+        assert_eq!(tree.added.borrow().len(), 5_000);
+        assert_eq!(tree.added_ids.borrow().len(), 5_000);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "quadratic scans of 5k rows take longer: {:?}", started.elapsed());
+        let mut tree = rows_in_a_positioned_box();
+        let shown = tree.root_revision();
+        apply(&mut tree, r##"[["createElement",10,"div"],["setStyle",10,{"position":"absolute"}],["appendChild",2,10],["detachChild",10]]"##);
+        assert!(tree.added_ids.borrow().is_empty() && tree.added.borrow().is_empty(), "a row taken out as it came is in neither list");
+        assert_eq!(tree.pure_membership_since(shown), None);
     }
 
     #[test]
