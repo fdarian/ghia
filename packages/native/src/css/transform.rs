@@ -371,7 +371,7 @@ pub(crate) fn forms_context_if_declared(style: &StyleDesc, lengths: &LengthConte
     Some(transform == Some(true) || perspective == Some(true) || preserve_3d == Some(true))
 }
 
-fn declares(style: &StyleDesc) -> bool {
+pub(crate) fn declares(style: &StyleDesc) -> bool {
     style.transform.is_some()
         || style.motion_transform.is_some()
         || style.translate.is_some()

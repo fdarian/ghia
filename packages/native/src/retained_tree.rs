@@ -1054,6 +1054,12 @@ pub struct RetainedTree {
     /// but their parent's children: out of flow, placed by their parent and still (`addition_leaves_the_rest`). A scroll that moves what
     /// holds them can build them where the frame shown has none ([`Self::pure_membership_since`]).
     added: std::cell::RefCell<Vec<(u64, u64)>>,
+    /// The children of `added`, to tell whether an element is one without a scan of the list.
+    added_ids: std::cell::RefCell<FxHashSet<u64>>,
+    /// The parents that a frame built inside the content of a `div` scroller and found absolute children placed by them in, the ones
+    /// that a scroll can build a child that comes in for (`Retain::entry_start`). A new child of any other parent is a change of
+    /// its parent, which is no use for the scroll to track.
+    scroll_content_parents: std::cell::RefCell<FxHashSet<u64>>,
     /// The revision of the last change in the frame that is not one of `removed` or `added`.
     other_revision: u64,
     /// A change of `removed` or `added` is being made, which takes a revision that is no `other_revision`.
@@ -1121,6 +1127,8 @@ impl RetainedTree {
             other_revision: 0,
             membership_open: false,
             added: Default::default(),
+            added_ids: Default::default(),
+            scroll_content_parents: Default::default(),
         }
     }
 
@@ -1265,6 +1273,7 @@ impl RetainedTree {
     pub fn take_structure(&self) -> Vec<u64> {
         self.removed.borrow_mut().clear();
         self.added.borrow_mut().clear();
+        self.added_ids.borrow_mut().clear();
         std::mem::take(&mut *self.structure.borrow_mut())
     }
 
@@ -1272,9 +1281,11 @@ impl RetainedTree {
     /// anchor follows: the next frame is a frame built whole, or a scroll that moves what held them (`pure_membership_since`).
     fn only_membership_pending(&self) -> bool {
         let (removed, added) = (self.removed.borrow(), self.added.borrow());
-        !(removed.is_empty() && added.is_empty())
-            && self.restyled.borrow().is_empty()
-            && self.structure.borrow().iter().all(|id| removed.iter().chain(added.iter()).any(|(_, parent)| parent == id))
+        if removed.is_empty() && added.is_empty() || !self.restyled.borrow().is_empty() {
+            return false;
+        }
+        let parents: FxHashSet<u64> = removed.iter().chain(added.iter()).map(|(_, parent)| *parent).collect();
+        self.structure.borrow().iter().all(|id| parents.contains(id))
     }
 
     /// The elements taken out of the tree and the ones put in it since the frame shown, if that frame was built at `revision` and
@@ -1296,14 +1307,14 @@ impl RetainedTree {
         let mut parents: Vec<u64> = removed.iter().chain(added).map(|(_, parent)| *parent).collect();
         parents.sort_unstable();
         parents.dedup();
+        let came: FxHashSet<u64> = added.iter().map(|(child, _)| *child).collect();
         let mut survivors = Vec::new();
         for parent in parents {
-            survivors.extend(self.elements.get(&parent)?.children.iter().copied().filter(|child| !added.iter().any(|(came, _)| came == child)));
+            survivors.extend(self.elements.get(&parent)?.children.iter().copied().filter(|child| !came.contains(child)));
         }
         Some(survivors)
     }
 
-    /// The children of `parent` in the order of the tree.
     pub(crate) fn children_of(&self, parent: u64) -> Option<&[u64]> {
         self.elements.get(&parent).map(|element| element.children.as_slice())
     }
@@ -1340,7 +1351,6 @@ impl RetainedTree {
         true
     }
 
-    /// `mark_changed(parent)` for `child` that is taken out of it.
     fn mark_removed(&mut self, child: u64, parent: u64, leaves_the_rest: bool) {
         if !leaves_the_rest {
             self.mark_changed(parent);
@@ -1350,12 +1360,13 @@ impl RetainedTree {
         self.mark_changed(parent);
         self.membership_open = false;
         // A child that came in since the frame shown is in no frame: it goes as it came.
-        let added = self.added.get_mut();
-        match added.iter().position(|(came, _)| *came == child) {
-            Some(at) => {
-                added.remove(at);
+        if self.added_ids.get_mut().remove(&child) {
+            let added = self.added.get_mut();
+            if let Some(at) = added.iter().position(|(came, _)| *came == child) {
+                added.swap_remove(at);
             }
-            None => self.removed.get_mut().push((child, parent)),
+        } else {
+            self.removed.get_mut().push((child, parent));
         }
     }
 
@@ -1364,7 +1375,8 @@ impl RetainedTree {
     /// its children after it has put it in the tree, so what the element is is judged when the frame asks
     /// ([`Self::addition_leaves_the_rest`]), and what is done to it until then is part of the addition ([`Self::in_a_new_child`]).
     fn parent_takes_additions(&self, parent: u64) -> bool {
-        self.commit_patching
+        self.scroll_content_parents.borrow().contains(&parent)
+            && self.commit_patching
             && !self.outside_the_frame(parent)
             && self.anchor_holding(parent).is_none()
             && self.elements.get(&parent).is_some_and(|holder| {
@@ -1379,13 +1391,13 @@ impl RetainedTree {
 
     /// Whether `id` is a child that came in since the frame shown, or is inside one.
     fn in_a_new_child(&self, id: u64) -> bool {
-        let added = self.added.borrow();
+        let added = self.added_ids.borrow();
         if added.is_empty() {
             return false;
         }
         let mut at = Some(id);
         while let Some(up) = at {
-            if added.iter().any(|(child, _)| *child == up) {
+            if added.contains(&up) {
                 return true;
             }
             at = self.elements.get(&up).and_then(|element| element.parent);
@@ -1427,7 +1439,6 @@ impl RetainedTree {
         true
     }
 
-    /// `mark_changed(parent)` for the new element `child` that is put under it.
     fn mark_added(&mut self, child: u64, parent: u64, covered: bool) {
         if !covered {
             self.mark_changed(parent);
@@ -1437,6 +1448,12 @@ impl RetainedTree {
         self.mark_changed(parent);
         self.membership_open = false;
         self.added.get_mut().push((child, parent));
+        self.added_ids.get_mut().insert(child);
+    }
+
+    /// A frame built the children of `parent` inside the content of a `div` scroller, and some of them are absolute and placed by it.
+    pub(crate) fn note_scroll_content_parent(&self, parent: u64) {
+        self.scroll_content_parents.borrow_mut().insert(parent);
     }
 
     /// Classifies paint-only restyles for patch frames from now on, or stops.
@@ -1849,6 +1866,7 @@ impl RetainedTree {
             }
             self.resolved.get_mut().forget(id);
             self.fresh.get_mut().remove(&id);
+            self.scroll_content_parents.get_mut().remove(&id);
             destroyed.push(id);
             if element.pseudo_matches().is_some() {
                 self.destroy_generated_of(id);

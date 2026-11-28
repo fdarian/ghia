@@ -1826,6 +1826,7 @@ impl Retain {
         self.woken.retain(|id| tree.elements.contains_key(id));
         self.skipping.retain(|id| tree.elements.contains_key(id));
         self.patch_root_scans.retain(|id, _| tree.elements.contains_key(id));
+        self.entry_starts.retain(|id, _| tree.elements.contains_key(id));
     }
 
     /// Whether the frame about to be built is one that is not recorded, see [`Backoff`].
@@ -2320,13 +2321,6 @@ impl Retain {
     /// What a child that comes in under `parent` is built from: the start a sibling was built from, and the shape of `parent`.
     pub(crate) fn entry_start(&self, parent: u64) -> Option<(&crate::renderer::BuildStart, u64)> {
         self.entry_starts.get(&parent).map(|known| (&known.start, known.shape))
-    }
-
-    /// Forgets the starts of parents the tree no longer has.
-    pub(crate) fn prune_entry_starts(&mut self, tree: &crate::retained_tree::RetainedTree) {
-        if self.entry_starts.len() > 1024 {
-            self.entry_starts.retain(|parent, _| tree.elements.contains_key(parent));
-        }
     }
 
     /// The shape of the element being built, for a child that is not built inside it to take as its

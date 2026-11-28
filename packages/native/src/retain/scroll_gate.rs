@@ -166,16 +166,18 @@ impl ScrollGate {
         // What stays beside what came or left is under another index among its siblings, and what the roots of a parent that got a
         // child wrote is in the order of the tree.
         let parents: FxHashSet<u64> = removed.iter().chain(&added).map(|(_, parent)| *parent).collect();
+        let came: FxHashSet<u64> = added.iter().map(|(child, _)| *child).collect();
+        let got_a_child: FxHashSet<u64> = added.iter().map(|(_, parent)| *parent).collect();
         let mut renumbered = Vec::new();
         let mut order = Vec::new();
         for parent in parents {
             let siblings = tree.children_of(parent)?;
             for (index, sibling) in siblings.iter().enumerate() {
-                if !added.iter().any(|(came, _)| came == sibling) {
+                if !came.contains(sibling) {
                     renumbered.push((*sibling, index as u32));
                 }
             }
-            if added.iter().any(|(_, held)| *held == parent) {
+            if got_a_child.contains(&parent) {
                 order.push(siblings.to_vec());
             }
         }
@@ -211,6 +213,7 @@ impl ScrollGate {
                         size: gpui::size(gpui::px(placed.size.0 as f32), gpui::px(placed.size.1 as f32)),
                         origin: gpui::point(gpui::px(placed.origin.0 as f32), gpui::px(placed.origin.1 as f32)),
                         scrolls: true,
+                        lift_z: 0,
                     }
                 })
                 .collect();
@@ -238,6 +241,17 @@ fn removals_leave_the_rest(window: gpui::WindowId, removed: &[(u64, u64)]) -> bo
 }
 
 impl GpuixView {
+    /// A frame that moved the content of a scroller drew the tree as it is: the children a commit took out of it are out of the
+    /// frame shown and the ones it put in are built, so the frame shown is the frame of this revision, as after a patch.
+    pub(crate) fn note_membership_drawn(&mut self) {
+        let tree = self.tree.lock().unwrap();
+        tree.take_restyles();
+        tree.take_structure();
+        // What came in was drawn: it has been seen with its style.
+        tree.note_frame_built();
+        self.retain.note_patched(tree.root_revision());
+    }
+
     /// Whether a source other than the scroll of the scroller `translating` differs from the frame shown, see
     /// `Retain::sources_changed`. What cannot be read is a change.
     fn sources_besides_scroll_changed(&self, window: &gpui::Window, translating: Option<gpui::ScrollKey>) -> bool {
@@ -260,7 +274,7 @@ impl GpuixView {
             // The rows that left are out of the registries before the sweeps read the boxes, and out of
             // the page's records before a frame builds a row that comes in again. So are the children a commit took out
             // of the scroller, which the frame was drawn without.
-            let membership_drawn = settled_tapes.settle_rows(window.window_handle().window_id());
+            let membership_drawn = settled_tapes.settle_adopted(window.window_handle().window_id());
             crate::renderer::list_writes_drawn(window.window_handle().window_id());
             if let Some(view) = settled_view.upgrade().filter(|view| !view.is_updating(cx)) {
                 view.update(cx, |view, _| {

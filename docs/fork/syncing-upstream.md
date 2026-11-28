@@ -71,6 +71,13 @@ cannot do without); the engine otherwise stays as upstream ships it, and upstrea
 needs the owner's explicit permission and an entry here: the decision, the considerations and the reasoning. A sync keeps
 each entry or applies it again.
 
+### A scroll anchor does not pick a node a scratch layout left its boxes on (zed `taffy.rs`: `TaffyLayoutEngine::unplaced`, `mark_computed_unplaced`, `anchor_facts`; zed `claude/div-membership`)
+
+- **Decision.** A layout-engine change for what Ghia needs (a scroll that builds the children a commit put into a scroller's content must not make the scroller anchor to one of them), in the patch mode that is opt-in per window (`Window::set_scroll_patch`); a window that does not turn it on is as before. Owner OK'd 2026-11-28 (the TanStack row-change work). Not upstream behaviour: upstream has no scroll patch.
+- **What it changes.** The roots a scratch pass laid out (`Window::build_enter_group`: each child that comes in is laid out as a root of its own, then put in the frame shown) hold the boxes of that layout, which are not the page's. `mark_computed_unplaced` notes those nodes, and `anchor_facts` reports them `hidden` so that a scroller picking its anchor before the next layout skips them, as it skips a node that was never laid out. The mark ends when that pick is done and when a pass that lays out the page ends (`end_pass`), whichever the scroller asks for; the end of a scratch pass (`end_pass_keeping_nodes`) keeps it, so a translate with several groups keeps the marks of the first for the layout that places them.
+- **Considerations.** A node that is marked and was already placed (a root that stays) is not reached: only the roots a scratch pass computed, and what is below them. A stale mark would hide a real box from the anchor of a later frame, which is why it is cleared at the end of the next non-scratch pass even when no scroller picked.
+- **Reasoning.** Without it the scroller could pick as its anchor a child whose box is the scratch layout's, which is not where the page has it, and anchoring then follows a box that is not there.
+
 ### A platform can open its windows invisible (zed `gpui_macos`: `MacPlatform::invisible_windows`, `MacWindow::open`; branch `claude/offscreen-live-tests`)
 
 - **Decision.** A test-support change for what Ghia needs (a suite that opens live windows must not show them), opt-in per platform exactly as `keep_window_frames` is; a platform that does not call it is as before. Owner OK'd 2026-11-27 ("open test windows off-screen so they don't flash"), fork-only. Not something an upstream GPUI app asks for.

@@ -1449,9 +1449,11 @@ impl TapeStore {
         rebuilt
     }
 
-    /// A frame that moves the content of a scroller takes the roots of its children that left out of the frame and builds the ones
-    /// that came in: the next [`Self::settle_rows`] takes what the first wrote out of the registries, puts what the others wrote
-    /// where it belongs, and puts what the roots that stay wrote under the path they have now.
+    /// What a frame that moves the content of a scroller would do to the roots of its children: take the ones that left out of the
+    /// frame and build the ones that came in. It is only a plan until gpui says the frame was drawn that way
+    /// ([`Self::settle_adopted`]), which then takes what the first wrote out of the registries, puts what the others wrote where it
+    /// belongs, and puts what the roots that stay wrote under the path they have now. Any other settling forgets it: a translate that
+    /// was declined is a frame built whole, which has the roots as they were.
     pub(crate) fn note_membership(&self, membership: Membership) {
         *self.membership.borrow_mut() = membership;
     }
@@ -1462,20 +1464,6 @@ impl TapeStore {
         let tapes = self.tapes.borrow();
         survivors.iter().all(|root| tapes.contains_key(root))
             && roots.iter().all(|root| tapes.get(root).is_some_and(|tape| self.current_doc(*root, &tape.borrow()).is_plain()))
-    }
-
-    /// The path `root`, a child of a scroller's content, has in the document the frame shown has, or the one a frame that builds it
-    /// would give it: its index among the siblings of its parent. `None` for a root that has no tape.
-    pub(crate) fn doc_index_of(&self, root: u64) -> Option<u32> {
-        let tapes = self.tapes.borrow();
-        let tape = tapes.get(&root)?.borrow();
-        self.current_doc(root, &tape).parent_and_index().map(|(_, index)| index)
-    }
-
-    /// Whether `root` is not inside a paragraph, which no index of its own renumbers.
-    pub(crate) fn is_plain_root(&self, root: u64) -> bool {
-        let tapes = self.tapes.borrow();
-        tapes.get(&root).is_some_and(|tape| self.current_doc(root, &tape.borrow()).is_plain())
     }
 
     /// The path `root` has in the document the frame shown has: the one the last frame visited it at, or the one its build had.
@@ -1497,10 +1485,20 @@ impl TapeStore {
     /// comes in again is built, so its tape is its own. Does nothing until such a frame has moved
     /// rows (kept one in place, or built one again where it is), and once for each.
     ///
-    /// Settles the roots a frame took out of a scroller's content as well ([`Self::note_membership`]), and says whether there
-    /// were some.
-    pub(crate) fn settle_rows(&self, window: WindowId) -> bool {
-        let membership = std::mem::take(&mut *self.membership.borrow_mut());
+    /// Forgets what a frame that moves the content of a scroller was going to do ([`Self::note_membership`]) too: nothing drew it.
+    pub(crate) fn settle_rows(&self, window: WindowId) {
+        self.settle(window, false);
+    }
+
+    /// [`Self::settle_rows`] for a frame that was drawn as [`Self::note_membership`] says: the roots it took out of a scroller's
+    /// content and the ones it built are settled too. Says whether there were some.
+    pub(crate) fn settle_adopted(&self, window: WindowId) -> bool {
+        self.settle(window, true)
+    }
+
+    fn settle(&self, window: WindowId, adopted: bool) -> bool {
+        let planned = std::mem::take(&mut *self.membership.borrow_mut());
+        let membership = if adopted { planned } else { Membership::default() };
         let changed = !(membership.removed.is_empty() && membership.entered.is_empty());
         self.settle_membership(window, &membership);
         let mut rows = self.rows.borrow_mut();

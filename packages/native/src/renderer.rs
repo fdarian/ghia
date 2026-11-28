@@ -7384,7 +7384,7 @@ pub(crate) fn emit_css_events(
     }
 }
 
-fn emit_highlight_events(callback: &Option<EventCallback>, events: &[(u64, usize)]) {
+pub(crate) fn emit_highlight_events(callback: &Option<EventCallback>, events: &[(u64, usize)]) {
     for &(id, total) in events {
         emit_event_full(callback, id, "highlight", |payload| {
             payload.match_count = Some(total as f64);
@@ -7751,7 +7751,7 @@ impl GpuixView {
     /// The instant the pass being built samples time at: a draw reads the clock, anything else
     /// (a layout a read forced, the reference of a verified frame) the instant of the draw
     /// before it. See `frame_instant`.
-    fn pass_instant(&mut self, window: &gpui::Window) -> web_time::Instant {
+    pub(crate) fn pass_instant(&mut self, window: &gpui::Window) -> web_time::Instant {
         if window.is_retention_reference() {
             return self
                 .frame_instant
@@ -8461,64 +8461,6 @@ impl GpuixView {
         let left = self.tapes.take_left();
         let tree = self.tree.clone();
         self.retain.forget_left_rows(&left, &tree.lock().unwrap());
-    }
-
-    /// A frame that moved the content of a scroller drew the tree as it is: the children a commit took out of it are out of the
-    /// frame shown and the ones it put in are built, so the frame shown is the frame of this revision, as after a patch.
-    pub(crate) fn note_membership_drawn(&mut self) {
-        let tree = self.tree.lock().unwrap();
-        tree.take_restyles();
-        tree.take_structure();
-        // What came in was drawn: it has been seen with its style.
-        tree.note_frame_built();
-        self.retain.prune_entry_starts(&tree);
-        self.retain.note_patched(tree.root_revision());
-    }
-
-    /// What the children of `parent` that are absolute and placed by it inside a scroller were built from.
-    pub(crate) fn retain_entry_start(&self, parent: u64) -> Option<(&BuildStart, u64)> {
-        self.retain.entry_start(parent)
-    }
-
-    /// Builds the child `child`, which came into the content of a scroller as the child of its parent at `index`, as the frame that
-    /// built its siblings built them (`start`, and the `shape` of the parent), for a frame that moves the content to put in the frame
-    /// shown: a root entered the way a row of a list is, which has no part in the decision of the page.
-    pub(crate) fn build_entering(
-        &mut self,
-        child: u64,
-        index: u32,
-        mut start: BuildStart,
-        shape: u64,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> gpui::AnyElement {
-        let tree_arc = self.tree.clone();
-        let tree = tree_arc.lock().unwrap();
-        let callback = self.event_callback.clone();
-        let now = self.pass_instant(window);
-        start.now = now;
-        *start.doc_path.last_mut().expect("a child of a scroller's content has a place among its siblings") = index;
-        start.focus_styles = self.focus.styles(&tree, tree.keyboard_focus_dim());
-        let viewport = window.viewport_size();
-        start.inherited.lengths = start
-            .inherited
-            .lengths
-            .with_viewport(f64::from(f32::from(viewport.width)), f64::from(f32::from(viewport.height)));
-        crate::layout::box_generation::hold_display(&tree, self.css_transitions.held_displays());
-        crate::accessibility::links::sync(&tree);
-        let activation = self.activation();
-        let pointer_state = self.pointer.clone();
-        let pointer = pointer_state.borrow();
-        let mut highlight_events = Vec::new();
-        let mut build_ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), start);
-        build_ctx.retain.begin_entering(shape);
-        let built = build_element(child, &mut build_ctx, window, cx);
-        build_ctx.retain.finish_entering();
-        drop(pointer);
-        emit_highlight_events(&callback, &highlight_events);
-        self.emit_css_events(&callback, &tree);
-        emit_layout_events(&callback, &tree, self.layout_flips.take_events());
-        built
     }
 
     /// A frame moved the content of the scroller `translated` in place: the offset the next frame is compared with is the one it left.
@@ -9958,7 +9900,7 @@ impl PendingFocus {
 
 impl GpuixView {
     /// The context a build of elements starts in, with `start` handed down to the first of them.
-    fn build_ctx<'a>(
+    pub(crate) fn build_ctx<'a>(
         &'a mut self,
         tree: &'a RetainedTree,
         callback: &'a Option<EventCallback>,
@@ -10978,7 +10920,7 @@ impl gpui::Render for GpuixView {
             let tapes = self.tapes.clone();
             Rc::new(move |_: &gpui::Window| {
                 // The frame built whole after the translate is about to forget which rows the translate moved.
-                tapes.settle_rows(window_id);
+                tapes.settle_adopted(window_id);
                 crate::automation::describe_registries(window_id)
             }) as Rc<dyn Fn(&gpui::Window) -> String>
         }));
@@ -11580,6 +11522,22 @@ pub(crate) struct BuildStart {
 }
 
 impl BuildStart {
+    /// The start of a build of a child that comes in as the child of the element `start` was noted for, at `index` among its siblings,
+    /// in the frame being drawn now.
+    pub(crate) fn for_entering(
+        mut self,
+        index: u32,
+        now: web_time::Instant,
+        focus_styles: crate::focus::FocusStyles,
+        viewport: gpui::Size<gpui::Pixels>,
+    ) -> Self {
+        self.now = now;
+        *self.doc_path.last_mut().expect("a child of a scroller's content has a place among its siblings") = index;
+        self.focus_styles = focus_styles;
+        self.inherited.lengths = self.inherited.lengths.with_viewport(f64::from(f32::from(viewport.width)), f64::from(f32::from(viewport.height)));
+        self
+    }
+
     /// Where the element this starts the build of sits in the document.
     fn doc_path(&self) -> crate::text::selection::DocPath {
         crate::text::selection::DocPath::new(self.doc_hosts.clone(), self.doc_path.as_slice().into())
@@ -13916,6 +13874,7 @@ fn build_plan(
                     let shape = ctx.retain.current_shape();
                     let start = BuildStart::of(ctx);
                     ctx.retain.note_entry_start(element.id, start, shape);
+                    ctx.tree.note_scroll_content_parent(element.id);
                 }
                 // A block of a box is a line of its own.
                 let outer_line = ctx.inline_line.take();
