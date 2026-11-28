@@ -35,11 +35,12 @@ type Layout = "absolute" | "transform" | "flow"
 
 type Log = { clicks: number[]; nodes: Record<number, unknown> }
 
-type Options = { removed?: number[]; tint?: boolean; hover?: boolean }
+type Options = { removed?: number[]; tint?: boolean; hover?: boolean; present?: number[]; autoFocusRow?: number; tallerRow?: number; flowRow?: number; spacerHeight?: number }
 
-function Page({ log, layout, removed = [], tint, hover }: { log: Log; layout: Layout } & Options) {
+function Page({ log, layout, removed = [], tint, hover, present, autoFocusRow, tallerRow, flowRow, spacerHeight }: { log: Log; layout: Layout } & Options) {
   const rows = Array.from({ length: COUNT }, (_, index) => index)
     .filter((index) => !removed.includes(index))
+    .filter((index) => present === undefined || present.includes(index))
     .map((index) => (
       <div
         key={index}
@@ -49,23 +50,24 @@ function Page({ log, layout, removed = [], tint, hover }: { log: Log; layout: La
         }}
         onClick={() => log.clicks.push(index)}
         style={{
-          position: layout === "flow" ? undefined : "absolute",
+          position: layout === "flow" || index === flowRow ? undefined : "absolute",
           top: layout === "absolute" ? index * ROW : layout === "transform" ? 0 : undefined,
           ...(layout === "transform" ? { transform: `translateY(${index * ROW}px)` } : {}),
           width: ROW_WIDTH,
-          height: ROW,
+          height: index === tallerRow ? undefined : ROW,
           flexShrink: 0,
           backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
           ...(hover ? { hover: { backgroundColor: "#664422" } } : {}),
         }}
       >
         <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
+        {index === autoFocusRow ? <input autoFocus /> : null}
       </div>
     ))
   return (
     <div testId="scroller" style={{ width: 200, height: VIEWPORT, overflowY: "auto", scrollbarWidth: "none", ...(tint ? { backgroundColor: "#101820" } : {}) }}>
       {layout !== "flow" ? (
-        <div testId="inner" style={{ position: "relative", width: "100%", height: COUNT * ROW }}>
+        <div testId="inner" style={{ position: "relative", width: "100%", height: spacerHeight ?? COUNT * ROW }}>
           {rows}
         </div>
       ) : (
@@ -300,5 +302,203 @@ describeNative("a wheel step over a div scroller whose commit only takes rows ou
     } finally {
       opened.unmount()
     }
+  })
+})
+
+type RowStep = { by: number; rows?: number[] }
+
+/** What a test observes of the rows a step left in the tree: the box each reports, and what is under the points. */
+function seenRows(opened, present: number[]) {
+  const renderer = opened.renderer
+  const scroller = renderer.findByTestId("scroller")
+  return {
+    boxes: boxes(renderer),
+    scrollOffset: renderer.getScrollOffset(scroller.id),
+    under: points.map(([x, y]) => renderer.getElementsAt(x, y)),
+    picture: picture(renderer),
+    rects: present.map((index) => {
+      const box = opened.log.nodes[index].getBoundingClientRect()
+      return { index, x: box.x, y: box.y, width: box.width, height: box.height }
+    }),
+  }
+}
+
+/**
+ * Each step is a wheel and the commit a virtualizer makes with it: `rows` are the rows that are rendered from then on, so that the
+ * ones that were not are created and the ones that are not any more are removed, before the frame of the step is drawn.
+ */
+function runRows(translate: boolean, layout: Layout, first: number[], steps: RowStep[], options: Options = {}) {
+  const opened = open(translate, layout, { ...options, present: first })
+  const renderer = opened.renderer
+  try {
+    renderer.nativeSimulateMouseMove(180, 60)
+    renderer.dispatchNativeEvents()
+    renderer.drawFrame()
+    const wheel = (by: number) => {
+      renderer.clockAdvance(VSYNC)
+      renderer.advanceTime(VSYNC)
+      renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+      renderer.dispatchNativeEvents()
+    }
+    wheel(4)
+    renderer.drawFrame()
+    wheel(-4)
+    renderer.drawFrame()
+    const before = scroll(renderer)
+    let present = first
+    const frames: unknown[] = []
+    const translated: boolean[] = []
+    for (const step of steps) {
+      const patched = scroll(renderer).patched
+      wheel(step.by)
+      if (step.rows) {
+        present = step.rows
+        opened.render(<Page log={opened.log} layout={layout} {...options} present={present} />)
+      }
+      renderer.drawFrame()
+      translated.push(scroll(renderer).patched > patched)
+      frames.push(seenRows(opened, present))
+    }
+    // The click on rows that came in, the text across them, and what is under the pointer.
+    const clicks: number[] = []
+    for (const [x, y] of [[20, 20], [20, 50], [20, 90]]) {
+      const count = opened.log.clicks.length
+      renderer.nativeSimulateClick(x, y)
+      clicks.push(...opened.log.clicks.slice(count))
+    }
+    const selected = renderer.dragSelect(10, 5, 140, 95)
+    renderer.dispatchNativeEvents()
+    return { frames, translated, counters: scroll(renderer), before, clicks, selected, mismatches: renderer.getRetentionMismatches() }
+  } finally {
+    opened.unmount()
+  }
+}
+
+/** Rows come in after the last, before the first, two at once, and while others leave. */
+const FIRST = [0, 1, 2, 3]
+const enterSteps: RowStep[] = [
+  { by: 3, rows: [0, 1, 2, 3, 4] },
+  { by: 5 },
+  { by: 8, rows: [0, 1, 2, 3, 4, 5] },
+  { by: -4, rows: [0, 1, 2, 3, 4, 5, 6] },
+  { by: 6, rows: [1, 2, 3, 4, 5, 6, 7, 8] },
+  { by: 2 },
+  { by: 7, rows: [3, 4, 5, 6, 7, 8, 9] },
+  { by: -30, rows: [0, 1, 2, 3, 4, 5, 6] },
+]
+
+describeNative("a wheel step over a div scroller whose commit puts rows in it", { timeout: TIMEOUT }, () => {
+  for (const layout of ["absolute", "transform"] as const) {
+    unverified(`is a translate that builds the rows, over ${layout} rows`, () => {
+      const on = runRows(true, layout, FIRST, enterSteps)
+      const off = runRows(false, layout, FIRST, enterSteps)
+      expect(off.counters.frames).toBe(0)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.translated, "every step is a translate: the ones with a commit build the rows that came in").toEqual(enterSteps.map(() => true))
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(9)
+      expect(on.counters.held.Edited ?? 0, "a commit that put rows in is no edit").toBe(0)
+      // The picture, the boxes, getBoundingClientRect of the new rows, what is under the points, the offset.
+      expect(on.frames).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.selected, "the text selected across rows that came in").toEqual(off.selected)
+      expect(on.selected).toBeTruthy()
+    })
+  }
+
+  it("draws the same under the verifier, and the verifier finds no difference", () => {
+    for (const layout of ["absolute", "transform"] as const) {
+      const on = runRows(true, layout, FIRST, enterSteps)
+      const off = runRows(false, layout, FIRST, enterSteps)
+      expect(on.frames).toEqual(off.frames)
+      expect(on.mismatches.join("\n")).toBe("")
+      expect(on.counters.rowsBuilt, "the verifier compared a translate that built rows").toBeGreaterThan(0)
+    }
+  })
+
+  unverified("is a frame built whole when a row that comes in has no height of its own", () => {
+    const on = runRows(true, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], { tallerRow: 4 })
+    const off = runRows(false, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], { tallerRow: 4 })
+    expect(on.translated).toEqual([false])
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
+    expect(on.frames).toEqual(off.frames)
+  })
+
+  unverified("is a frame built whole when the height of the box that holds the rows changes with the commit", () => {
+    const opened = open(true, "absolute", { present: FIRST })
+    const renderer = opened.renderer
+    try {
+      renderer.nativeSimulateMouseMove(180, 60)
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      for (const by of [4, -4]) {
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+      }
+      const before = scroll(renderer)
+      renderer.clockAdvance(VSYNC)
+      renderer.nativeSimulateScrollWheel(180, 60, 0, 5)
+      renderer.dispatchNativeEvents()
+      opened.render(<Page log={opened.log} layout="absolute" present={[0, 1, 2, 3, 4]} spacerHeight={COUNT * ROW + 40} />)
+      renderer.drawFrame()
+      const after = scroll(renderer)
+      expect(after.patched - before.patched).toBe(0)
+      expect(after.rowsBuilt - before.rowsBuilt).toBe(0)
+      expect(after.reasons.Edited - before.reasons.Edited).toBe(1)
+    } finally {
+      opened.unmount()
+    }
+  })
+
+  unverified("is a frame built whole when a row that comes in takes focus or is in the flow", () => {
+    for (const options of [{ autoFocusRow: 4 }, { flowRow: 4 }]) {
+      const on = runRows(true, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
+      const off = runRows(false, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
+      expect(on.translated, JSON.stringify(options)).toEqual([false])
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
+      expect(on.frames).toEqual(off.frames)
+    }
+  })
+
+  unverified("builds rows with a hover style, which a patch repaints, and a row that comes in under the pointer", () => {
+    const hovered = (translate: boolean) => {
+      const opened = open(translate, "transform", { hover: true, present: FIRST })
+      const renderer = opened.renderer
+      try {
+        renderer.nativeSimulateMouseMove(20, 50)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        renderer.drawFrame()
+        for (const by of [4, -4]) {
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(20, 50, 0, by)
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+        }
+        const frames: unknown[] = []
+        let present = FIRST
+        for (const [by, rows] of [[30, [0, 1, 2, 3, 4]], [30, [1, 2, 3, 4, 5]], [-20, [0, 1, 2, 3, 4, 5]]] as const) {
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(20, 50, 0, by)
+          renderer.dispatchNativeEvents()
+          present = [...rows]
+          opened.render(<Page log={opened.log} layout="transform" hover present={present} />)
+          renderer.drawFrame()
+          frames.push({ under: renderer.getElementsAt(20, 50), picture: picture(renderer) })
+        }
+        renderer.advanceTime(500)
+        renderer.dispatchNativeEvents()
+        for (let frame = 0; frame < 3; frame++) renderer.drawFrame()
+        frames.push({ under: renderer.getElementsAt(20, 50), picture: picture(renderer), rects: seenRows(opened, present).rects })
+        return { patched: scroll(renderer).patched, built: scroll(renderer).rowsBuilt, frames }
+      } finally {
+        opened.unmount()
+      }
+    }
+    const on = hovered(true)
+    const off = hovered(false)
+    expect(on.built).toBeGreaterThan(0)
+    expect(on.frames).toEqual(off.frames)
   })
 })

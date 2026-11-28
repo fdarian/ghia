@@ -73,21 +73,20 @@ impl DocPath {
         self.hosts.is_empty()
     }
 
-    /// This path once the element at `removed` was taken out of the document: what comes after it among its siblings is one
-    /// place nearer the start, in the path and in the paragraphs that host it. `None` when nothing of it comes after.
-    pub fn after_removal_of(&self, removed: &DocPath) -> Option<DocPath> {
-        let (index, parent) = removed.path.split_last()?;
-        let up = |path: &Arc<[u32]>| -> Option<Arc<[u32]>> {
+    /// This path once the child of `parent` it is under (`parent` followed by the index `from`) has the index `to`: a sibling moved
+    /// by what was taken out or put in before it. The paragraphs that host it move with it. `None` when it is not under that child.
+    pub fn moved_sibling(&self, parent: &[u32], from: u32, to: u32) -> Option<DocPath> {
+        let moved = |path: &Arc<[u32]>| -> Option<Arc<[u32]>> {
             match path.strip_prefix(parent) {
-                Some([sibling, ..]) if sibling > index => {
+                Some([sibling, ..]) if *sibling == from => {
                     let mut moved = path.to_vec();
-                    moved[parent.len()] -= 1;
+                    moved[parent.len()] = to;
                     Some(moved.into())
                 }
                 _ => None,
             }
         };
-        let (path, hosts): (Option<Arc<[u32]>>, Vec<Option<Arc<[u32]>>>) = (up(&self.path), self.hosts.iter().map(|host| up(&host.path)).collect());
+        let (path, hosts): (Option<Arc<[u32]>>, Vec<Option<Arc<[u32]>>>) = (moved(&self.path), self.hosts.iter().map(|host| moved(&host.path)).collect());
         if path.is_none() && hosts.iter().all(Option::is_none) {
             return None;
         }
@@ -95,6 +94,11 @@ impl DocPath {
             hosts: self.hosts.iter().zip(hosts).map(|(host, moved)| Host { path: moved.unwrap_or_else(|| host.path.clone()), ..host.clone() }).collect(),
             path: path.unwrap_or_else(|| self.path.clone()),
         })
+    }
+
+    /// The index of the element this is the path of among its siblings, and the path of the parent.
+    pub fn parent_and_index(&self) -> Option<(&[u32], u32)> {
+        self.path.split_last().map(|(index, parent)| (parent, *index))
     }
 
     /// This path as seen from `root`, the path of an element it is inside: what `root` has in
@@ -1116,17 +1120,19 @@ mod tests {
     }
 
     #[test]
-    fn what_comes_after_a_removed_element_among_its_siblings_is_one_place_nearer_the_start() {
-        let removed = DocPath::from(Arc::<[u32]>::from([0, 4, 7]));
+    fn a_sibling_that_a_removal_or_an_addition_moved_has_its_path_and_its_hosts_under_the_new_index() {
         let path = |path: &[u32]| DocPath::from(Arc::<[u32]>::from(path));
-        let moved = path(&[0, 4, 9, 1]).after_removal_of(&removed).expect("a later sibling moves");
+        let moved = path(&[0, 4, 9, 1]).moved_sibling(&[0, 4], 9, 8).expect("the sibling moves");
         assert_eq!(DocPos::new(moved, 0), DocPos::new(Arc::<[u32]>::from([0, 4, 8, 1]), 0));
-        assert!(path(&[0, 4, 6, 1]).after_removal_of(&removed).is_none(), "an earlier sibling stays");
-        assert!(path(&[0, 4, 7]).after_removal_of(&removed).is_none(), "and the element is not after itself");
-        assert!(path(&[0, 5, 9]).after_removal_of(&removed).is_none(), "nor is what is under another parent");
+        assert!(path(&[0, 4, 6, 1]).moved_sibling(&[0, 4], 9, 8).is_none(), "another sibling stays");
+        assert!(path(&[0, 5, 9]).moved_sibling(&[0, 4], 9, 8).is_none(), "nor is what is under another parent");
         let hosted = DocPath::new(path(&[0, 1]).host(0, 3), Arc::from([0, 4, 9, 2]));
-        let moved = hosted.after_removal_of(&removed).expect("a text in a paragraph is put where its path is");
-        assert_eq!(DocPos::new(moved, 0), DocPos::new(DocPath::new(path(&[0, 1]).host(0, 3), Arc::from([0, 4, 8, 2])), 0));
+        let moved = hosted.moved_sibling(&[0, 4], 9, 10).expect("a text in a paragraph is put where its path is");
+        assert_eq!(DocPos::new(moved, 0), DocPos::new(DocPath::new(path(&[0, 1]).host(0, 3), Arc::from([0, 4, 10, 2])), 0));
+        let inside = DocPath::new(path(&[0, 4, 9]).host(0, 3), Arc::from([0, 4, 9, 2]));
+        let moved = inside.moved_sibling(&[0, 4], 9, 10).expect("the paragraph it is hosted by is under the sibling");
+        assert_eq!(DocPos::new(moved, 0), DocPos::new(DocPath::new(path(&[0, 4, 10]).host(0, 3), Arc::from([0, 4, 10, 2])), 0));
+        assert_eq!(path(&[0, 4, 9]).parent_and_index(), Some((&[0, 4][..], 9)));
     }
 
     #[test]

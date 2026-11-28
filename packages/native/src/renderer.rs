@@ -8464,12 +8464,61 @@ impl GpuixView {
     }
 
     /// A frame that moved the content of a scroller drew the tree as it is: the children a commit took out of it are out of the
-    /// frame shown, so the frame shown is the frame of this revision, as after a patch.
-    pub(crate) fn note_removals_drawn(&mut self) {
+    /// frame shown and the ones it put in are built, so the frame shown is the frame of this revision, as after a patch.
+    pub(crate) fn note_membership_drawn(&mut self) {
         let tree = self.tree.lock().unwrap();
         tree.take_restyles();
         tree.take_structure();
+        // What came in was drawn: it has been seen with its style.
+        tree.note_frame_built();
+        self.retain.prune_entry_starts(&tree);
         self.retain.note_patched(tree.root_revision());
+    }
+
+    /// What the children of `parent` that are absolute and placed by it inside a scroller were built from.
+    pub(crate) fn retain_entry_start(&self, parent: u64) -> Option<(&BuildStart, u64)> {
+        self.retain.entry_start(parent)
+    }
+
+    /// Builds the child `child`, which came into the content of a scroller as the child of its parent at `index`, as the frame that
+    /// built its siblings built them (`start`, and the `shape` of the parent), for a frame that moves the content to put in the frame
+    /// shown: a root entered the way a row of a list is, which has no part in the decision of the page.
+    pub(crate) fn build_entering(
+        &mut self,
+        child: u64,
+        index: u32,
+        mut start: BuildStart,
+        shape: u64,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::AnyElement {
+        let tree_arc = self.tree.clone();
+        let tree = tree_arc.lock().unwrap();
+        let callback = self.event_callback.clone();
+        let now = self.pass_instant(window);
+        start.now = now;
+        *start.doc_path.last_mut().expect("a child of a scroller's content has a place among its siblings") = index;
+        start.focus_styles = self.focus.styles(&tree, tree.keyboard_focus_dim());
+        let viewport = window.viewport_size();
+        start.inherited.lengths = start
+            .inherited
+            .lengths
+            .with_viewport(f64::from(f32::from(viewport.width)), f64::from(f32::from(viewport.height)));
+        crate::layout::box_generation::hold_display(&tree, self.css_transitions.held_displays());
+        crate::accessibility::links::sync(&tree);
+        let activation = self.activation();
+        let pointer_state = self.pointer.clone();
+        let pointer = pointer_state.borrow();
+        let mut highlight_events = Vec::new();
+        let mut build_ctx = self.build_ctx(&tree, &callback, &activation, &pointer, &mut highlight_events, Fonts::of(cx), start);
+        build_ctx.retain.begin_entering(shape);
+        let built = build_element(child, &mut build_ctx, window, cx);
+        build_ctx.retain.finish_entering();
+        drop(pointer);
+        emit_highlight_events(&callback, &highlight_events);
+        self.emit_css_events(&callback, &tree);
+        emit_layout_events(&callback, &tree, self.layout_flips.take_events());
+        built
     }
 
     /// A frame moved the content of the scroller `translated` in place: the offset the next frame is compared with is the one it left.
@@ -13862,6 +13911,12 @@ fn build_plan(
                         Some("absolute" | "fixed")
                     )
                 });
+                if out_of_flow && ctx.placed_by_parent && ctx.scroller.is_some_and(|scroller| scroller.div) && ctx.retain.wants_entry_start(element.id) {
+                    // What a frame that moves the content of the scroller builds a child that comes in from.
+                    let shape = ctx.retain.current_shape();
+                    let start = BuildStart::of(ctx);
+                    ctx.retain.note_entry_start(element.id, start, shape);
+                }
                 // A block of a box is a line of its own.
                 let outer_line = ctx.inline_line.take();
                 let built = if out_of_flow {

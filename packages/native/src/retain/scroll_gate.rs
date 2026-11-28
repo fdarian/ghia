@@ -88,40 +88,47 @@ struct ScrollGate {
     view: gpui::WeakEntity<GpuixView>,
 }
 
-/// What the gate says of the frame, and the roots the commit took out of the tree that it did not count as an edit.
+/// The children a commit took out of the tree or put in it that the gate did not count as an edit, for the frame that moves the
+/// content of a scroller to take out of the frame or to build.
+#[derive(Clone, Default)]
+struct Membership {
+    removed: Vec<u64>,
+    /// The roots that stay beside the ones that came or left, with the index each has among its siblings now.
+    renumbered: Vec<(u64, u32)>,
+    entered: Vec<super::entering::Group>,
+    /// The roots of each parent that got a child, in the order of the tree.
+    order: Vec<Vec<u64>>,
+}
+
+/// What the gate says of the frame, and what the commit did to the content of the scroller if it counted none of it as an edit.
 struct GateAnswer {
     reason: Option<ScrollPatchReason>,
-    removed: Vec<u64>,
-    /// The children of the parents they left, which stay.
-    survivors: Vec<u64>,
+    membership: Membership,
 }
 
 impl ScrollGate {
     fn answer(&self, window: &gpui::Window, cx: &gpui::App, translating: Option<gpui::ScrollKey>, accepts_removals: bool) -> GateAnswer {
-        let reason = |reason| GateAnswer { reason: Some(reason), removed: Vec::new(), survivors: Vec::new() };
+        let reason = |reason| GateAnswer { reason: Some(reason), membership: Membership::default() };
         let Some(revision) = self.shown.0.get() else {
             return reason(ScrollPatchReason::Other);
         };
         let window_id = window.window_handle().window_id();
         // A tree locked by an update is being edited.
-        let (removed, survivors) = {
+        let membership = {
             let Ok(tree) = self.tree.try_lock() else {
                 return reason(ScrollPatchReason::Edited);
             };
             if tree.root_revision() == revision {
-                (Vec::new(), Vec::new())
+                Membership::default()
             } else {
-                let pairs = accepts_removals.then(|| tree.pure_removals_since(revision)).flatten();
-                let Some((removed, survivors)) = pairs.and_then(|pairs| tree.what_stays_of(&pairs)) else {
+                let membership = accepts_removals.then(|| tree.pure_membership_since(revision)).flatten();
+                let Some(membership) = membership.and_then(|(removed, added)| self.membership(&tree, window_id, removed, added)) else {
                     return reason(ScrollPatchReason::Edited);
                 };
-                if !removals_leave_the_rest(window_id, &removed) || !self.tapes.can_remove(&removed.iter().map(|(child, _)| *child).collect::<Vec<_>>(), &survivors) {
-                    return reason(ScrollPatchReason::Edited);
-                }
-                (removed.into_iter().map(|(child, _)| child).collect(), survivors)
+                membership
             }
         };
-        let answer = |reason: Option<ScrollPatchReason>| GateAnswer { reason, removed: removed.clone(), survivors: survivors.clone() };
+        let answer = |reason: Option<ScrollPatchReason>| GateAnswer { reason, membership: membership.clone() };
         if crate::scroll::animating_in(window_id) || crate::scrollbar::needs_frames(window_id) {
             return answer(Some(ScrollPatchReason::ScrollAnimation));
         }
@@ -139,6 +146,77 @@ impl ScrollGate {
             return answer(Some(ScrollPatchReason::Edited));
         }
         answer(crate::scrollbar::container_bar_stale(window_id).then_some(ScrollPatchReason::Thumb))
+    }
+
+    /// What a frame that moves the content of a scroller does for the children `removed` and `added` (each with its parent), or
+    /// `None` when it cannot do it all.
+    fn membership(
+        &self,
+        tree: &crate::retained_tree::RetainedTree,
+        window_id: gpui::WindowId,
+        removed: Vec<(u64, u64)>,
+        added: Vec<(u64, u64)>,
+    ) -> Option<Membership> {
+        let survivors = tree.what_stays_of(&removed, &added)?;
+        let left: Vec<u64> = removed.iter().map(|(child, _)| *child).collect();
+        if !removals_leave_the_rest(window_id, &removed) || !self.tapes.can_remove(&left, &survivors) {
+            return None;
+        }
+        let entered = super::entering::groups(tree, window_id, &added)?;
+        // What stays beside what came or left is under another index among its siblings, and what the roots of a parent that got a
+        // child wrote is in the order of the tree.
+        let parents: FxHashSet<u64> = removed.iter().chain(&added).map(|(_, parent)| *parent).collect();
+        let mut renumbered = Vec::new();
+        let mut order = Vec::new();
+        for parent in parents {
+            let siblings = tree.children_of(parent)?;
+            for (index, sibling) in siblings.iter().enumerate() {
+                if !added.iter().any(|(came, _)| came == sibling) {
+                    renumbered.push((*sibling, index as u32));
+                }
+            }
+            if added.iter().any(|(_, held)| *held == parent) {
+                order.push(siblings.to_vec());
+            }
+        }
+        Some(Membership { removed: left, renumbered, entered, order })
+    }
+
+    /// The groups that came in as gpui builds them: each child is built where the sibling beside it was, from what that sibling's
+    /// parent built its children from.
+    fn entering(&self, cx: &gpui::App, groups: &[super::entering::Group]) -> Option<Vec<gpui::ScrollEntering>> {
+        let view = self.view.upgrade()?;
+        let mut entering = Vec::with_capacity(groups.len());
+        for group in groups {
+            let (start, shape) = {
+                let (start, shape) = view.read(cx).retain_entry_start(group.parent)?;
+                (start.clone(), shape)
+            };
+            let tree = self.tree.try_lock().ok()?;
+            let siblings = tree.children_of(group.parent)?.to_vec();
+            drop(tree);
+            let children = group
+                .children
+                .iter()
+                .map(|(child, placed)| {
+                    let index = siblings.iter().position(|sibling| sibling == child).expect("a child that came in is among its parent's children") as u32;
+                    let (view, start, child) = (self.view.clone(), start.clone(), *child);
+                    gpui::ScrollEntered {
+                        id: crate::renderer::retained_id(child),
+                        build: Rc::new(move |window, cx| {
+                            view.update(cx, |view, cx| view.build_entering(child, index, start.clone(), shape, window, cx))
+                                .expect("the view of a window lives as long as the window draws")
+                        }),
+                        available: gpui::size(gpui::AvailableSpace::Definite(gpui::px(placed.available_width as f32)), gpui::AvailableSpace::MinContent),
+                        size: gpui::size(gpui::px(placed.size.0 as f32), gpui::px(placed.size.1 as f32)),
+                        origin: gpui::point(gpui::px(placed.origin.0 as f32), gpui::px(placed.origin.1 as f32)),
+                        scrolls: true,
+                    }
+                })
+                .collect();
+            entering.push(gpui::ScrollEntering { neighbor: crate::renderer::retained_id(group.neighbor), follows: group.follows, children });
+        }
+        Some(entering)
     }
 }
 
@@ -182,14 +260,14 @@ impl GpuixView {
             // The rows that left are out of the registries before the sweeps read the boxes, and out of
             // the page's records before a frame builds a row that comes in again. So are the children a commit took out
             // of the scroller, which the frame was drawn without.
-            let removals_drawn = settled_tapes.settle_rows(window.window_handle().window_id());
+            let membership_drawn = settled_tapes.settle_rows(window.window_handle().window_id());
             crate::renderer::list_writes_drawn(window.window_handle().window_id());
             if let Some(view) = settled_view.upgrade().filter(|view| !view.is_updating(cx)) {
                 view.update(cx, |view, _| {
                     view.forget_left_rows();
                     view.note_scrolls_translated(translated);
-                    if removals_drawn {
-                        view.note_removals_drawn();
+                    if membership_drawn {
+                        view.note_membership_drawn();
                     }
                 });
             }
@@ -214,17 +292,19 @@ impl GpuixView {
                 gate.answer(window, cx, translating, false).reason
             }
         })));
-        // A commit that only took children out of the tree is no edit for a scroll of a `div` that moves what held them.
+        // A commit that only took children out of the tree or put some in is no edit for a scroll of a `div` that moves what held them.
         window.set_scroll_patch_removals(Some(Rc::new(move |window: &gpui::Window, cx: &gpui::App, translating: Option<gpui::ScrollKey>| {
             let answer = gate.answer(window, cx, translating, true);
-            if answer.removed.is_empty() {
+            let membership = answer.membership;
+            if membership.removed.is_empty() && membership.entered.is_empty() {
                 return None;
             }
-            gate.tapes.note_removed(&answer.removed, &answer.survivors);
-            Some(gpui::ScrollRemovals {
-                removed: answer.removed.iter().map(|root| crate::renderer::retained_id(*root)).collect(),
-                gate: answer.reason,
-            })
+            let entered = gate.entering(cx, &membership.entered)?;
+            let removed = membership.removed.iter().map(|root| crate::renderer::retained_id(*root)).collect();
+            let (renumbered, order) = (membership.renumbered, membership.order);
+            let came = membership.entered.iter().flat_map(|group| group.children.iter().map(|(child, _)| *child)).collect();
+            gate.tapes.note_membership(crate::tape::Membership { removed: membership.removed, renumbered, entered: came, order });
+            Some(gpui::ScrollRemovals { removed, entered, gate: answer.reason })
         })));
     }
 }

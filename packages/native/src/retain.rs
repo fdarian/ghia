@@ -45,6 +45,7 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 mod debug;
+pub(crate) mod entering;
 pub(crate) mod gate;
 mod patch;
 pub(crate) mod scroll_gate;
@@ -586,6 +587,8 @@ pub(crate) struct Scroller {
     pub viewport: gpui::Size<gpui::Pixels>,
     /// How far past its clip a root is recorded, see [`gpui::Retained::relocatable`].
     pub overscan: gpui::Pixels,
+    /// The scroller is a `div` whose content is its children, and not a virtual list that asks for its rows.
+    pub div: bool,
 }
 
 /// Roots of at most this many viewports (per axis) are recorded to be moved by their scroller. A
@@ -639,7 +642,7 @@ impl Scroller {
             (true, true) => viewport.width.max(viewport.height),
         };
         let overscan = if unlaid { reach * UNLAID_OVERSCAN_VIEWPORTS } else { reach * (1.0 + ROOT_VIEWPORTS) };
-        Some(Self { window, viewport, overscan })
+        Some(Self { window, viewport, overscan, div: true })
     }
 
     /// The scroller a virtual list is for its rows: it always scrolls, by its height. Before its
@@ -657,7 +660,7 @@ impl Scroller {
         window_size: gpui::Size<gpui::Pixels>,
     ) -> Self {
         let viewport = if viewport.width <= gpui::px(0.0) || viewport.height <= gpui::px(0.0) { window_size } else { viewport };
-        Self { window, viewport, overscan: viewport.height * (1.0 + ROOT_VIEWPORTS) + overdraw }
+        Self { window, viewport, overscan: viewport.height * (1.0 + ROOT_VIEWPORTS) + overdraw, div: false }
     }
 
     /// Whether the element's last box is small enough to be recorded to move: one that has no box
@@ -677,6 +680,14 @@ impl Scroller {
                 && bounds.height <= f64::from(f32::from(self.viewport.height) * ROOT_VIEWPORTS)
         })
     }
+}
+
+/// What the children of an element were built from, see [`Retain::note_entry_start`].
+struct EntryStart {
+    start: crate::renderer::BuildStart,
+    shape: u64,
+    /// The frame that noted it, which notes it once.
+    epoch: u64,
 }
 
 /// An element a frame did not build, standing in for the record of its last build.
@@ -1297,6 +1308,11 @@ pub(crate) struct Retain {
     /// The shape of the list the row is a child of, which the row's key takes where an element
     /// takes the shape of its parent.
     row_parent_shape: u64,
+    /// What the build of the children of an element that has absolute children inside a scroller started from, and the shape the
+    /// element had: a frame that moves the content of the scroller builds the children that came in from it.
+    entry_starts: FxHashMap<u64, EntryStart>,
+    /// How many frames began, for `entry_starts` to be noted once in each.
+    entry_frame: u64,
     /// The rows built since the last frame that looked, whose records are still wanted.
     rows_seen: FxHashSet<u64>,
     /// The rows the frame before asked for: the ones of them that this frame does not ask for are
@@ -1540,6 +1556,8 @@ impl Retain {
             hover_scans: Default::default(),
             row: false,
             row_parent_shape: 0,
+            entry_starts: FxHashMap::default(),
+            entry_frame: 0,
             rows_seen: FxHashSet::default(),
             rows_before: FxHashSet::default(),
             row_candidates: false,
@@ -1706,6 +1724,7 @@ impl Retain {
         sources.tree.take_structure();
         self.prune(sources.tree);
         self.pass = sources.pass;
+        self.entry_frame += 1;
         self.layout_only = sources.layout_only;
         self.reference = sources.reference;
         self.unit = None;
@@ -2194,8 +2213,15 @@ impl Retain {
     /// part of the page's decision: `plan`, `summary` and the dynamic elements of other rows are
     /// as the page left them.
     pub(crate) fn begin_row(&mut self, parent_shape: u64, row_id: u64) {
-        debug_assert!(self.stack.is_empty(), "a row is not built inside an element");
         self.rows_seen.insert(row_id);
+        self.begin_entering(parent_shape);
+    }
+
+    /// Starts the build of a child that comes into the content of a scroller while a frame moves it, the way [`Self::begin_row`]
+    /// starts a row: a root entered with the shape of its parent, recorded when it is built, and no part of the page's decision.
+    /// It is no row of a list, so the sweep of the rows a list stopped asking for does not know it.
+    pub(crate) fn begin_entering(&mut self, parent_shape: u64) {
+        debug_assert!(self.stack.is_empty(), "a row is not built inside an element");
         self.open = self.enabled && !self.backoff.resting;
         self.row = true;
         self.row_parent_shape = parent_shape;
@@ -2211,6 +2237,10 @@ impl Retain {
     }
 
     pub(crate) fn finish_row(&mut self) {
+        self.finish_entering();
+    }
+
+    pub(crate) fn finish_entering(&mut self) {
         self.row_candidates |= self.finish_session();
         self.row = false;
         self.row_parent_shape = 0;
@@ -2275,6 +2305,28 @@ impl Retain {
         self.plan.enclosing_forgotten.retain(|id| !gone.contains(id));
         self.box_candidates.retain(|id| !gone.contains(id));
         self.plan.unrecorded.retain(|id| !gone.contains(id));
+    }
+
+    /// Whether the frame being built has not noted what the children of `parent` are built from ([`Self::note_entry_start`]).
+    pub(crate) fn wants_entry_start(&self, parent: u64) -> bool {
+        self.entry_starts.get(&parent).is_none_or(|known| known.epoch != self.entry_frame)
+    }
+
+    /// Notes what the children of `parent`, that are absolute and placed by it inside a `div` scroller, are built from.
+    pub(crate) fn note_entry_start(&mut self, parent: u64, start: crate::renderer::BuildStart, shape: u64) {
+        self.entry_starts.insert(parent, EntryStart { start, shape, epoch: self.entry_frame });
+    }
+
+    /// What a child that comes in under `parent` is built from: the start a sibling was built from, and the shape of `parent`.
+    pub(crate) fn entry_start(&self, parent: u64) -> Option<(&crate::renderer::BuildStart, u64)> {
+        self.entry_starts.get(&parent).map(|known| (&known.start, known.shape))
+    }
+
+    /// Forgets the starts of parents the tree no longer has.
+    pub(crate) fn prune_entry_starts(&mut self, tree: &crate::retained_tree::RetainedTree) {
+        if self.entry_starts.len() > 1024 {
+            self.entry_starts.retain(|parent, _| tree.elements.contains_key(parent));
+        }
     }
 
     /// The shape of the element being built, for a child that is not built inside it to take as its
@@ -6442,7 +6494,7 @@ mod tests {
     #[test]
     fn a_pass_that_only_lays_out_skips_a_root_with_the_overscan_it_was_wrapped_with() {
         let window = gpui::WindowId::from(1);
-        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
+        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0), div: false };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         let mut page = Units::new();
         // A list laid out empty is no scroller, and the entry is wrapped to stay where it is.
@@ -6460,7 +6512,7 @@ mod tests {
     #[test]
     fn the_content_under_a_scroller_first_found_in_a_painted_frame_is_still_recorded_to_be_moved() {
         let window = gpui::WindowId::from(2);
-        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
+        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0), div: false };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         let mut page = Units::new();
         assert!(page_in(&mut page, false, Some(list)).is_none());
@@ -6484,7 +6536,7 @@ mod tests {
     #[test]
     fn a_record_made_to_be_moved_is_built_again_where_its_scroller_moves_nothing_now() {
         let window = gpui::WindowId::from(3);
-        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
+        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0), div: false };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         let mut page = Units::new();
         assert!(page_in(&mut page, false, Some(list)).is_none());
@@ -7419,7 +7471,7 @@ mod tests {
     #[test]
     fn a_row_root_is_relocatable_whatever_is_lifted_inside_its_context_and_whether_it_lifts_itself() {
         let window = gpui::WindowId::from(4);
-        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
+        let list = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0), div: false };
         crate::automation::set_bounds(window, 3, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         // `None` is what the renderer decides for the root of a row: the list's lift barrier takes its own
         // position. A row is a stacking context, so the absolute children of a mailbox row stay in it.
@@ -7435,7 +7487,7 @@ mod tests {
     #[test]
     fn a_root_is_relocatable_unless_it_is_watched_and_lifts_itself() {
         let window = gpui::WindowId::from(5);
-        let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
+        let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0), div: false };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         // `watched`: 0 nothing, 1 the root carries the relevance watch, 2 an element two levels below it does.
         let root_skip = |lift_z: Option<i32>, forms_context: bool, child_lifted: bool, watched: u8| {
@@ -7540,7 +7592,7 @@ mod tests {
     #[test]
     fn a_root_that_hands_a_retained_root_of_its_own_to_the_context_is_not_moved_unless_a_context_is_between() {
         let window = gpui::WindowId::from(6);
-        let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0) };
+        let scroller = Scroller { window, viewport: gpui::size(gpui::px(900.0), gpui::px(780.0)), overscan: gpui::px(390.0), div: false };
         crate::automation::set_bounds(window, 2, crate::automation::ElementBounds::plain(0.0, 0.0, 100.0, 100.0));
         let overscan = Some(gpui::px(390.0));
         // A lifted element that is a root of its own is a hole in the recording of the root, and one that is

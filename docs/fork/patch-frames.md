@@ -1420,7 +1420,7 @@ scroller's pixels on both axes (`ShiftPlan` takes `shift.x` too). Code: zed `win
 - **`DivFrame`** (in `rendered_frame.scroll.divs`): the offset the content was built at, the clip around the children, the children culling left out
   with where it looked for each (`Window::lies_outside_the_mask` notes both reaches), the hitboxes the content inserted that no root holds, and the
   operations its paint left (and the ones a stacking context painted for its lifted children that are no root). A splice of the frame marks it stale
-  (`Other`: the next frame is built whole, except for what [a removal](#roots-that-leave-a-div-scroller-slice-d2a) edits: the ranges are carried over).
+  (`Other`: the next frame is built whole, except for what [a removal or an addition](#roots-that-leave-and-come-into-a-div-scroller-slices-d2a-and-d2b) edits: the ranges are carried over).
 - **The classifier** (`Window::div_verdict`) runs the checks of a list's (`Edited`, `Hover`, `Place`, `Region`, `Clip`, `A11y`, `ScrollAnimation`,
   `Clock`, `Thumb`) with the shift on both axes, and new causes of `NotRelocatable`:
 
@@ -1524,48 +1524,73 @@ translates, rows that come in with a wheel step, plain and under the verifier), 
 scroller), `hover_after_scroll.rs`. The two react cases that
 concern the two fixes pass with the fixes taken out: only the stack app discriminates them, as the table above does.
 
-### Roots that leave a `div` scroller (slice D2a)
+### Roots that leave and come into a `div` scroller (slices D2a and D2b)
 
-TanStack's scroll handler commits the rows the new offset needs: rows that enter the window are created, rows that left it are detached and destroyed. A commit that **only
-takes children out** of a `div` scroller's content is drawn as the translate with those roots taken out of the frame, so that the tick builds nothing, as the rows that leave a
-list do ([slice G3](#rows-that-come-in-and-leave-slice-g3)). A commit that also creates a child, changes another element, or takes out anything that is not a root of the
-scroller is `Edited` and a frame built whole, as before; rows that come in are the next slice. In the stack app 66 of the 356 batch ticks are removals only (76 create only,
-224 both), 58 of them translates.
+TanStack's scroll handler commits the rows the new offset needs: rows that enter the window are created, rows that left it are detached and destroyed. A commit that **only takes
+children out of a `div` scroller's content, or puts new ones in it** is drawn as the translate with those roots taken out of the frame and the new ones built in a scratch frame and put beside the root
+that stays next to them, so the tick builds no more than the children that came in, as the rows that come in and leave a list do ([slice G3](#rows-that-come-in-and-leave-slice-g3)). A commit that
+also changes another element, takes out or puts in a child the rules below do not cover, is `Edited` and a frame built whole, as before. In the stack app 66 of the 356 batch ticks are removals only, 76
+additions only and 224 both.
 
-- **The commit rule** (`RetainedTree::mark_removed`, `pure_removals_since`). `detach_child`, and `destroy_element` of an element that is in the tree, are a *removal* when the
+- **The commit rule** (`RetainedTree::mark_removed`, `mark_added`, `pure_membership_since`). `detach_child`, and `destroy_element` of an element that is in the tree, are a *removal* when the
   child is out of flow (`position: absolute` or `fixed`: nothing after it is moved by its leaving), nothing in it can take focus, its parent is in the document, has no generated
-  content, and no anchor or box root follows it (the patch that follows an anchor is the better frame). The revision such a change takes is not `other_revision`, the revision of the last
-  change that is not one: `pure_removals_since(shown revision)` is the list of removals when `other_revision` is not past the revision the frame shown was built at, and `None`
-  for any other change. `take_structure` hands the list over with the other changes. A pure removal outside every anchor is `Dirty::Layout` and not `LayoutPatchable`: no tick
-  asks for it (a tick holds the translate as `Clock`), and the view is notified as a commit notifies it, which the translate takes off the queue as it does for the scroll.
+  content, and no anchor or box root follows it (the patch that follows an anchor is the better frame). `append_child` and `insert_before` of an element that was never in the tree are an *addition*
+  when the parent is in the document, generates no content, is positioned (it places the absolute children it has) and no anchor follows it. A framework gives the new element its style and its
+  children after it has put it in the tree, so what it is is judged when the frame asks, and what is done to it until then (`in_a_new_child`) is part of the addition: it is not a change of the frame
+  shown. The revision such a change takes is not `other_revision`, the revision of the last change that is not one: `pure_membership_since(shown revision)` is the list of removals and additions
+  when `other_revision` is not past the revision the frame shown was built at and every child that came in is, by then, `position: absolute` and placed by its parent, nothing in its subtree can
+  take focus, load, run a motion or start a transition (`addition_leaves_the_rest`), and `None` for any other change. A child put in and taken out before a frame draws is in no frame. `take_structure`
+  hands the lists over with the other changes. A pure membership change outside every anchor is `Dirty::Layout` and not `LayoutPatchable`: no tick asks for it (a tick holds the translate as `Clock`), and
+  the view is notified as a commit notifies it, which the translate takes off the queue as it does for the scroll. Creating an element takes no `other_revision`: putting it in is the change.
 - **The gate** (`Window::set_scroll_patch_removals`, `retain/scroll_gate.rs`). The gate says `Edited` for the commit as for any other, so a list's translate is never one that took
-  rows out. The classifier of a `div` scroller's frame asks the owner again, when the gate said `Edited`, whether it was only removals: the owner runs the rest of its gate as if
-  it were not an edit (animation, clock, the sources, the bar) and says which roots left (`ScrollRemovals`, by the id each retained root was built with). Ghia also asks for
+  rows out. The classifier of a `div` scroller's frame asks the owner again, when the gate said `Edited`, whether it was only removals and additions: the owner runs the rest of its gate as if
+  it were not an edit (animation, clock, the sources, the bar) and says which roots left and which groups came in (`ScrollRemovals`, by the id each retained root was built with). Ghia also asks for
   what a frame that keeps the rest where it is needs: the box of each child that left is inside its parent's (the scrollable overflow does not shrink), every child the parent keeps is
   a root with a tape (what a root nested in the page wrote is found by its tape), and the roots that leave are not inside a paragraph. Every id has to be a run of the scroller (a
   child that is no root, or one in another scroller, is `Edited`), else the frame is built whole.
-- **Taking the roots out** (zed `Window::plan_root_removal`, `Splice`, `RunEdit::by_position`). The root's part of the frame is its recording's: the ranges of every vector it
-  recorded, from the dispatch node of the element that wraps it (pushed before the recording begins) to its own recording, replaced by nothing, as a list's row is
-  (`plan_removal`). A root that a stacking context lifted (`ScrollRun::lifted`, noted where the context takes the child) has its hitboxes where the context put them and not where it
-  prepainted them, so its hitboxes are taken out by id and its part is empty among the hitboxes; the context paints it under a content mask of its own, which its marks
-  (`Replaced` and `EndReplaced`) bracket, and they leave with it. A root whose part the frame does not hold where its recording says (a tab stop a context moved, a deferred draw)
-  declines the translate as `Splice`, and the frame is built whole. The runs of the roots that stay, the scroller's `DivFrame` (`ops`, `lifted_ops`) and the thumbs move by where they are in the
-  frame (`DivFrame::splice_operations`): the scroller stays valid for the next wheel, where a list membership splice still marks it stale.
-- **Ghia's part** (`TapeStore::note_removed`, `settle_rows`, `forget_roots`). The roots that left are taken out of the registries as a list's rows are (their tapes, boxes, text and start
+- **What comes in** (`retain/entering.rs`, `ScrollEntering`). The children that came in under one parent and follow one another in the tree are a group, beside the root that stays next to it in the
+  tree (the one before the group, or the one after it for a group at the start): a root of the scroller that a stacking context holds (`ScrollRun::lifted`), with a hitbox, that has not left. Where each
+  is put and how big it comes out is worked out from its style and the box of its parent in the frame shown, without laying the parent out again: every child of the parent is absolute (so its index
+  among its siblings is its place in the document), the parent is not transformed, and the child names its `top` (and `left`, or takes the place where the parent's content begins in a block parent),
+  its `width` and its `height` in px or %, with no margin, bound on the size, ratio or other inset, and its box lies inside the padding box of the parent (the scrollable overflow does not grow).
+  Anything else is a layout of what holds the child, and the frame is built whole.
+- **Building them** (zed `Window::build_enter_group`, `Window::draw_entering`). Each child is built by `GpuixView::build_entering` as the frame that built its siblings built it: from the `BuildStart`
+  `Retain::note_entry_start` noted for the parent (the children of an element that has absolute children inside a `div` scroller; one clone for each parent in a frame) and the shape of the parent,
+  entered the way a list's row is (`Retain::begin_entering`, no part of the page's decision, no row of a list to sweep). zed enters the surroundings the neighbor was prepainted in
+  (`ScrollRun::around`, noted by every lifted root of a `div` scroller), lays each child out as a root of its own in the width of the parent's padding box (declined as `Height` when it comes out
+  other than the size said), prepaints it at its origin plus the scroll's shift, hands it to the stacking context as the scroller does (`begin_lift`, `finish_lift`, `end_stacking_context`), and paints it
+  with the context's own `paint_lifted`, which brackets its operations with the content mask the context uses. A child that registers tab stops, that a patch cannot take, or that is not a root a
+  scroll can move (`is_scroll_movable`) declines as `Row` or `Splice`. Nothing of the frame shown is written until every group is built. The roots a patch repaints (a hover style) keep the units they
+  register, hung off their parent's node.
+- **Putting them in** (zed `Window::plan_root_entry`, `plan_lifted_insertion`, `Splice::lifted_hitboxes`, `RunEdit::by_position`). The place is the neighbor's part of the frame, from its recording: before its
+  first dispatch node (the wrapper of the root) and its operations' opening mark, or after its own recording and its closing mark. The hitboxes of what the context holds are in the order of the
+  context's paint and the part of the frame that a recording says is not where the context put them, so they are put next to the neighbor's first or last hitbox by id, wherever it is when the splice is
+  made. The recordings and the runs that come after the point move by it, told apart by the dispatch nodes (`SideCut::witness`), the one vector that is in the order of the tree for roots a
+  context holds. A group that comes in where a root that leaves ends or begins is put in the order the splices are made in (last first, a tie by the order of the batch). The roots that leave are taken out as before.
+- **Ghia's part** (`TapeStore::note_membership`, `settle_rows`, `settle_membership`). The roots that left are taken out of the registries as a list's rows are (their tapes, boxes, text and start
   regions) and out of the page's records (`forget_left_rows`), before the sweeps and before a frame builds. What the roots that stay wrote of text carries the path the root has in the document, the child
-  indices from the root: those after a removed root are one place nearer the start (`DocPath::after_removal_of`), so each is put under its new path as a replay of it is
-  (`text::replace` with the tape's writes) and its tape keeps the path. When the translate is settled the frame shown is the frame of the revision (`note_removals_drawn`: the changes are taken
-  and `note_patched`); a translate that declines leaves them for the frame built whole, which takes them.
+  indices from the root: each is put under the index it has among its siblings now (`DocPath::moved_sibling`) as a replay of it is (`text::replace` with the tape's writes) and its tape keeps the path.
+  What the roots that came in wrote is at the end of the registries and goes where the tree has it (`order_by_rows` over the roots of the parent in the order of the tree). When the translate is settled
+  the frame shown is the frame of the revision (`note_membership_drawn`: the changes are taken, what came in is no longer fresh, and `note_patched`); a translate that declines leaves them for the frame
+  built whole, which takes them.
+- **The layout engine** (`TaffyLayoutEngine::mark_computed_unplaced`). The roots were laid out as roots, and their nodes are the ones the page keeps for them: a scroller that picks its scroll anchor
+  before the layout that puts them in the page took them for what the layout before had, a node at the top of the parent, and moved the offset by the distance they then moved. The nodes that a
+  scratch pass laid out are marked, and no pick looks at them until one has been made.
 - **What stays whole.** Rows in the flow (what is after a row that leaves moves; the scroll extent of a scroller that holds them shrinks), a child with focusable content, a
-  removal under an anchor, and a box that is not inside its parent's. Under the verifier the frame built whole after the translate is compared with it, registries included.
+  removal under an anchor, a box that is not inside its parent's, a child that comes in with no `top`, no definite size, a margin or a bound on its size, one that has a transition, a motion, an
+  image, an input or any element but a block of text, a spacer whose size changes with the commit (it is another element changed), a neighbor with no hitbox, and the accessibility tree being
+  on. Under the verifier the frame built whole after the translate is compared with it, registries included.
 
-**Measured** (`PHASE=scroll APP=stack A11Y=0`, release addon, test renderer, ghia-bench's data): translated 420 of 720 (362 before), 58 of them membership translates that take one row out
-(median 6.60M against 5.48M for the other translates), mean 10.13M a tick (10.6M before), median 6.31M. The 298 batch ticks left whole create rows.
+**Measured** (`PHASE=scroll APP=stack A11Y=0`, release addon, test renderer, ghia-bench's data): translated 707 of 720 (420 after D2a, 362 before), 349 of them membership translates (283 rows built,
+288 removed), mean 9.01M a tick (10.1M after D2a), median 6.03M (6.31M). The 356 ticks that apply a mutation batch have median 10.6M and mean 12.5M (they were drawn whole, at about 13.8M); the 364
+ticks that do not have median 4.73M. A membership translate costs a median 10.5M against 4.97M for the translates that move what is there, the rest being the build of the rows that came in.
 
 Tests: zed `scroll_patch_div_tests.rs` (`roots_that_a_commit_took_out_are_taken_out_by_the_translate`: absolute rows with each variant of the page, in the clip, in the overscan, with the pointer
-over a root that left; `roots_in_the_flow_that_a_commit_took_out_at_the_end_...`; the verifier; a root that is no run of the scroller is `Edited`), `scroll_patch/div.rs`
-(`moved_over`), `retained_tree.rs` (the removal rule, `Dirty::Layout`), `text/selection.rs` (`after_removal_of`), react `scroll-patch-div-membership.test.tsx` (absolute and transform rows, the pictures, boxes of
-the page and of a node that left, hit points, clicks, the hover over a root that left, rows in the flow and a commit that also restyles stay whole, plain and under the verifier).
+over a root that left; `roots_in_the_flow_that_a_commit_took_out_at_the_end_...`; `roots_that_a_commit_put_in_are_put_in_by_the_translate`, `roots_that_come_in_are_put_in_as_the_frame_built_whole_has_them`
+(before, after, between, beside roots that leave, in each variant of the page), `a_commit_that_put_roots_in_is_checked_against_the_frame_built_whole_after_it`, `what_is_under_the_pointer_in_a_root_that_came_in_is_hit`;
+the verifier; a root that is no run of the scroller is `Edited`), `scroll_patch/div.rs` (`moved_over`), `retained_tree.rs` (the removal and the addition rules, `Dirty::Layout`), `text/selection.rs`
+(`moved_sibling`), react `scroll-patch-div-membership.test.tsx` (absolute and transform rows, the pictures, boxes and `getBoundingClientRect` of the rows, hit points, clicks and the text selected across rows that came in, the hover over rows that came
+in and over one that left, rows in the flow, a row with no height, with focus, a spacer that grows and a commit that also restyles stay whole, plain and under the verifier).
 
 ### Rows that come in and leave (slice G3)
 

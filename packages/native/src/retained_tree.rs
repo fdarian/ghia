@@ -1048,12 +1048,16 @@ pub struct RetainedTree {
     detached_from: FxHashMap<u64, u64>,
     /// The elements taken out of the tree, and the parent each left, since the frame that last took the changes
     /// (`take_structure`), that changed nothing but their parent's children: out of flow, and under no anchor. A scroll
-    /// that moves what holds them can take them out of the frame it shows ([`Self::pure_removals_since`]).
+    /// that moves what holds them can take them out of the frame it shows ([`Self::pure_membership_since`]).
     removed: std::cell::RefCell<Vec<(u64, u64)>>,
-    /// The revision of the last change in the frame that is not one of `removed`.
+    /// The elements put in the tree, and the parent each came under, since the frame that last took the changes, that changed nothing
+    /// but their parent's children: out of flow, placed by their parent and still (`addition_leaves_the_rest`). A scroll that moves what
+    /// holds them can build them where the frame shown has none ([`Self::pure_membership_since`]).
+    added: std::cell::RefCell<Vec<(u64, u64)>>,
+    /// The revision of the last change in the frame that is not one of `removed` or `added`.
     other_revision: u64,
-    /// A change of `removed` is being made, which takes a revision that is no `other_revision`.
-    removal_open: bool,
+    /// A change of `removed` or `added` is being made, which takes a revision that is no `other_revision`.
+    membership_open: bool,
 }
 
 // `init_threaded` moves the tree into a thread: nothing kept on an element may be `Rc`.
@@ -1115,7 +1119,8 @@ impl RetainedTree {
             detached_from: FxHashMap::default(),
             removed: Default::default(),
             other_revision: 0,
-            removal_open: false,
+            membership_open: false,
+            added: Default::default(),
         }
     }
 
@@ -1158,7 +1163,7 @@ impl RetainedTree {
     pub fn take_dirty(&mut self) -> Dirty {
         let dirty = std::mem::take(&mut self.dirty);
         let unattributed = std::mem::take(&mut self.unattributed_dirty);
-        if dirty == Dirty::Layout && !unattributed && self.structure_attributed() && !self.only_removals_pending() {
+        if dirty == Dirty::Layout && !unattributed && self.structure_attributed() && !self.only_membership_pending() {
             return Dirty::LayoutPatchable;
         }
         dirty
@@ -1259,37 +1264,48 @@ impl RetainedTree {
     /// Hands the elements of `pending_structure` over: a frame built whole drew them, or a patch did.
     pub fn take_structure(&self) -> Vec<u64> {
         self.removed.borrow_mut().clear();
+        self.added.borrow_mut().clear();
         std::mem::take(&mut *self.structure.borrow_mut())
     }
 
-    /// Whether the changes since a frame took them are children taken out of the tree and nothing else, which no anchor
-    /// follows: the next frame is a frame built whole, or a scroll that moves what held them (`pure_removals_since`).
-    fn only_removals_pending(&self) -> bool {
-        let removed = self.removed.borrow();
-        !removed.is_empty()
+    /// Whether the changes since a frame took them are children taken out of the tree or put in it and nothing else, which no
+    /// anchor follows: the next frame is a frame built whole, or a scroll that moves what held them (`pure_membership_since`).
+    fn only_membership_pending(&self) -> bool {
+        let (removed, added) = (self.removed.borrow(), self.added.borrow());
+        !(removed.is_empty() && added.is_empty())
             && self.restyled.borrow().is_empty()
-            && self.structure.borrow().iter().all(|id| removed.iter().any(|(_, parent)| parent == id))
+            && self.structure.borrow().iter().all(|id| removed.iter().chain(added.iter()).any(|(_, parent)| parent == id))
     }
 
-    /// The elements taken out of the tree since the frame shown, if that frame was built at `revision` and nothing else
-    /// changed since: out of flow, so that what stays is where it was, and under no anchor. `None` for any other change.
-    /// Each is given with the parent it left.
-    pub(crate) fn pure_removals_since(&self, revision: u64) -> Option<Vec<(u64, u64)>> {
-        let removed = self.removed.borrow();
-        (!removed.is_empty() && self.other_revision <= revision && self.restyled.borrow().is_empty()).then(|| removed.clone())
+    /// The elements taken out of the tree and the ones put in it since the frame shown, if that frame was built at `revision` and
+    /// nothing else changed since: out of flow, so that what stays is where it was, and under no anchor. `None` for any other
+    /// change. Each is given with the parent it left or came under.
+    pub(crate) fn pure_membership_since(&self, revision: u64) -> Option<(Vec<(u64, u64)>, Vec<(u64, u64)>)> {
+        let (removed, added) = (self.removed.borrow(), self.added.borrow());
+        let changed = !(removed.is_empty() && added.is_empty());
+        let stays_whole = changed
+            && self.other_revision <= revision
+            && self.restyled.borrow().is_empty()
+            && added.iter().all(|(child, parent)| self.addition_leaves_the_rest(*child, *parent));
+        stays_whole.then(|| (removed.clone(), added.clone()))
     }
 
-    /// `removed`, and the children each parent has left, which a removal moves nearer the start of the document: `None` when a
-    /// parent is not in the tree any more.
-    pub(crate) fn what_stays_of(&self, removed: &[(u64, u64)]) -> Option<(Vec<(u64, u64)>, Vec<u64>)> {
-        let mut parents: Vec<u64> = removed.iter().map(|(_, parent)| *parent).collect();
+    /// The children each parent that lost or got a child has, which a removal moves nearer the start of the document and an
+    /// addition moves further from it, and the ones of them that came in: `None` when a parent is not in the tree any more.
+    pub(crate) fn what_stays_of(&self, removed: &[(u64, u64)], added: &[(u64, u64)]) -> Option<Vec<u64>> {
+        let mut parents: Vec<u64> = removed.iter().chain(added).map(|(_, parent)| *parent).collect();
         parents.sort_unstable();
         parents.dedup();
         let mut survivors = Vec::new();
         for parent in parents {
-            survivors.extend(self.elements.get(&parent)?.children.iter().copied());
+            survivors.extend(self.elements.get(&parent)?.children.iter().copied().filter(|child| !added.iter().any(|(came, _)| came == child)));
         }
-        Some((removed.to_vec(), survivors))
+        Some(survivors)
+    }
+
+    /// The children of `parent` in the order of the tree.
+    pub(crate) fn children_of(&self, parent: u64) -> Option<&[u64]> {
+        self.elements.get(&parent).map(|element| element.children.as_slice())
     }
 
     /// Whether taking `child` out of `parent` changes nothing a frame that keeps the rest of the content where it is cannot
@@ -1330,10 +1346,97 @@ impl RetainedTree {
             self.mark_changed(parent);
             return;
         }
-        self.removal_open = true;
+        self.membership_open = true;
         self.mark_changed(parent);
-        self.removal_open = false;
-        self.removed.get_mut().push((child, parent));
+        self.membership_open = false;
+        // A child that came in since the frame shown is in no frame: it goes as it came.
+        let added = self.added.get_mut();
+        match added.iter().position(|(came, _)| *came == child) {
+            Some(at) => {
+                added.remove(at);
+            }
+            None => self.removed.get_mut().push((child, parent)),
+        }
+    }
+
+    /// Whether putting a new element under `parent` can be a change that a scroll builds the element for, whatever its style comes to
+    /// be: the parent is in the frame, no anchor follows it, and it generates no content. A framework gives a new element its style and
+    /// its children after it has put it in the tree, so what the element is is judged when the frame asks
+    /// ([`Self::addition_leaves_the_rest`]), and what is done to it until then is part of the addition ([`Self::in_a_new_child`]).
+    fn parent_takes_additions(&self, parent: u64) -> bool {
+        self.commit_patching
+            && !self.outside_the_frame(parent)
+            && self.anchor_holding(parent).is_none()
+            && self.elements.get(&parent).is_some_and(|holder| {
+                // A parent that places the absolute children it has (`containing_block::is_placed_by`, but for the child).
+                holder.pseudo_matches().is_none()
+                    && crate::text::inline::is_host_container(holder)
+                    && !self.display_of(holder).0
+                    && self.position_of(holder) != containing_block::Position::Static
+                    && crate::layout::table::part(holder).is_none()
+            })
+    }
+
+    /// Whether `id` is a child that came in since the frame shown, or is inside one.
+    fn in_a_new_child(&self, id: u64) -> bool {
+        let added = self.added.borrow();
+        if added.is_empty() {
+            return false;
+        }
+        let mut at = Some(id);
+        while let Some(up) = at {
+            if added.iter().any(|(child, _)| *child == up) {
+                return true;
+            }
+            at = self.elements.get(&up).and_then(|element| element.parent);
+        }
+        false
+    }
+
+    /// Whether the new element `child` under `parent` changes nothing a frame that keeps the rest of the content where it is cannot
+    /// draw and a scroll cannot build: `child` is out of flow and placed by `parent`, and what comes in is still (it cannot take
+    /// focus, load, run or start a transition when it is drawn the first time) and is laid out by what its style says alone.
+    fn addition_leaves_the_rest(&self, child: u64, parent: u64) -> bool {
+        let (Some(element), Some(holder)) = (self.elements.get(&child), self.elements.get(&parent)) else {
+            return false;
+        };
+        if self.position_of(element) != containing_block::Position::Absolute || !containing_block::is_placed_by(self, holder, element) {
+            return false;
+        }
+        let mut pending = vec![child];
+        while let Some(id) = pending.pop() {
+            let Some(element) = self.elements.get(&id) else {
+                return false;
+            };
+            let still = self.focusable_ids.contains(&id)
+                || self.motion_ids.contains(&id)
+                || self.motion_value_ids.contains(&id)
+                || self.image_ids.contains(&id)
+                || self.control_ids.contains(&id)
+                || self.geometry_ids.contains(&id)
+                || !matches!(element.element_type.as_str(), "div" | "span" | "#text" | "p" | "strong" | "em" | "b" | "i" | "small" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "ul" | "ol" | "li");
+            let runs = element.style.as_deref().is_some_and(|style| {
+                [&style.transition, &style.transition_property, &style.animation, &style.animation_name].iter().any(|value| value.is_some())
+                    || style.holds_var_declarations()
+            });
+            if still || runs || element.pseudo_matches().is_some() || has_container_rules(element) {
+                return false;
+            }
+            pending.extend(element.children.iter().copied());
+        }
+        true
+    }
+
+    /// `mark_changed(parent)` for the new element `child` that is put under it.
+    fn mark_added(&mut self, child: u64, parent: u64, covered: bool) {
+        if !covered {
+            self.mark_changed(parent);
+            return;
+        }
+        self.membership_open = true;
+        self.mark_changed(parent);
+        self.membership_open = false;
+        self.added.get_mut().push((child, parent));
     }
 
     /// Classifies paint-only restyles for patch frames from now on, or stops.
@@ -1556,7 +1659,8 @@ impl RetainedTree {
         self.dirty = self.dirty.max(Dirty::Layout);
         let revision = self.next_revision;
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
-        self.other_revision = revision;
+        // An element that is not in the tree changes nothing a frame draws: putting it in is the change, which `append_child` and
+        // `insert_before` note for the parent that takes it.
         revision
     }
 
@@ -1579,7 +1683,7 @@ impl RetainedTree {
         if dirty != Dirty::PaintPatchable && !followed {
             self.patch_barrier = revision;
         }
-        if !self.removal_open {
+        if !self.membership_open {
             self.other_revision = revision;
         }
         revision
@@ -1640,7 +1744,7 @@ impl RetainedTree {
     /// parent that takes it. It is what a stylesheet unmatches when `detach_child` takes a subtree out, which would
     /// otherwise be a `Structure` no anchor holds, declined by the next read of layout.
     fn outside_the_frame(&self, id: u64) -> bool {
-        self.commit_patching && self.root_id.is_some() && !crate::css::computed_style::is_connected(self, id)
+        self.commit_patching && self.root_id.is_some() && (!crate::css::computed_style::is_connected(self, id) || self.in_a_new_child(id))
     }
 
     fn mark_changed_detail(&mut self, id: u64, search: bool, dirty: Dirty) -> u64 {
@@ -1847,7 +1951,13 @@ impl RetainedTree {
         if let Some(old_parent_id) = old_parent_id {
             self.mark_changed(old_parent_id);
         }
-        self.mark_changed(parent_id);
+        match placed_before {
+            true => self.mark_changed(parent_id),
+            false => {
+                let covered = self.parent_takes_additions(parent_id);
+                self.mark_added(child_id, parent_id, covered);
+            }
+        }
         self.relations.restructured();
     }
 
@@ -1891,7 +2001,13 @@ impl RetainedTree {
         if let Some(old_parent_id) = old_parent_id {
             self.mark_changed(old_parent_id);
         }
-        self.mark_changed(parent_id);
+        match placed_before {
+            true => self.mark_changed(parent_id),
+            false => {
+                let covered = self.parent_takes_additions(parent_id);
+                self.mark_added(child_id, parent_id, covered);
+            }
+        }
         self.relations.restructured();
     }
 
@@ -4706,15 +4822,14 @@ mod tests {
         let shown = tree.root_revision();
         apply(&mut tree, r##"[["detachChild",3],["detachChild",4]]"##);
         assert_ne!(tree.root_revision(), shown);
-        assert_eq!(tree.pure_removals_since(shown), Some(vec![(3, 2), (4, 2)]));
-        let (removed, stays) = tree.what_stays_of(&[(3, 2), (4, 2)]).unwrap();
-        assert_eq!(removed, vec![(3, 2), (4, 2)]);
+        assert_eq!(tree.pure_membership_since(shown), Some((vec![(3, 2), (4, 2)], vec![])));
+        let stays = tree.what_stays_of(&[(3, 2), (4, 2)], &[]).unwrap();
         assert_eq!(stays, vec![5], "what is left of the box that held them");
         // Destroying what was detached changes nothing more, and a frame that takes the changes forgets them.
         apply(&mut tree, r#"[["destroyElement",3]]"#);
-        assert_eq!(tree.pure_removals_since(shown).map(|removed| removed.len()), Some(2));
+        assert_eq!(tree.pure_membership_since(shown).map(|(removed, _)| removed.len()), Some(2));
         tree.take_structure();
-        assert_eq!(tree.pure_removals_since(shown), None);
+        assert_eq!(tree.pure_membership_since(shown), None);
     }
 
     #[test]
@@ -4722,15 +4837,15 @@ mod tests {
         let mut tree = rows_in_a_box();
         let shown = tree.root_revision();
         apply(&mut tree, r##"[["detachChild",3],["setStyle",1,{"opacity":0.5}]]"##);
-        assert_eq!(tree.pure_removals_since(shown), None);
+        assert_eq!(tree.pure_membership_since(shown), None);
         let mut tree = rows_in_a_box();
         let shown = tree.root_revision();
         apply(&mut tree, r##"[["setStyle",1,{"opacity":0.5}],["detachChild",3]]"##);
-        assert_eq!(tree.pure_removals_since(shown), None);
+        assert_eq!(tree.pure_membership_since(shown), None);
         let mut tree = rows_in_a_box();
         let shown = tree.root_revision();
         apply(&mut tree, r##"[["detachChild",3],["createElement",6,"div"],["appendChild",2,6]]"##);
-        assert_eq!(tree.pure_removals_since(shown), None, "a row that comes in is a build");
+        assert_eq!(tree.pure_membership_since(shown), None, "a row that comes in is a build");
     }
 
     #[test]
@@ -4738,7 +4853,7 @@ mod tests {
         let mut tree = rows_in_a_box();
         let shown = tree.root_revision();
         apply(&mut tree, r##"[["detachChild",5]]"##);
-        assert_eq!(tree.pure_removals_since(shown), None);
+        assert_eq!(tree.pure_membership_since(shown), None);
     }
 
     #[test]
@@ -4751,6 +4866,84 @@ mod tests {
         tree.set_anchors([1].into_iter().collect(), tree.root_revision());
         apply(&mut tree, r##"[["detachChild",3]]"##);
         assert_eq!(tree.take_dirty(), Dirty::LayoutPatchable, "an anchor that holds the box lays it out again");
-        assert_eq!(tree.pure_removals_since(0), None, "a removal that an anchor follows is that patch's");
+        assert_eq!(tree.pure_membership_since(0), None, "a removal that an anchor follows is that patch's");
+    }
+
+    /// A scroller (1) that holds a positioned box (2), which holds an absolute row (3).
+    fn rows_in_a_positioned_box() -> RetainedTree {
+        let mut tree = RetainedTree::new();
+        tree.set_commit_patching(true);
+        apply(
+            &mut tree,
+            r##"[["createElement",1,"div"],["createElement",2,"div"],["createElement",3,"div"],
+                ["setStyle",2,{"position":"relative"}],["setStyle",3,{"position":"absolute"}],
+                ["appendChild",1,2],["appendChild",2,3],["setRoot",1]]"##,
+        );
+        tree.take_dirty();
+        tree.take_structure();
+        tree.take_restyles();
+        tree
+    }
+
+    #[test]
+    fn a_new_absolute_row_put_in_a_positioned_box_is_an_addition_the_frame_shown_can_follow() {
+        let mut tree = rows_in_a_positioned_box();
+        let shown = tree.root_revision();
+        apply(
+            &mut tree,
+            r##"[["createElement",4,"div"],["setStyle",4,{"position":"absolute","top":30}],["createElement",5,"#text"],["appendChild",4,5],
+                ["appendChild",2,4],["detachChild",3]]"##,
+        );
+        assert_ne!(tree.root_revision(), shown);
+        assert_eq!(tree.pure_membership_since(shown), Some((vec![(3, 2)], vec![(4, 2)])));
+        assert_eq!(tree.what_stays_of(&[(3, 2)], &[(4, 2)]), Some(vec![]), "what came in is no survivor");
+        assert_eq!(tree.take_dirty(), Dirty::Layout, "no patch asks for it");
+        tree.take_structure();
+        assert_eq!(tree.pure_membership_since(shown), None);
+    }
+
+    #[test]
+    fn a_row_that_is_put_in_and_taken_out_before_a_frame_is_drawn_is_in_no_frame() {
+        let mut tree = rows_in_a_positioned_box();
+        let shown = tree.root_revision();
+        apply(&mut tree, r##"[["createElement",4,"div"],["setStyle",4,{"position":"absolute"}],["appendChild",2,4],["detachChild",4]]"##);
+        assert_eq!(tree.pure_membership_since(shown), None, "nothing is left to draw differently");
+    }
+
+    #[test]
+    fn what_cannot_be_built_for_a_scroll_is_a_change_a_frame_is_built_for() {
+        for (what, row) in [
+            ("a row in the flow", r##"["setStyle",4,{"position":"relative"}]"##),
+            ("a row that transitions", r##"["setStyle",4,{"position":"absolute","transition":"opacity 1s"}]"##),
+            ("a row with text that takes focus", r##"["setStyle",4,{"position":"absolute"}],["setCustomProp",4,"tabIndex",0]"##),
+        ] {
+            let mut tree = rows_in_a_positioned_box();
+            let shown = tree.root_revision();
+            apply(&mut tree, &format!(r##"[["createElement",4,"div"],{row},["appendChild",2,4]]"##));
+            assert_eq!(tree.pure_membership_since(shown), None, "{what}");
+        }
+        let mut tree = rows_in_a_positioned_box();
+        let shown = tree.root_revision();
+        apply(&mut tree, r##"[["createElement",4,"div"],["setStyle",4,{"position":"absolute"}],["createElement",5,"input"],["appendChild",4,5],["appendChild",2,4]]"##);
+        assert_eq!(tree.pure_membership_since(shown), None, "a row with an input");
+        let mut tree = rows_in_a_positioned_box();
+        tree.set_anchors([1].into_iter().collect(), tree.root_revision());
+        let shown = tree.root_revision();
+        apply(&mut tree, r##"[["createElement",4,"div"],["setStyle",4,{"position":"absolute"}],["appendChild",2,4]]"##);
+        assert_eq!(tree.pure_membership_since(shown), None, "an anchor holds the box");
+    }
+
+    #[test]
+    fn a_framework_that_styles_and_fills_a_new_row_after_it_put_it_in_still_adds_a_row() {
+        let mut tree = rows_in_a_positioned_box();
+        let shown = tree.root_revision();
+        apply(
+            &mut tree,
+            r##"[["createElement",4,"div"],["appendChild",2,4],["setStyle",4,{"position":"absolute","top":30,"height":30}],
+                ["createElement",5,"#text"],["appendChild",4,5],["setText",5,"row"]]"##,
+        );
+        assert_eq!(tree.pure_membership_since(shown), Some((vec![], vec![(4, 2)])));
+        apply(&mut tree, r##"[["setStyle",3,{"position":"absolute","top":1}]]"##);
+        assert_eq!(tree.pure_membership_since(shown), None, "a change to what was already in the frame is not part of the addition");
     }
 }
