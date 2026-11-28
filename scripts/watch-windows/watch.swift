@@ -41,7 +41,8 @@ var treeOf = [Int32: Bool]()
 // A window that lives a frame is why this polls about every millisecond.
 while Date() < end {
   if kill(root, 0) != 0 { break }
-  let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
+  // The list is nil when the window server does not answer; that sample is skipped.
+  let windows = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []
   for window in windows {
     let alpha = window[kCGWindowAlpha as String] as? Double ?? 0
     let bounds = window[kCGWindowBounds as String] as? [String: Double] ?? [:]
