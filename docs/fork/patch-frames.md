@@ -1607,7 +1607,7 @@ additions only and 224 both.
 - **What comes in** (`retain/entering.rs`, `ScrollEntering`). The children that came in under one parent and follow one another in the tree are a group, beside the root that stays next to it in the
   tree (the one before the group, or the one after it for a group at the start): a root of the scroller that a stacking context holds (`ScrollRun::lifted`), with a hitbox, that has not left. Where each
   is put and how big it comes out is worked out from its style and the box of its parent in the frame shown, without laying the parent out again: every child of the parent is absolute (so its index
-  among its siblings is its place in the document), the parent is not transformed, and the child names its `top` (and `left`, or, for a child that is block-level, takes the place where the content of a block parent that runs left to right begins),
+  among its siblings is its place in the document), the parent is not transformed, and the child names its `top` (and `left`, or, for a child that is block-level, takes the place where the content of a parent that is a block (`display: block`, or none on a `div`, `p`, heading or list element) that runs left to right begins; a parent whose direction cannot be read declines),
   its `width` and its `height` in px or %, with no margin, bound on the size, ratio or other inset, and its box lies inside the padding box of the parent (the scrollable overflow does not grow); a translation by px or % moves the box, and the moved box lies inside
   the padding box too, and any other transform is a layout of its own. The neighbor has the z-index the children have (`ScrollEntered::lift_z`, 0 for `auto`), since the roots of the group are handed to the context the neighbor is
   handed to; a child that is a run of the scroller already is not one that came in. Anything else is a layout of what holds the child, and the frame is built whole.
@@ -1632,15 +1632,19 @@ additions only and 224 both.
   settled the frame shown is the frame of the revision (`note_membership_drawn`: the changes are taken, what came in is no longer fresh, and `note_patched`); the entry starts of parents the tree destroyed go with the next `Retain::prune`.
 - **The layout engine** (`TaffyLayoutEngine::mark_computed_unplaced`). The roots were laid out as roots, and their nodes are the ones the page keeps for them: a scroller that picks its scroll anchor
   before the layout that puts them in the page took them for what the layout before had, a node at the top of the parent, and moved the offset by the distance they then moved. The nodes that a
-  scratch pass laid out are marked, and no pick looks at them until the end of the next pass that lays out the page (or the pick of a scroller that asked for one, whichever is first).
+  scratch pass laid out are marked, and no pick looks at them until the page computes them (`place_below`, for a root that a pass of the page computes) or a pass of the page ends (`end_pass_of_page`). The end of
+  any other pass leaves the mark, the scratch pass of a patch (a hover between a translate and the next frame) included: `begin_scratch_pass` says that the roots such a pass computes are no layout of the page.
+- **What is kept per parent** (`Retain::entry_start`, `RetainedTree::scroll_content_parents`). A build of an element forgets both for it before it builds its children, and the first child that is absolute, placed by it
+  and in a `div` scroller notes them again, so a parent that is no longer in a scroller or no longer has such a child is found out by its next build. A parent that is taken out of the tree or put under another one
+  is dropped by `detach_child`, `append_child` and `insert_before`, and a new child of it is a change of its parent until a frame notes it again.
 - **What stays whole.** Rows in the flow (what is after a row that leaves moves; the scroll extent of a scroller that holds them shrinks), a child with focusable content, a
   removal under an anchor, a box that is not inside its parent's, a child that comes in with no `top`, no definite size, a margin or a bound on its size, one that has a transition, a motion, an
   image, an input or any element but a block of text, a spacer whose size changes with the commit (it is another element changed), a neighbor with no hitbox, and the accessibility tree being
   on. Under the verifier the frame built whole after the translate is compared with it, registries included.
 
-**Measured** (`PHASE=scroll APP=stack A11Y=0`, release addon, test renderer, ghia-bench's data): translated 707 of 720 (420 after D2a, 362 before), 349 of them membership translates (283 rows built,
-288 removed), mean 9.01M a tick (10.1M after D2a), median 6.03M (6.31M). The 356 ticks that apply a mutation batch have median 10.6M and mean 12.5M (they were drawn whole, at about 13.8M); the 364
-ticks that do not have median 4.73M. A membership translate costs a median 10.5M against 4.97M for the translates that move what is there, the rest being the build of the rows that came in.
+**Measured** (`PHASE=scroll APP=stack A11Y=0`, release addon, test renderer, ghia-bench's data, three runs after the review fixes): translated 707 of 720 (420 after D2a, 362 before), 349 of them membership translates (283 rows built,
+288 removed), mean 9.01M, 9.10M and 9.13M a tick (10.1M after D2a), median 6.05M and 6.02M (6.31M). The 356 ticks that apply a mutation batch have median 10.90M and 11.06M and mean 12.68M and 12.77M (they were drawn whole, at about 13.8M); the 364
+ticks that do not have median 4.74M. A membership translate costs a median 10.58M against 4.95M for the translates that move what is there, the rest being the build of the rows that came in. The review fixes changed no count.
 
 Tests: zed `scroll_patch_div_tests.rs` (`roots_that_a_commit_took_out_are_taken_out_by_the_translate`: absolute rows with each variant of the page, in the clip, in the overscan, with the pointer
 over a root that left; `roots_in_the_flow_that_a_commit_took_out_at_the_end_...`; `roots_that_a_commit_put_in_are_put_in_by_the_translate`, `roots_that_come_in_are_put_in_as_the_frame_built_whole_has_them`
