@@ -177,9 +177,9 @@ describeNative("a wheel over a list with the accessibility tree built", { timeou
 
   unverified("puts the rows that came in in the tree and takes the ones that left out of it", () => {
     const opened = open()
-  const renderer = opened.renderer
-  const list = opened.list
-  const unmount = opened.unmount
+    const renderer = opened.renderer
+    const list = opened.list
+    const unmount = opened.unmount
     try {
       renderer.scrollTo(list, 0, 300)
       rebuild(renderer)
@@ -200,9 +200,9 @@ describeNative("a wheel over a list with the accessibility tree built", { timeou
 
   unverified("is a translate after a screen reader came or went, and edits the tree while one is connected", () => {
     const opened = open()
-  const renderer = opened.renderer
-  const list = opened.list
-  const unmount = opened.unmount
+    const renderer = opened.renderer
+    const list = opened.list
+    const unmount = opened.unmount
     try {
       renderer.setA11yActive(false)
       let scrolled = 300
@@ -235,9 +235,9 @@ describeNative("a wheel over a list with the accessibility tree built", { timeou
   // frame built whole after it.
   it("is the frame built whole under the retention verifier", () => {
     const opened = open()
-  const renderer = opened.renderer
-  const list = opened.list
-  const unmount = opened.unmount
+    const renderer = opened.renderer
+    const list = opened.list
+    const unmount = opened.unmount
     try {
       renderer.setRetainVerify(true)
       let scrolled = 300

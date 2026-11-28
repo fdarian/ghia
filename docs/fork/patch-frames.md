@@ -1362,19 +1362,27 @@ had no translate). A translate now edits the tree the frame shown sent (`window/
   scratch frame hung off the scratch builder's root, and hangs off the tree's node now): the first node after the block that lists the
   first of the rows' top children.
 - **What is not a translate:** the tree is checked before anything is written (`plan_scroll`, `applyDeclines.A11y`), after the rows that come
-  in were built and forgotten. Each of these is a unit test in `window/a11y/scroll.rs` that fails without its check:
-  - a row that leaves or comes in holds the focus or the active descendant (what it recorded, or the tree's focus on one of its nodes);
-  - a row that comes in names a relation (`aria-labelledby` and the others resolve against the whole tree, which the scratch builder
-    does not have);
-  - a row that leaves or comes in claims an author id that a relation of the frame names (`A11yNodeBuilder::relation_targets`: the
-    author ids the last finalize found in a relation, found or not, so a row that comes in under an id nothing had resolves what it
-    would not have). Ghia gives every DOM `id` an author id, and labels one for the controls they name, so an id that nothing points at
-    is no reason, and a list whose rows have `id`s translates;
-  - the tree has an active descendant, or gpui's focus is in the node the rows hang off or above it (`A11y::is_inside`, a walk down from
-    the focused node over the retained nodes, which follow their children): a row that comes in could claim the active descendant, and the
-    scratch tree builder has no focus stack to decide it;
-  - a row has no recording of its nodes (`RetainedState::a11y_parts`), the rows' nodes are not where the tree has them in the order of the
-    list, they hang off more than one node, the node they hang off is not found, or it lists the rows in another order.
+  in were built and forgotten. Tests are named per item (unit = `window/a11y/scroll.rs`, window = `membership_patch_tests.rs`); each
+  unit test fails without its check (mutated one at a time):
+  - a row that leaves or comes in holds the focus (what it recorded, or the tree's focus on one of its nodes): unit. A focus in a row that
+    stays is a translate: unit and window;
+  - a row that comes in names a relation (`aria-labelledby` and the others resolve against the whole tree, which the scratch builder does
+    not have): unit only. **Known follow-up, left as it is:** such a row could be resolved against its own authors and the tree's, as the
+    `<label for>` of a control in the row would be; for now a row that comes in with a relation of its own is a frame built whole;
+  - a row that leaves or comes in claims an author id that a relation of the frame names (`A11yNodeBuilder::relation_targets`: the author
+    ids the last finalize found in a relation, found or not, so a row that comes in under an id nothing had yet resolves what it would
+    not have): unit, and window for both a row that leaves and a row named before it is built. Ghia gives every DOM `id` an author id, and
+    a `<label>` one for the control it names, so an id that nothing points at is no reason and a list whose rows have `id`s translates
+    (window);
+  - the tree has an active descendant: unit. A row that comes in and asks to be one (`aria_active_descendant`, noted in its recording as
+    `asked_active_descendant` even when the scratch tree, which has no focus, drops the claim) under a focus on the list's node or above it
+    (`A11y::is_inside`, a walk down from the focused node over the retained nodes, which follow their children): unit and window. A focus
+    there with no row that asks costs nothing (unit and window), and neither does one beside the list (unit). `recording.active_descendant` is
+    not asked of a row: one that claimed it is in a tree that has one, and the scratch builder never lets a row claim;
+  - a row has no recording of its nodes (`RetainedState::a11y_parts`): window. The rows' nodes are not where the tree has them in the order of
+    the list, the node they hang off is not found, or it lists the rows in another order: unit.
+  Ghia never calls gpui's `aria_active_descendant` (its `aria-activedescendant` is a relation, resolved to the focus at the end of the
+  frame), so the active descendant checks are only for an embedder of gpui; they are there because the scratch builder could not decide them.
 - **The platform** is told of what changed in an update of its own, with no `tree` (the nodes that moved, the nodes that came in and the node
   that lists the children); what the root no longer reaches is dropped by the adapter. `getShownA11yTree` (test renderer) reads the retained tree
   without the flush that `getA11yTree` makes and that draws a frame built whole over it.
