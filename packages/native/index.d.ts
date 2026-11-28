@@ -1614,6 +1614,12 @@ export declare class TestGpuixRenderer {
    * Empty until a11y is active; the test renderer turns that on at construct.
    */
   getA11yTree(): string
+  /**
+   * [`Self::get_a11y_tree`] of the frame that was drawn last as it is, with no flush: a frame that
+   * moved the rows of a list in place edited the tree, and a flush would draw a frame built whole
+   * over it.
+   */
+  getShownA11yTree(): string
   /** Tree JSON with last-paint bounds. Used by the automation locators. */
   getAutomationTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */

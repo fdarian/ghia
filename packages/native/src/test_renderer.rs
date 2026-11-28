@@ -3363,6 +3363,15 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// [`Self::get_a11y_tree`] of the frame that was drawn last as it is, with no flush: a frame that
+    /// moved the rows of a list in place edited the tree, and a flush would draw a frame built whole
+    /// over it.
+    #[napi(js_name = "getShownA11yTree")]
+    pub fn get_shown_a11y_tree(&self) -> Result<String> {
+        self.window_call(|window, _cx| window.debug_a11y_tree_json())?
+            .ok_or_else(|| Error::from_reason("no frame has sent an accessibility tree: a screen reader is not connected"))
+    }
+
     /// Tree JSON with last-paint bounds. Used by the automation locators.
     #[napi]
     pub fn get_automation_tree(&self) -> Result<String> {
