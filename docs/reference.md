@@ -11387,12 +11387,14 @@ move the clock with `clockAdvance(ms)` before each `drawFrame()`. `clockFastForw
 also tells the window, so the frame after it is built whole and never a tick.
 
 `setA11yActive(false)` removes the pretend screen reader the test window starts
-with. Set `GPUIX_RETAIN_OFF=1` (or call `setRetainEnabled(false)` on one window)
+with. `getA11yTree()` flushes and so draws a frame built whole; `getShownA11yTree()`
+returns the tree of the frame drawn last as it is, which after a wheel over a
+`<virtual-list>` is the tree the translate of its rows edited. Set `GPUIX_RETAIN_OFF=1` (or call `setRetainEnabled(false)` on one window)
 to build every frame in full, for timing, `GPUIX_PATCH_OFF=1` (or
 `setPatchEnabled(false)` on one window) to draw every tick of an animation whole
 instead of patching it, `getPatchCounters().scrollPatch` for how the frames after a
 wheel over a `<virtual-list>` or a `div` scroller (`overflow: auto` or `scroll`) were classified and how many were drawn by moving the content of the frame before (`patched`; `applyDeclines`
-says why the others that could be were not; `held` counts each reason that holds a frame whole, and by cause under it, so a `div` scroller's frame names what held it:
+says why the others that could be were not, and `applyDeclines.A11y` that a screen reader is connected and the accessibility tree could not be edited. That happens when a row that leaves or comes in has an `id` that another element's `aria-labelledby`, `aria-describedby`, `aria-controls`, `aria-activedescendant` or the like points at (a `<label for>` points at its control's `id` too), a row that comes in has such an attribute itself, or a row that leaves or comes in holds the focus; an `id` that nothing points at costs nothing; `held` counts each reason that holds a frame whole, and by cause under it, so a `div` scroller's frame names what held it:
 `NotRelocatable.entered` (a child culling left out would come into reach), `.unrooted` (the content paints or inserts something no relocatable root holds), `.nested`
 (a list or another scroller is inside it), `.layered` (its children are in a stacking context of their own or an order of their own, or hold a sticky or escaping box) and `.noRun` (none of the content is a relocatable root);
 a scrollbar's thumb is moved with the content, and `Thumb.*` says when it cannot be; `GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off and draws every frame whole; `rowsMeasuredByLayout`, `rowsMeasuredByDeclaration` and `declarationMismatches` count how the lists measured their rows, and `GPUIX_LIST_SIZES_OFF=1`, or `setListSizesEnabled(false)`, makes them all by layout), and

@@ -122,6 +122,7 @@ function calls(r, ids) {
     focusPrevious: () => r.focusPrevious(),
     focusPreviousWithin: () => r.focusPreviousWithin(ids.form),
     getA11yTree: () => r.getA11yTree(),
+    getShownA11yTree: () => r.getShownA11yTree(),
     getAttribute: () => r.getAttribute(ids.box, "id"),
     getAllText: () => r.getAllText(),
     getInputChoice: () => r.getInputChoice(ids.check),

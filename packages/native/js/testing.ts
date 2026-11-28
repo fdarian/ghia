@@ -362,6 +362,7 @@ interface NativeTestRendererApi
   simulateFileDrop(x: number, y: number, paths: string[]): void
   getTreeJson(): string
   getA11yTree(): string
+  getShownA11yTree(): string
   getAutomationTree(): string
   getRetainedElementCount(): number
   getBuildCounters(): BuildCounters
@@ -1482,6 +1483,14 @@ export class TestRenderer implements NativeRenderer {
   /** GPUI accessibility dump from the last painted frame. */
   getA11yTree(): A11yTreeDump {
     return JSON.parse(this.native.getA11yTree()) as A11yTreeDump
+  }
+
+  /**
+   * `getA11yTree` of the frame drawn last as it is: it does not flush, so after a wheel over a list it is the tree that
+   * the frame that moved the rows in place left, where `getA11yTree` draws a frame built whole first.
+   */
+  getShownA11yTree(): A11yTreeDump {
+    return JSON.parse(this.native.getShownA11yTree()) as A11yTreeDump
   }
 
   getAutomationTree(): string {
