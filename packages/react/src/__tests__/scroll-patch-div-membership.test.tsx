@@ -69,6 +69,8 @@ type Options = {
   transformBy?: number
   /** The rows before this one are in the flow, the others are absolute. */
   absoluteFrom?: number
+  /** `content-visibility: hidden` on the box that holds the rows: its build skips them. */
+  skipHolder?: boolean
 }
 
 function measureRow(log: Log, index: number, instance, read: boolean) {
@@ -135,7 +137,10 @@ function Page(props: { log: Log; layout: Layout } & Options) {
     >
       {props.sheet === undefined ? null : <style>{props.sheet}</style>}
       {layout !== "flow" ? (
-        <div testId="inner" style={{ position: "relative", width: "100%", height: props.spacerHeight ?? COUNT * ROW }}>
+        <div
+          testId="inner"
+          style={{ position: "relative", width: "100%", height: props.spacerHeight ?? COUNT * ROW, ...(props.skipHolder ? { contentVisibility: "hidden" } : {}) }}
+        >
           {rows}
         </div>
       ) : (
@@ -575,6 +580,58 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     expect(on.edited).toBe(1)
     expect(on.frame).toEqual(off.frame)
   })
+
+  for (const [what, shownBeforeRows] of [["is a translate again once it shows them", true], ["is a frame built whole when it shows them in the commit the rows come in with", false]] as const) {
+    unverified(`${what}, after the box that holds the absolute rows skipped its content`, () => {
+      // The build of the box forgets what it was noted as before it finds that it builds none of its children, so a box whose content
+      // `content-visibility` skips is no parent a scroll builds children for until a build that shows them notes it again.
+      const trial = (translate: boolean) => {
+        const opened = open(translate, "absolute", { present: FIRST })
+        const renderer = opened.renderer
+        try {
+          renderer.nativeSimulateMouseMove(180, 60)
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+          for (const by of [4, -4]) {
+            renderer.clockAdvance(VSYNC)
+            renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+            renderer.dispatchNativeEvents()
+            renderer.drawFrame()
+          }
+          opened.render(<Page log={opened.log} layout="absolute" present={FIRST} skipHolder />)
+          renderer.drawFrame()
+          renderer.drawFrame()
+          if (shownBeforeRows) {
+            opened.render(<Page log={opened.log} layout="absolute" present={FIRST} />)
+            renderer.drawFrame()
+            renderer.drawFrame()
+            // A wheel and its way back record the rows the frames built whole just built.
+            for (const by of [4, -4]) {
+              renderer.clockAdvance(VSYNC)
+              renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+              renderer.dispatchNativeEvents()
+              renderer.drawFrame()
+            }
+          }
+          const before = scroll(renderer)
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(180, 60, 0, 3)
+          renderer.dispatchNativeEvents()
+          opened.render(<Page log={opened.log} layout="absolute" present={[0, 1, 2, 3, 4]} />)
+          renderer.drawFrame()
+          const after = scroll(renderer)
+          return { patched: after.patched - before.patched, built: after.rowsBuilt - before.rowsBuilt, frame: seenRows(opened, [0, 1, 2, 3, 4]) }
+        } finally {
+          opened.unmount()
+        }
+      }
+      const on = trial(true)
+      const off = trial(false)
+      expect(on.patched).toBe(shownBeforeRows ? 1 : 0)
+      expect(on.built).toBe(shownBeforeRows ? 1 : 0)
+      expect(on.frame).toEqual(off.frame)
+    })
+  }
 
   unverified("is a frame built whole when the scroller runs its inline axis from the right, which puts a box that names no left there", () => {
     const options = { rtl: true }

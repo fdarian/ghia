@@ -13701,6 +13701,11 @@ impl Placement {
 /// A parent that is no longer inside a `div` scroller, or no longer has an absolute child placed by it, is found out by a build that
 /// does not note it again: this runs for every build of the element, whatever it builds of its children (content skipped by
 /// `content-visibility` included).
+///
+/// The builds that return before it are those of an element that is `display: none` or hidden by an animation, which builds no
+/// children and has no box in the frame: its entries stay until its next build, and that is harmless. A child that comes in under it is
+/// built by a scroll only beside a neighbor that is a root of the frame shown (`retain::entering`), and the frame shown has none under
+/// an element that is not there.
 fn forget_scroll_content_state(element: &crate::retained_tree::RetainedElement, ctx: &mut BuildCtx) {
     ctx.retain.forget_entry_start(element.id);
     ctx.tree.forget_scroll_content_parent(element.id);

@@ -4946,6 +4946,22 @@ mod tests {
     }
 
     #[test]
+    fn a_parent_that_left_the_scroller_is_no_parent_a_scroll_builds_children_for() {
+        let mut tree = rows_in_a_positioned_box();
+        apply(&mut tree, r##"[["detachChild",2]]"##);
+        assert!(!tree.scroll_content_parents.borrow().contains(&2), "taken out of the tree");
+        let mut tree = rows_in_a_positioned_box();
+        apply(&mut tree, r##"[["createElement",4,"div"],["appendChild",1,4],["appendChild",4,2]]"##);
+        assert!(!tree.scroll_content_parents.borrow().contains(&2), "moved under another parent");
+        let mut tree = rows_in_a_positioned_box();
+        tree.note_scroll_content_parent(3);
+        apply(&mut tree, r##"[["createElement",4,"div"],["appendChild",2,4],["insertBefore",2,3,4]]"##);
+        assert!(tree.scroll_content_parents.borrow().contains(&3), "moved among its siblings, it is in the same scroller");
+        tree.forget_scroll_content_parent(2);
+        assert!(!tree.scroll_content_parents.borrow().contains(&2), "a build that found no absolute children of it");
+    }
+
+    #[test]
     fn five_thousand_rows_put_in_a_scroller_are_tracked_without_a_scan_of_the_list_for_each() {
         let mut tree = rows_in_a_positioned_box();
         let shown = tree.root_revision();
