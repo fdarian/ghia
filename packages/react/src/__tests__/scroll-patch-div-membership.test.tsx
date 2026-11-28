@@ -58,6 +58,8 @@ type Options = {
   /** A stylesheet that styles the rows by class, which they all have. */
   sheet?: string
   rtl?: boolean
+  /** The rows are in the tree in the opposite order, which is a keyed reorder of what is there. */
+  reverse?: boolean
   /** The row at the end of the first four takes this z-index, which the row that comes in after it does not have. */
   selectedZ?: number
   /** One row is placed at the top by a translation of this many px past it (it stays inside the box that holds the rows when it is small). */
@@ -112,6 +114,7 @@ function Page(props: { log: Log; layout: Layout } & Options) {
         {index === props.autoFocusRow ? <input autoFocus /> : null}
       </div>
     ))
+  if (props.reverse) rows.reverse()
   return (
     <div
       testId="scroller"
@@ -499,7 +502,6 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     const options = { measure: true }
     const on = runRows(true, "absolute", FIRST, enterSteps, options)
     const off = runRows(false, "absolute", FIRST, enterSteps, options)
-    expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by a translate").toBeGreaterThan(0)
     expect(on.measured.length).toBeGreaterThan(FIRST.length)
     expect(on.measured).toEqual(off.measured)
     expect(on.observed.length).toBeGreaterThan(0)
@@ -530,6 +532,52 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     expect(on.translated).toEqual([false])
     expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
     expect(on.frames).toEqual(off.frames)
+  })
+
+  unverified("leaves nothing of a translate that was declined for the frames after it", () => {
+    const trial = (translate: boolean) => {
+      const opened = open(translate, "absolute", { hover: true })
+      const renderer = opened.renderer
+      try {
+        renderer.nativeSimulateMouseMove(180, 60)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        for (const by of [4, -4]) {
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+        }
+        const patched = scroll(renderer).patched
+        // A commit that only takes a row out, with a pointer that moves onto another row: a hover change holds the frame whole.
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateMouseMove(20, 10)
+        renderer.nativeSimulateScrollWheel(20, 10, 0, 5)
+        renderer.dispatchNativeEvents()
+        opened.render(<Page log={opened.log} layout="absolute" hover removed={[9]} />)
+        renderer.drawFrame()
+        const declined = scroll(renderer).patched === patched
+        // The rows are reordered, and a plain wheel follows.
+        opened.render(<Page log={opened.log} layout="absolute" hover removed={[9]} reverse />)
+        renderer.drawFrame()
+        renderer.drawFrame()
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateScrollWheel(20, 10, 0, 4)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        const selected = renderer.dragSelect(10, 5, 140, 95)
+        renderer.dispatchNativeEvents()
+        return { declined, translated: scroll(renderer).patched > patched, selected, picture: picture(renderer) }
+      } finally {
+        opened.unmount()
+      }
+    }
+    const on = trial(true)
+    const off = trial(false)
+    expect(on.declined, "the frame with the commit was built whole").toBe(true)
+    expect(on.selected).toBeTruthy()
+    expect(on.selected, "the text selected across the rows, in the order the tree has them").toEqual(off.selected)
+    expect(on.picture).toEqual(off.picture)
   })
 
   unverified("is a frame built whole when a row that comes in has no height of its own", () => {

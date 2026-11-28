@@ -1589,7 +1589,9 @@ additions only and 224 both.
 - **The commit rule** (`RetainedTree::mark_removed`, `mark_added`, `pure_membership_since`). `detach_child`, and `destroy_element` of an element that is in the tree, are a *removal* when the
   child is out of flow (`position: absolute` or `fixed`: nothing after it is moved by its leaving), nothing in it can take focus, its parent is in the document, has no generated
   content, and no anchor or box root follows it (the patch that follows an anchor is the better frame). `append_child` and `insert_before` of an element that was never in the tree are an *addition*
-  when the parent is in the document, generates no content, is positioned (it places the absolute children it has) and no anchor follows it. A framework gives the new element its style and its
+  when the parent is in the document, generates no content, is positioned (it places the absolute children it has), no anchor follows it, and a frame found absolute children of it inside a `div` scroller's content
+  (`note_scroll_content_parent`, noted with the entry start; a parent outside every scroller keeps no list, so appending thousands of nodes to it costs nothing more). The lists keep a set of the children beside them, so that
+  every test is one lookup. A framework gives the new element its style and its
   children after it has put it in the tree, so what it is is judged when the frame asks, and what is done to it until then (`in_a_new_child`) is part of the addition: it is not a change of the frame
   shown. The revision such a change takes is not `other_revision`, the revision of the last change that is not one: `pure_membership_since(shown revision)` is the list of removals and additions
   when `other_revision` is not past the revision the frame shown was built at and every child that came in is, by then, `position: absolute` and placed by its parent, nothing in its subtree can
@@ -1605,9 +1607,10 @@ additions only and 224 both.
 - **What comes in** (`retain/entering.rs`, `ScrollEntering`). The children that came in under one parent and follow one another in the tree are a group, beside the root that stays next to it in the
   tree (the one before the group, or the one after it for a group at the start): a root of the scroller that a stacking context holds (`ScrollRun::lifted`), with a hitbox, that has not left. Where each
   is put and how big it comes out is worked out from its style and the box of its parent in the frame shown, without laying the parent out again: every child of the parent is absolute (so its index
-  among its siblings is its place in the document), the parent is not transformed, and the child names its `top` (and `left`, or takes the place where the parent's content begins in a block parent),
-  its `width` and its `height` in px or %, with no margin, bound on the size, ratio or other inset, and its box lies inside the padding box of the parent (the scrollable overflow does not grow).
-  Anything else is a layout of what holds the child, and the frame is built whole.
+  among its siblings is its place in the document), the parent is not transformed, and the child names its `top` (and `left`, or, for a child that is block-level, takes the place where the content of a block parent that runs left to right begins),
+  its `width` and its `height` in px or %, with no margin, bound on the size, ratio or other inset, and its box lies inside the padding box of the parent (the scrollable overflow does not grow); a translation by px or % moves the box, and the moved box lies inside
+  the padding box too, and any other transform is a layout of its own. The neighbor has the z-index the children have (`ScrollEntered::lift_z`, 0 for `auto`), since the roots of the group are handed to the context the neighbor is
+  handed to; a child that is a run of the scroller already is not one that came in. Anything else is a layout of what holds the child, and the frame is built whole.
 - **Building them** (zed `Window::build_enter_group`, `Window::draw_entering`). Each child is built by `GpuixView::build_entering` as the frame that built its siblings built it: from the `BuildStart`
   `Retain::note_entry_start` noted for the parent (the children of an element that has absolute children inside a `div` scroller; one clone for each parent in a frame) and the shape of the parent,
   entered the way a list's row is (`Retain::begin_entering`, no part of the page's decision, no row of a list to sweep). zed enters the surroundings the neighbor was prepainted in
@@ -1624,12 +1627,12 @@ additions only and 224 both.
 - **Ghia's part** (`TapeStore::note_membership`, `settle_rows`, `settle_membership`). The roots that left are taken out of the registries as a list's rows are (their tapes, boxes, text and start
   regions) and out of the page's records (`forget_left_rows`), before the sweeps and before a frame builds. What the roots that stay wrote of text carries the path the root has in the document, the child
   indices from the root: each is put under the index it has among its siblings now (`DocPath::moved_sibling`) as a replay of it is (`text::replace` with the tape's writes) and its tape keeps the path.
-  What the roots that came in wrote is at the end of the registries and goes where the tree has it (`order_by_rows` over the roots of the parent in the order of the tree). When the translate is settled
-  the frame shown is the frame of the revision (`note_membership_drawn`: the changes are taken, what came in is no longer fresh, and `note_patched`); a translate that declines leaves them for the frame
-  built whole, which takes them.
+  What the roots that came in wrote is at the end of the registries and goes where the tree has it (`order_by_rows` over the roots of the parent in the order of the tree). The gate only plans it: `note_membership` keeps the plan, and `settle_adopted` (the settled callback of a translate, or the registries callback of the verifier's translate) settles it; every other settling
+  (`settle_rows`, which the classification of the next frame and the build of a frame whole start with) forgets it, so a translate that gpui declined leaves the registries as the frame built whole has them. When the translate is
+  settled the frame shown is the frame of the revision (`note_membership_drawn`: the changes are taken, what came in is no longer fresh, and `note_patched`); the entry starts of parents the tree destroyed go with the next `Retain::prune`.
 - **The layout engine** (`TaffyLayoutEngine::mark_computed_unplaced`). The roots were laid out as roots, and their nodes are the ones the page keeps for them: a scroller that picks its scroll anchor
   before the layout that puts them in the page took them for what the layout before had, a node at the top of the parent, and moved the offset by the distance they then moved. The nodes that a
-  scratch pass laid out are marked, and no pick looks at them until one has been made.
+  scratch pass laid out are marked, and no pick looks at them until the end of the next pass that lays out the page (or the pick of a scroller that asked for one, whichever is first).
 - **What stays whole.** Rows in the flow (what is after a row that leaves moves; the scroll extent of a scroller that holds them shrinks), a child with focusable content, a
   removal under an anchor, a box that is not inside its parent's, a child that comes in with no `top`, no definite size, a margin or a bound on its size, one that has a transition, a motion, an
   image, an input or any element but a block of text, a spacer whose size changes with the commit (it is another element changed), a neighbor with no hitbox, and the accessibility tree being
