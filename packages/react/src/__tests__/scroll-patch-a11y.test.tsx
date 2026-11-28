@@ -38,7 +38,7 @@ function upBy(scrolled: number, count: number): number {
   return top(rowsAt(scrolled)[0] - count + 1) - 1
 }
 
-function Rows({ log }: { log: number[] }) {
+function Rows(props: { log: number[] }) {
   return (
     <div style={{ width: 300, height: 700, backgroundColor: "#ffffff" }}>
       <div style={{ height: 10, backgroundColor: "#eeeeee" }} />
@@ -57,7 +57,7 @@ function Rows({ log }: { log: number[] }) {
             testId={`row-${index}`}
             role="listitem"
             aria-label={`row-${index}`}
-            onClick={() => log.push(index)}
+            onClick={() => props.log.push(index)}
             style={{
               width: 180,
               height: height(index),
@@ -128,7 +128,10 @@ const steps: Step[] = [
 ]
 
 function run(translate: boolean) {
-  const { renderer, unmount, list } = open()
+  const opened = open()
+  const renderer = opened.renderer
+  const list = opened.list
+  const unmount = opened.unmount
   try {
     renderer.setScrollPatchEnabled(translate)
     let scrolled = 300
@@ -145,7 +148,7 @@ function run(translate: boolean) {
       translated.push(scroll(renderer).patched > before.patched)
       trees.push(tree(renderer))
     }
-    return { trees, translated, counters: scroll(renderer), mismatches: renderer.getRetentionMismatches() }
+    return { trees, translated, scrolled, counters: scroll(renderer), mismatches: renderer.getRetentionMismatches() }
   } finally {
     unmount()
   }
@@ -164,15 +167,19 @@ describeNative("a wheel over a list with the accessibility tree built", { timeou
     expect(on.counters.membershipFrames).toBeGreaterThan(0)
     expect(on.mismatches).toEqual([])
     expect(on.trees).toEqual(off.trees)
-    // The rows the last step shows are in the tree, and no row that left is.
-    const shown = rowsAt(downBy(downBy(downBy(300, 1), 2), 5))
+    // The rows the last step shows are in the tree, and the ones above them are not.
+    const shown = rowsAt(on.scrolled)
     expect(shown.length).toBeGreaterThan(0)
-    const last = on.trees.at(-1)
-    expect(labels(last).length).toBeGreaterThan(0)
+    const named = labels(on.trees.at(-1))
+    for (const row of shown) expect(named, `row ${row} shows`).toContain(`row-${row}`)
+    for (let row = 0; row < shown[0]; row += 1) expect(named, `row ${row} left`).not.toContain(`row-${row}`)
   })
 
   unverified("puts the rows that came in in the tree and takes the ones that left out of it", () => {
-    const { renderer, unmount, list } = open()
+    const opened = open()
+  const renderer = opened.renderer
+  const list = opened.list
+  const unmount = opened.unmount
     try {
       renderer.scrollTo(list, 0, 300)
       rebuild(renderer)
@@ -192,7 +199,10 @@ describeNative("a wheel over a list with the accessibility tree built", { timeou
   })
 
   unverified("is a translate after a screen reader came or went, and edits the tree while one is connected", () => {
-    const { renderer, unmount, list } = open()
+    const opened = open()
+  const renderer = opened.renderer
+  const list = opened.list
+  const unmount = opened.unmount
     try {
       renderer.setA11yActive(false)
       let scrolled = 300
@@ -224,7 +234,10 @@ describeNative("a wheel over a list with the accessibility tree built", { timeou
   // a second time under the verifier, and the rows of the frame shown can be moved. The tree the translate left is compared with the
   // frame built whole after it.
   it("is the frame built whole under the retention verifier", () => {
-    const { renderer, unmount, list } = open()
+    const opened = open()
+  const renderer = opened.renderer
+  const list = opened.list
+  const unmount = opened.unmount
     try {
       renderer.setRetainVerify(true)
       let scrolled = 300

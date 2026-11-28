@@ -1362,14 +1362,25 @@ had no translate). A translate now edits the tree the frame shown sent (`window/
   scratch frame hung off the scratch builder's root, and hangs off the tree's node now): the first node after the block that lists the
   first of the rows' top children.
 - **What is not a translate:** the tree is checked before anything is written (`plan_scroll`, `applyDeclines.A11y`), after the rows that come
-  in were built and forgotten: a row that leaves or comes in holds the focus or the active descendant, claims an author id or names a
-  relation (these resolve against the whole tree), the rows' nodes are not where the tree has them in the order of the list, they hang off more
-  than one node, or the node they hang off is not found.
+  in were built and forgotten. Each of these is a unit test in `window/a11y/scroll.rs` that fails without its check:
+  - a row that leaves or comes in holds the focus or the active descendant (what it recorded, or the tree's focus on one of its nodes);
+  - a row that comes in names a relation (`aria-labelledby` and the others resolve against the whole tree, which the scratch builder
+    does not have);
+  - a row that leaves or comes in claims an author id that a relation of the frame names (`A11yNodeBuilder::relation_targets`: the
+    author ids the last finalize found in a relation, found or not, so a row that comes in under an id nothing had resolves what it
+    would not have). Ghia gives every DOM `id` an author id, and labels one for the controls they name, so an id that nothing points at
+    is no reason, and a list whose rows have `id`s translates;
+  - the tree has an active descendant, or gpui's focus is in the node the rows hang off or above it (`A11y::is_inside`, a walk down from
+    the focused node over the retained nodes, which follow their children): a row that comes in could claim the active descendant, and the
+    scratch tree builder has no focus stack to decide it;
+  - a row has no recording of its nodes (`RetainedState::a11y_parts`), the rows' nodes are not where the tree has them in the order of the
+    list, they hang off more than one node, the node they hang off is not found, or it lists the rows in another order.
 - **The platform** is told of what changed in an update of its own, with no `tree` (the nodes that moved, the nodes that came in and the node
   that lists the children); what the root no longer reaches is dropped by the adapter. `getShownA11yTree` (test renderer) reads the retained tree
   without the flush that `getA11yTree` makes and that draws a frame built whole over it.
 - **The verifier** compares the tree the translate left (`A11y::describe_shown`: the nodes in order and the focus) with the frame built whole
-  after it, with the maps (`describe_whole`) it already compared.
+  after it, with the maps (`describe_whole`) it already compared. The debug dump (`last_node_info` of debug builds, the frame's tab stop
+  count, node count and number) follows the edit.
 
 **The thumb** (`Window::paint_scroll_thumb`, zed `window/scroll_patch.rs`; Ghia `scrollbar.rs`). A list's overlay scrollbar paints its thumb
 over the rows, and a scroll moves it. The bar paints the thumb through `paint_scroll_thumb(list, quad, plan, moved)`, which paints the quad and

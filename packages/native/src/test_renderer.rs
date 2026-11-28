@@ -3368,11 +3368,8 @@ impl TestGpuixRenderer {
     /// over it.
     #[napi(js_name = "getShownA11yTree")]
     pub fn get_shown_a11y_tree(&self) -> Result<String> {
-        self.window_call(|window, _cx| {
-            window
-                .debug_a11y_tree_json()
-                .unwrap_or_else(|| "{}".to_string())
-        })
+        self.window_call(|window, _cx| window.debug_a11y_tree_json())?
+            .ok_or_else(|| Error::from_reason("no frame has sent an accessibility tree: a screen reader is not connected"))
     }
 
     /// Tree JSON with last-paint bounds. Used by the automation locators.

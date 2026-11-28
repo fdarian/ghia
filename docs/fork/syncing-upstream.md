@@ -368,8 +368,9 @@ each entry or applies it again.
   frame shown sent instead of holding. What it changes: `A11yRecording` and the retained `TreeUpdate` of the debug dump are what a
   translate reads, the scratch frame of the rows that come in has a tree builder and maps of its own (`begin_rows_scratch`), a
   translate sends the platform a partial update (`PlatformWindow::a11y_tree_update`, no `tree`), and `ScrollApplyDecline::A11y` is
-  the decline. It is carried beside upstream's `a11y.rs`: the `parent`-less recording, the `tree_sent` field set in `draw_roots`, the
-  `mod scroll`, and the test platform's `record_a11y_updates`. Run the `a11y` filters and `membership_patch_tests`.
+  the decline. It is carried beside upstream's `a11y.rs`: the `tree_sent` field set in `draw_roots`, `relation_targets` in the node builder
+  (set where `resolve_relations` takes the pending relations), `moved_bounds` split out of `moved_node`, the `mod scroll`, the
+  accessors of `A11yDebug`, and the test platform's `record_a11y_updates`. Run the `a11y` filters and `membership_patch_tests`.
 
 ### The marks of a text kept across widths (zed `2b2da134c4`, `gpui/src/text_system/line_layout.rs`, `line_layout/snap.rs`, `shape_store.rs`)
 
