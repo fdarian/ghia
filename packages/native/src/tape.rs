@@ -1175,9 +1175,26 @@ pub(crate) struct TapeStore {
     /// ordinal: a root that replayed has to have put back every one it wrote when it was built.
     replayed_lifted: RefCell<Vec<(u64, u32, String)>>,
     rows: RefCell<Rows>,
+    /// The roots a commit took out of the tree or put in it that a frame which moves the content of a scroller took out of the frame
+    /// or built, which have not been settled in the registries yet ([`TapeStore::settle_rows`]).
+    membership: RefCell<Membership>,
     /// The path each root a frame visited has in the document, as the frame has it ([`TapeStore::visited`]), for the hook of a root
     /// to put its text under the path the root has now, whatever the frame that made the hook had.
     docs: RefCell<FxHashMap<u64, DocPath>>,
+}
+
+/// What a frame that moves the content of a scroller did to the roots of its children, for the registries to follow.
+#[derive(Default)]
+pub(crate) struct Membership {
+    /// The roots that left: what they wrote is taken out.
+    pub removed: Vec<u64>,
+    /// The roots that stay beside the ones that came or left, with the index each has among its siblings now: what they wrote is put
+    /// under the path that index gives.
+    pub renumbered: Vec<(u64, u32)>,
+    /// The roots that came in, wrote what they wrote at the end of the registries.
+    pub entered: Vec<u64>,
+    /// The roots of each parent that got a child, in the order of the tree: what they wrote goes in that order.
+    pub order: Vec<Vec<u64>>,
 }
 
 /// Which rows of virtual lists the frame shown has, and what a frame that moved them in place did to
@@ -1432,6 +1449,28 @@ impl TapeStore {
         rebuilt
     }
 
+    /// What a frame that moves the content of a scroller would do to the roots of its children: take the ones that left out of the
+    /// frame and build the ones that came in. It is only a plan until gpui says the frame was drawn that way
+    /// ([`Self::settle_adopted`]), which then takes what the first wrote out of the registries, puts what the others wrote where it
+    /// belongs, and puts what the roots that stay wrote under the path they have now. Any other settling forgets it: a translate that
+    /// was declined is a frame built whole, which has the roots as they were.
+    pub(crate) fn note_membership(&self, membership: Membership) {
+        *self.membership.borrow_mut() = membership;
+    }
+
+    /// Whether a frame can take `roots` out of the frame and leave `survivors` as they are: each has the tape of a build, so that
+    /// what it wrote is found, and the removed ones are not inside a paragraph, whose runs a removal does not renumber.
+    pub(crate) fn can_remove(&self, roots: &[u64], survivors: &[u64]) -> bool {
+        let tapes = self.tapes.borrow();
+        survivors.iter().all(|root| tapes.contains_key(root))
+            && roots.iter().all(|root| tapes.get(root).is_some_and(|tape| self.current_doc(*root, &tape.borrow()).is_plain()))
+    }
+
+    /// The path `root` has in the document the frame shown has: the one the last frame visited it at, or the one its build had.
+    fn current_doc(&self, root: u64, tape: &Tape) -> DocPath {
+        self.docs.borrow().get(&root).cloned().unwrap_or_else(|| tape.doc.clone())
+    }
+
     /// A list scrolled and the frame about to be drawn may move its rows: what was built since the
     /// frame shown was settled is part of it.
     pub(crate) fn fold_rows(&self, window: WindowId) {
@@ -1445,10 +1484,26 @@ impl TapeStore {
     /// the frame wrote, and forgets their tapes: the frame built whole has none of it, and a row that
     /// comes in again is built, so its tape is its own. Does nothing until such a frame has moved
     /// rows (kept one in place, or built one again where it is), and once for each.
+    ///
+    /// Forgets what a frame that moves the content of a scroller was going to do ([`Self::note_membership`]) too: nothing drew it.
     pub(crate) fn settle_rows(&self, window: WindowId) {
+        self.settle(window, false);
+    }
+
+    /// [`Self::settle_rows`] for a frame that was drawn as [`Self::note_membership`] says: the roots it took out of a scroller's
+    /// content and the ones it built are settled too. Says whether there were some.
+    pub(crate) fn settle_adopted(&self, window: WindowId) -> bool {
+        self.settle(window, true)
+    }
+
+    fn settle(&self, window: WindowId, adopted: bool) -> bool {
+        let planned = std::mem::take(&mut *self.membership.borrow_mut());
+        let membership = if adopted { planned } else { Membership::default() };
+        let changed = !(membership.removed.is_empty() && membership.entered.is_empty());
+        self.settle_membership(window, &membership);
         let mut rows = self.rows.borrow_mut();
         if rows.kept.is_empty() && rows.rebuilt.is_empty() {
-            return;
+            return changed;
         }
         let kept = std::mem::take(&mut rows.kept);
         rows.rebuilt.clear();
@@ -1502,6 +1557,60 @@ impl TapeStore {
                 .collect();
             crate::text::order_by_rows(window, &rows);
         }
+        changed
+    }
+
+    /// What the roots that left wrote is taken out of the registries and their tapes go, as the rows of a list that left have: the
+    /// frame built whole has none of it. What the roots that stay wrote is put under the path they have now, and what the roots that
+    /// came in wrote, at the end, where the tree has it.
+    fn settle_membership(&self, window: WindowId, membership: &Membership) {
+        let mut held = Roots(Vec::new());
+        let mut boxes = Vec::new();
+        for root in &membership.removed {
+            self.laid_out.borrow_mut().remove(root);
+            self.moved.borrow_mut().remove(root);
+            let Some(tape) = self.tapes.borrow_mut().remove(root) else {
+                continue;
+            };
+            let tape = tape.borrow();
+            self.docs.borrow_mut().remove(root);
+            held.extend(tape.roots());
+            tape.each(Kind::Bounds, &mut |data, _| boxes.push(crate::automation::id_of_bounds_write(data)));
+        }
+        if !membership.removed.is_empty() {
+            crate::text::replace(window, &held, &[]);
+            crate::automation::forget_boxes(window, &boxes);
+        }
+        // What was beside them in the document is under another index, which the text a root wrote says: it is put under the path
+        // the root has now, as a replay of it is.
+        for (survivor, index) in &membership.renumbered {
+            let Some(tape) = self.tapes.borrow().get(survivor).cloned() else {
+                continue;
+            };
+            let mut tape = tape.borrow_mut();
+            let before = self.current_doc(*survivor, &tape);
+            let Some((parent, was)) = before.parent_and_index() else {
+                continue;
+            };
+            let Some(after) = (was != *index).then(|| before.moved_sibling(&parent.to_vec(), was, *index)).flatten() else {
+                continue;
+            };
+            tape.doc = after.clone();
+            self.docs.borrow_mut().insert(*survivor, after);
+            crate::text::replace(window, &tape.roots(), &tape.lives(self.moved(*survivor)));
+        }
+        if !membership.entered.is_empty() {
+            let tapes = self.tapes.borrow();
+            for order in &membership.order {
+                let rows: Vec<Roots> = order.iter().filter_map(|root| tapes.get(root).map(|tape| tape.borrow().roots())).collect();
+                crate::text::order_by_rows(window, &rows);
+            }
+        }
+        let mut rows = self.rows.borrow_mut();
+        for root in &membership.removed {
+            rows.shown.remove(root);
+        }
+        rows.left.extend(&membership.removed);
     }
 
     /// The rows that left since this was last asked, for the records the page keeps of them to go.
@@ -2798,6 +2907,34 @@ mod tests {
         tapes.settle_rows(window);
         assert_eq!(tapes.take_left(), [3]);
         assert_eq!([3, 4, 5, 50].map(|row| x_of(window, row)), [None, Some(4.0), Some(5.0), Some(50.0)]);
+    }
+
+    #[test]
+    fn what_a_frame_that_moves_a_scrollers_content_was_going_to_do_is_settled_only_once_it_is_drawn() {
+        let window = WindowId::from(931);
+        crate::automation::forget_window(window);
+        let tapes = TapeStore::default();
+        tapes.begin_rows();
+        for row in [1, 2] {
+            built_row(&tapes, window, 100, row);
+        }
+        tapes.fold_rows(window);
+        let plan = || Membership { removed: vec![1], ..Membership::default() };
+
+        // The translate was declined: the next frames, built whole or classified, have the root as it was.
+        tapes.note_membership(plan());
+        tapes.fold_rows(window);
+        assert_eq!(crate::text::painted_text(window).len(), 2);
+        tapes.note_membership(plan());
+        tapes.settle_rows(window);
+        assert_eq!(crate::text::painted_text(window).len(), 2);
+        assert!(tapes.take_left().is_empty());
+
+        tapes.note_membership(plan());
+        assert!(tapes.settle_adopted(window));
+        assert_eq!(crate::text::painted_text(window).len(), 1);
+        assert_eq!(tapes.take_left(), [1]);
+        assert!(!tapes.settle_adopted(window), "it is settled once");
     }
 
     #[test]

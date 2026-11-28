@@ -7384,7 +7384,7 @@ pub(crate) fn emit_css_events(
     }
 }
 
-fn emit_highlight_events(callback: &Option<EventCallback>, events: &[(u64, usize)]) {
+pub(crate) fn emit_highlight_events(callback: &Option<EventCallback>, events: &[(u64, usize)]) {
     for &(id, total) in events {
         emit_event_full(callback, id, "highlight", |payload| {
             payload.match_count = Some(total as f64);
@@ -7751,7 +7751,7 @@ impl GpuixView {
     /// The instant the pass being built samples time at: a draw reads the clock, anything else
     /// (a layout a read forced, the reference of a verified frame) the instant of the draw
     /// before it. See `frame_instant`.
-    fn pass_instant(&mut self, window: &gpui::Window) -> web_time::Instant {
+    pub(crate) fn pass_instant(&mut self, window: &gpui::Window) -> web_time::Instant {
         if window.is_retention_reference() {
             return self
                 .frame_instant
@@ -9900,7 +9900,7 @@ impl PendingFocus {
 
 impl GpuixView {
     /// The context a build of elements starts in, with `start` handed down to the first of them.
-    fn build_ctx<'a>(
+    pub(crate) fn build_ctx<'a>(
         &'a mut self,
         tree: &'a RetainedTree,
         callback: &'a Option<EventCallback>,
@@ -10920,7 +10920,7 @@ impl gpui::Render for GpuixView {
             let tapes = self.tapes.clone();
             Rc::new(move |_: &gpui::Window| {
                 // The frame built whole after the translate is about to forget which rows the translate moved.
-                tapes.settle_rows(window_id);
+                tapes.settle_adopted(window_id);
                 crate::automation::describe_registries(window_id)
             }) as Rc<dyn Fn(&gpui::Window) -> String>
         }));
@@ -11522,6 +11522,22 @@ pub(crate) struct BuildStart {
 }
 
 impl BuildStart {
+    /// The start of a build of a child that comes in as the child of the element `start` was noted for, at `index` among its siblings,
+    /// in the frame being drawn now.
+    pub(crate) fn for_entering(
+        mut self,
+        index: u32,
+        now: web_time::Instant,
+        focus_styles: crate::focus::FocusStyles,
+        viewport: gpui::Size<gpui::Pixels>,
+    ) -> Self {
+        self.now = now;
+        *self.doc_path.last_mut().expect("a child of a scroller's content has a place among its siblings") = index;
+        self.focus_styles = focus_styles;
+        self.inherited.lengths = self.inherited.lengths.with_viewport(f64::from(f32::from(viewport.width)), f64::from(f32::from(viewport.height)));
+        self
+    }
+
     /// Where the element this starts the build of sits in the document.
     fn doc_path(&self) -> crate::text::selection::DocPath {
         crate::text::selection::DocPath::new(self.doc_hosts.clone(), self.doc_path.as_slice().into())
@@ -13418,6 +13434,7 @@ pub(crate) fn build_host_container(
         &mut ctx.inside_marker,
         list_marker.as_ref().and_then(|marker| marker.inside.clone().map(|room| (element.id, room))),
     );
+    forget_scroll_content_state(element, ctx);
     #[cfg_attr(target_family = "wasm", allow(unused_mut))]
     let (mut content, mut placements, containing_heights) = if skipped {
         // The trim passed down is meant for what is built below.
@@ -13683,6 +13700,19 @@ impl Placement {
     }
 }
 
+/// A parent that is no longer inside a `div` scroller, or no longer has an absolute child placed by it, is found out by a build that
+/// does not note it again: this runs for every build of the element, whatever it builds of its children (content skipped by
+/// `content-visibility` included).
+///
+/// The builds that return before it are those of an element that is `display: none` or hidden by an animation, which builds no
+/// children and has no box in the frame: its entries stay until its next build, and that is harmless. A child that comes in under it is
+/// built by a scroll only beside a neighbor that is a root of the frame shown (`retain::entering`), and the frame shown has none under
+/// an element that is not there.
+fn forget_scroll_content_state(element: &crate::retained_tree::RetainedElement, ctx: &mut BuildCtx) {
+    ctx.retain.forget_entry_start(element.id);
+    ctx.tree.forget_scroll_content_parent(element.id);
+}
+
 /// What a host element holds, in paint order, with the placement of each, and the cells its
 /// atomic inlines read the content height of the element from.
 fn build_content(
@@ -13855,6 +13885,13 @@ fn build_plan(
                         Some("absolute" | "fixed")
                     )
                 });
+                if out_of_flow && ctx.placed_by_parent && ctx.scroller.is_some_and(|scroller| scroller.div) && ctx.retain.wants_entry_start(element.id) {
+                    // What a frame that moves the content of the scroller builds a child that comes in from.
+                    let shape = ctx.retain.current_shape();
+                    let start = BuildStart::of(ctx);
+                    ctx.retain.note_entry_start(element.id, start, shape);
+                    ctx.tree.note_scroll_content_parent(element.id);
+                }
                 // A block of a box is a line of its own.
                 let outer_line = ctx.inline_line.take();
                 let built = if out_of_flow {
@@ -13975,6 +14012,7 @@ fn build_contents_container(
         el = el.font_variations(variations);
     }
     let planned = (!crate::layout::generated::childless(ctx.tree, element)).then(|| crate::text::plan_cache::planned(ctx.tree, element));
+    forget_scroll_content_state(element, ctx);
     let (content, placements, containing_heights) =
         build_content(element, planned.as_ref().map_or(&[], |planned| &planned.children), ctx, window, cx);
     el = crate::text::atomic::report_containing_height(el, containing_heights);

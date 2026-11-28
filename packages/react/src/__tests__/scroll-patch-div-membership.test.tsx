@@ -1,0 +1,960 @@
+// @ts-nocheck
+/**
+ * A wheel step over a `div` scroller whose commit only takes rows out of it is drawn as a translate that takes them out of the frame
+ * (`scrollPatch.rowsRemoved`), as the rows of a `<virtual-list>` that leave are: TanStack Virtual's scroll handler renders the rows the
+ * new offset needs, and the ones that went out of its window are removed. The rows that leave are out of the picture, of the boxes (a
+ * removed node reports no box), of what is under a point and of the clicks, and all of it is what the same steps give with the translate
+ * off (`setScrollPatchEnabled(false)`).
+ *
+ * What the commit must not do besides taking the rows out is move or restyle what stays, so the rows that leave are the ones that take
+ * no room: absolute boxes (placed by `top` or by a `transform`). Rows in the flow, or a commit that also changes another element, are
+ * frames built whole, which the last cases pin.
+ */
+
+import fs from "fs"
+import React from "react"
+import { describe, expect, it } from "vitest"
+import { ResizeObserver } from "../index"
+import { createTestRoot, hasNativeTestRenderer } from "../testing"
+import { SHOTS_DIR } from "./test-utils.js"
+
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
+const verifying = process.env.GPUIX_RETAIN_VERIFY !== undefined
+// Under the retention verifier a frame that replays rows is built a second time, whole, and that build is the frame shown: its rows
+// are built, not replayed, so there is nothing to translate after it. The cases that count translates skip there, and the ones that
+// follow compare with the verifier on.
+const unverified = it.skipIf(verifying)
+
+const ROW = 40
+const VIEWPORT = 100
+const COUNT = 60
+const ROW_WIDTH = 150
+const TIMEOUT = 120_000
+const VSYNC = 16
+
+type Layout = "absolute" | "transform" | "flow"
+
+type Log = {
+  clicks: number[]
+  nodes: Record<number, unknown>
+  /** What each row reported of its box when it was attached, as a virtualizer measuring it would read it. */
+  measured: number[][]
+  /** What a ResizeObserver over the rows delivered. */
+  observed: number[][]
+  observer?: ResizeObserver
+}
+
+type Options = {
+  removed?: number[]
+  tint?: boolean
+  hover?: boolean
+  present?: number[]
+  autoFocusRow?: number
+  tallerRow?: number
+  flowRow?: number
+  spacerHeight?: number
+  /** Rows are measured when they are attached and observed. */
+  measure?: boolean
+  /** Rows are only observed when they are attached: nothing reads their box. */
+  observe?: boolean
+  /** A stylesheet that styles the rows by class, which they all have. */
+  sheet?: string
+  rtl?: boolean
+  /** The rows are in the tree in the opposite order, which is a keyed reorder of what is there. */
+  reverse?: boolean
+  /** The row at the end of the first four takes this z-index, which the row that comes in after it does not have. */
+  selectedZ?: number
+  /** One row is placed at the top by a translation of this many px past it (it stays inside the box that holds the rows when it is small). */
+  transformRow?: number
+  transformBy?: number
+  /** The rows before this one are in the flow, the others are absolute. */
+  absoluteFrom?: number
+  /** `content-visibility: hidden` on the box that holds the rows: its build skips them. */
+  skipHolder?: boolean
+  /** The rows are the children of the scroller itself, which is the box that places them (`position: relative`). */
+  inScroller?: boolean
+  /** The height of a row in px, and so how far each is from the top of the box that holds them (`ROW` when unset). */
+  rowHeight?: number
+  /** `top` is a percentage of the height of the box that holds the rows, which is `rowHeight` times the number of rows. */
+  percentTop?: boolean
+  /** The device pixels per px of the window. */
+  scale?: number
+  /** The index of the first row the page can render: the rows `firstRow` to `firstRow + COUNT`, below a spacer as tall as the rows before them. */
+  firstRow?: number
+  /** The scroller is scrolled to this many px before the steps. */
+  scrollTo?: number
+  /** A line of text above the box that holds the rows, whose height (line-height normal) is a fraction, so the box is on no whole px. */
+  header?: boolean
+}
+
+function measureRow(log: Log, index: number, instance, read: boolean) {
+  if (read) {
+    const box = instance.getBoundingClientRect()
+    log.measured.push([index, box.x, box.y, box.width, box.height])
+  }
+  log.observer ??= new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const index = Object.keys(log.nodes).find((key) => log.nodes[key] === entry.target)
+      log.observed.push([Number(index), entry.borderBoxSize[0].inlineSize, entry.borderBoxSize[0].blockSize])
+    }
+  })
+  log.observer.observe(instance)
+}
+
+function Page(props: { log: Log; layout: Layout } & Options) {
+  const layout = props.layout
+  const removed = props.removed ?? []
+  const firstRow = props.firstRow ?? 0
+  const rowCount = firstRow + COUNT
+  const rows = Array.from({ length: COUNT }, (_, index) => firstRow + index)
+    .filter((index) => !removed.includes(index))
+    .filter((index) => props.present === undefined || props.present.includes(index))
+    .map((index) => (
+      <div
+        key={index}
+        testId={`row-${index}`}
+        className="row"
+        ref={(instance) => {
+          if (instance === null) return
+          const attached = props.log.nodes[index] !== instance
+          props.log.nodes[index] = instance
+          if ((props.measure || props.observe) && attached) measureRow(props.log, index, instance, props.measure === true)
+        }}
+        onClick={() => props.log.clicks.push(index)}
+        style={{
+          position: layout === "flow" || index === props.flowRow || index < (props.absoluteFrom ?? 0) ? undefined : "absolute",
+          top:
+            layout === "absolute"
+              ? props.percentTop
+                ? `${((index * (props.rowHeight ?? ROW)) / (rowCount * (props.rowHeight ?? ROW))) * 100}%`
+                : index * (props.rowHeight ?? ROW)
+              : layout === "transform"
+                ? 0
+                : undefined,
+          ...(layout === "transform" ? { transform: `translateY(${index * (props.rowHeight ?? ROW)}px)` } : {}),
+          ...(index === 3 && props.selectedZ !== undefined ? { zIndex: props.selectedZ } : {}),
+          ...(index === props.transformRow ? { top: 0, transform: `translateY(${props.transformBy}px)` } : {}),
+          width: ROW_WIDTH,
+          height: index === props.tallerRow ? undefined : (props.rowHeight ?? ROW),
+          flexShrink: 0,
+          backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
+          ...(props.hover ? { hover: { backgroundColor: "#664422" } } : {}),
+        }}
+      >
+        <div style={{ color: "#ffffff" }}>{`row-${index}`}</div>
+        {index === props.autoFocusRow ? <input autoFocus /> : null}
+      </div>
+    ))
+  if (props.reverse) rows.reverse()
+  return (
+    <div
+      testId="scroller"
+      style={{
+        width: 200,
+        height: VIEWPORT,
+        overflowY: "auto",
+        scrollbarWidth: "none",
+        ...(props.tint ? { backgroundColor: "#101820" } : {}),
+        ...(props.rtl ? { direction: "rtl" } : {}),
+        ...(props.inScroller ? { position: "relative" } : {}),
+      }}
+    >
+      {props.sheet === undefined ? null : <style>{props.sheet}</style>}
+      {props.header ? <div testId="header">Rows below</div> : null}
+      {layout !== "flow" && !props.inScroller ? (
+        <div
+          testId="inner"
+          style={{ position: "relative", width: "100%", height: props.spacerHeight ?? rowCount * (props.rowHeight ?? ROW), ...(props.skipHolder ? { contentVisibility: "hidden" } : {}) }}
+        >
+          {rows}
+        </div>
+      ) : (
+        rows
+      )}
+    </div>
+  )
+}
+
+function open(translate: boolean, layout: Layout, options: Options = {}) {
+  const log: Log = { clicks: [], nodes: {}, measured: [], observed: [] }
+  const root = createTestRoot({ width: 300, height: 200, scaleFactor: options.scale })
+  const renderer = root.renderer
+  renderer.clockPause()
+  root.render(<Page log={log} layout={layout} {...options} />)
+  for (let frame = 0; frame < 3; frame++) {
+    renderer.flush()
+    renderer.dispatchNativeEvents()
+  }
+  renderer.setA11yActive(false)
+  renderer.setInlineDraws(false)
+  renderer.drawFrame()
+  renderer.drawFrame()
+  // A wheel and its way back record the rows and put them elsewhere.
+  renderer.setScrollPatchEnabled(translate)
+  return { ...root, renderer, log }
+}
+
+let shots = 0
+/** The frame that was drawn last as it is: `captureScreenshot` refreshes the window and would capture a frame built whole. */
+function picture(renderer): string {
+  const file = `${SHOTS_DIR}/scroll-patch-div-membership-${process.pid}-${shots++}.png`
+  fs.rmSync(file, { force: true })
+  renderer.captureShownFrame(file)
+  const bytes = fs.readFileSync(file)
+  fs.rmSync(file, { force: true })
+  return bytes.toString("base64")
+}
+
+function boxes(renderer) {
+  const out: Record<string, unknown> = {}
+  for (const element of renderer.findByType("div")) {
+    const box = renderer.getElementBounds(element.id)
+    if (box) out[String(element.id)] = box
+  }
+  return out
+}
+
+const scroll = (renderer) => renderer.getPatchCounters().scrollPatch
+
+/** The frames of the run were held for `reason` as many times as `count`, and for no other: what the counters say of why a step was no translate. */
+function heldFor(run: { counters; before }, reason: string, count: number) {
+  for (const [key, held] of Object.entries<number>(run.counters.held)) {
+    expect(held - (run.before.held[key] ?? 0), `held for ${key}`).toBe(key === reason ? count : 0)
+  }
+}
+
+const points: Array<[number, number]> = [[20, 10], [20, 50], [20, 90], [180, 60]]
+
+/** What a test observes of the page after a step: the boxes, the offset, what is under the points, the picture, and what a node that left reports. */
+function seen(opened, left: number[]) {
+  const renderer = opened.renderer
+  const scroller = renderer.findByTestId("scroller")
+  return {
+    boxes: boxes(renderer),
+    scrollOffset: renderer.getScrollOffset(scroller.id),
+    under: points.map(([x, y]) => renderer.getElementsAt(x, y)),
+    cursor: renderer.getCursor(),
+    picture: picture(renderer),
+    gone: left.map((index) => {
+      const box = opened.log.nodes[index].getBoundingClientRect()
+      return { x: box.x, y: box.y, width: box.width, height: box.height }
+    }),
+  }
+}
+
+type Step = { by: number; remove?: number[] }
+
+/**
+ * Each step is a wheel, and the commit that the scroll handler of a virtualizer makes with it: `remove` are the rows that stop being
+ * rendered, which come out of the tree before the frame of the step is drawn.
+ */
+function run(translate: boolean, layout: Layout, steps: Step[], options: Options = {}) {
+  const opened = open(translate, layout, options)
+  const renderer = opened.renderer
+  try {
+    renderer.nativeSimulateMouseMove(180, 60)
+    renderer.dispatchNativeEvents()
+    renderer.drawFrame()
+    const wheel = (by: number) => {
+      renderer.clockAdvance(VSYNC)
+      renderer.advanceTime(VSYNC)
+      renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+      renderer.dispatchNativeEvents()
+    }
+    wheel(4)
+    renderer.drawFrame()
+    wheel(-4)
+    renderer.drawFrame()
+    const before = scroll(renderer)
+    const removed: number[] = []
+    const frames: unknown[] = []
+    const translated: boolean[] = []
+    for (const step of steps) {
+      const patched = scroll(renderer).patched
+      wheel(step.by)
+      if (step.remove) {
+        removed.push(...step.remove)
+        opened.render(<Page log={opened.log} layout={layout} removed={removed} {...options} />)
+      }
+      renderer.drawFrame()
+      translated.push(scroll(renderer).patched > patched)
+      frames.push(seen(opened, removed))
+    }
+    // The click on a row that is still there, and on the place of one that left.
+    const clicks: number[] = []
+    for (const point of [{ x: 20, y: 50 }, { x: 20, y: 90 }]) {
+      const before = opened.log.clicks.length
+      renderer.nativeSimulateClick(point.x, point.y)
+      clicks.push(...opened.log.clicks.slice(before))
+    }
+    return { frames, translated, counters: scroll(renderer), before, clicks, mismatches: renderer.getRetentionMismatches(), removed }
+  } finally {
+    opened.unmount()
+  }
+}
+
+/** The rows that leave are in the clip (rows 1 and 2 at the offset the steps reach) and in the overscan under it. */
+const steps: Step[] = [
+  { by: 3 },
+  { by: 5, remove: [9] },
+  { by: 8 },
+  { by: -4, remove: [1] },
+  { by: 6, remove: [2, 4] },
+  { by: 2 },
+  { by: 7, remove: [12] },
+]
+
+describeNative("a wheel step over a div scroller whose commit only takes rows out of it", { timeout: TIMEOUT }, () => {
+  for (const layout of ["absolute", "transform"] as const) {
+    unverified(`is a translate with the rows taken out, over ${layout} rows`, () => {
+      const on = run(true, layout, steps)
+      const off = run(false, layout, steps)
+      expect(off.counters.frames).toBe(0)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.translated, "every step is a translate: the ones with a commit take the rows out").toEqual(steps.map(() => true))
+      expect(on.counters.membershipFrames - on.before.membershipFrames).toBe(4)
+      expect(on.counters.rowsRemoved - on.before.rowsRemoved).toBe(5)
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt, "nothing came in").toBe(0)
+      expect(on.counters.held.Edited ?? 0, "a commit that took rows out is no edit").toBe(0)
+      // The picture, the boxes, what is under the points, the cursor, the offset and what a node that left reports.
+      expect(on.frames).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.frames.at(-1).gone.length).toBe(5)
+      expect(on.frames.at(-1).gone.every((box) => box.width === 0 && box.height === 0), "a node that left has no box").toBe(true)
+    })
+  }
+
+  unverified("takes a row out from under the pointer", () => {
+    const hover = (translate: boolean) => {
+      const opened = open(translate, "absolute", { hover: true })
+      const renderer = opened.renderer
+      try {
+        renderer.nativeSimulateMouseMove(20, 50)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        renderer.drawFrame()
+        for (const by of [4, -4]) {
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(20, 50, 0, by)
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+        }
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateScrollWheel(20, 50, 0, 3)
+        renderer.dispatchNativeEvents()
+        opened.render(<Page log={opened.log} layout="absolute" removed={[1]} hover />)
+        renderer.drawFrame()
+        const during = { under: renderer.getElementsAt(20, 50), picture: picture(renderer) }
+        renderer.advanceTime(500)
+        renderer.dispatchNativeEvents()
+        for (let frame = 0; frame < 3; frame++) renderer.drawFrame()
+        return { patched: scroll(renderer).patched, during, ended: { under: renderer.getElementsAt(20, 50), picture: picture(renderer) } }
+      } finally {
+        opened.unmount()
+      }
+    }
+    const on = hover(true)
+    const off = hover(false)
+    expect(on.patched).toBeGreaterThan(0)
+    expect(on.during).toEqual(off.during)
+    expect(on.ended).toEqual(off.ended)
+  })
+
+  it("draws the same under the verifier, and the verifier finds no difference", () => {
+    for (const layout of ["absolute", "transform"] as const) {
+      const on = run(true, layout, steps)
+      const off = run(false, layout, steps)
+      expect(on.frames).toEqual(off.frames)
+      expect(on.mismatches.join("\n")).toBe("")
+      expect(on.counters.rowsRemoved, "the verifier compared a translate that took rows out").toBeGreaterThan(0)
+    }
+  })
+
+  unverified("is a frame built whole over rows in the flow, which a row that leaves moves the rest of", () => {
+    const flow: Step[] = [{ by: 3 }, { by: 5, remove: [1] }, { by: 8 }]
+    const on = run(true, "flow", flow)
+    const off = run(false, "flow", flow)
+    expect(on.translated.slice(0, 2), "the step with the commit is a frame built whole").toEqual([true, false])
+    expect(on.counters.rowsRemoved - on.before.rowsRemoved).toBe(0)
+    expect(on.counters.reasons.Edited).toBeGreaterThan(0)
+    expect(on.frames).toEqual(off.frames)
+  })
+
+  unverified("is a frame built whole when the commit changes another element as well", () => {
+    const opened = open(true, "absolute")
+    const renderer = opened.renderer
+    try {
+      renderer.nativeSimulateMouseMove(180, 60)
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      for (const by of [4, -4]) {
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+      }
+      const before = scroll(renderer)
+      renderer.clockAdvance(VSYNC)
+      renderer.nativeSimulateScrollWheel(180, 60, 0, 5)
+      renderer.dispatchNativeEvents()
+      // The scroller gets a background in the commit that takes the row out.
+      opened.render(<Page log={opened.log} layout="absolute" removed={[9]} tint />)
+      renderer.drawFrame()
+      const after = scroll(renderer)
+      expect(after.patched - before.patched).toBe(0)
+      expect(after.reasons.Edited - before.reasons.Edited).toBe(1)
+      expect(after.rowsRemoved - before.rowsRemoved).toBe(0)
+    } finally {
+      opened.unmount()
+    }
+  })
+})
+
+type RowStep = { by: number; rows?: number[]; /** What the page says besides, for this commit only: a frame built whole when it changes another element. */ page?: Options }
+
+/** What a test observes of the rows a step left in the tree: the box each reports, and what is under the points. */
+function seenRows(opened, present: number[]) {
+  const renderer = opened.renderer
+  const scroller = renderer.findByTestId("scroller")
+  return {
+    boxes: boxes(renderer),
+    scrollOffset: renderer.getScrollOffset(scroller.id),
+    under: points.map(([x, y]) => renderer.getElementsAt(x, y)),
+    picture: picture(renderer),
+    rects: present.map((index) => {
+      const box = opened.log.nodes[index].getBoundingClientRect()
+      return { index, x: box.x, y: box.y, width: box.width, height: box.height }
+    }),
+  }
+}
+
+/**
+ * Each step is a wheel and the commit a virtualizer makes with it: `rows` are the rows that are rendered from then on, so that the
+ * ones that were not are created and the ones that are not any more are removed, before the frame of the step is drawn.
+ */
+function runRows(translate: boolean, layout: Layout, first: number[], steps: RowStep[], options: Options = {}) {
+  const opened = open(translate, layout, { ...options, present: first })
+  const renderer = opened.renderer
+  try {
+    if (options.scrollTo !== undefined) {
+      renderer.scrollTo(renderer.findByTestId("scroller").id, 0, options.scrollTo)
+      renderer.drawFrame()
+      renderer.drawFrame()
+    }
+    renderer.nativeSimulateMouseMove(180, 60)
+    renderer.dispatchNativeEvents()
+    renderer.drawFrame()
+    const wheel = (by: number) => {
+      renderer.clockAdvance(VSYNC)
+      renderer.advanceTime(VSYNC)
+      renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+      renderer.dispatchNativeEvents()
+    }
+    wheel(4)
+    renderer.drawFrame()
+    wheel(-4)
+    renderer.drawFrame()
+    const before = scroll(renderer)
+    let present = first
+    const frames: unknown[] = []
+    const translated: boolean[] = []
+    for (const step of steps) {
+      const patched = scroll(renderer).patched
+      wheel(step.by)
+      if (step.rows || step.page) {
+        present = step.rows ?? present
+        opened.render(<Page log={opened.log} layout={layout} {...options} {...step.page} present={present} />)
+      }
+      renderer.drawFrame()
+      translated.push(scroll(renderer).patched > patched)
+      frames.push(seenRows(opened, present))
+    }
+    // The click on rows that came in, the text across them, and what is under the pointer.
+    const clicks: number[] = []
+    for (const point of [{ x: 20, y: 20 }, { x: 20, y: 50 }, { x: 20, y: 90 }]) {
+      const count = opened.log.clicks.length
+      renderer.nativeSimulateClick(point.x, point.y)
+      clicks.push(...opened.log.clicks.slice(count))
+    }
+    const selected = renderer.dragSelect(10, 5, 140, 95)
+    renderer.dispatchNativeEvents()
+    renderer.drawFrame()
+    renderer.dispatchNativeEvents()
+    return {
+      frames,
+      translated,
+      counters: scroll(renderer),
+      before,
+      clicks,
+      selected,
+      mismatches: renderer.getRetentionMismatches(),
+      measured: opened.log.measured,
+      observed: opened.log.observed,
+    }
+  } finally {
+    opened.unmount()
+  }
+}
+
+/** Rows come in after the last, before the first, two at once, and while others leave. */
+const FIRST = [0, 1, 2, 3]
+const enterSteps: RowStep[] = [
+  { by: 3, rows: [0, 1, 2, 3, 4] },
+  { by: 5 },
+  { by: 8, rows: [0, 1, 2, 3, 4, 5] },
+  { by: -4, rows: [0, 1, 2, 3, 4, 5, 6] },
+  { by: 6, rows: [1, 2, 3, 4, 5, 6, 7, 8] },
+  { by: 2 },
+  { by: 7, rows: [3, 4, 5, 6, 7, 8, 9] },
+  { by: -30, rows: [0, 1, 2, 3, 4, 5, 6] },
+]
+
+describeNative("a wheel step over a div scroller whose commit puts rows in it", { timeout: TIMEOUT }, () => {
+  for (const layout of ["absolute", "transform"] as const) {
+    unverified(`is a translate that builds the rows, over ${layout} rows`, () => {
+      const on = runRows(true, layout, FIRST, enterSteps)
+      const off = runRows(false, layout, FIRST, enterSteps)
+      expect(off.counters.frames).toBe(0)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.translated, "every step is a translate: the ones with a commit build the rows that came in").toEqual(enterSteps.map(() => true))
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(9)
+      expect(on.counters.held.Edited ?? 0, "a commit that put rows in is no edit").toBe(0)
+      // The picture, the boxes, getBoundingClientRect of the new rows, what is under the points, the offset.
+      expect(on.frames).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.selected, "the text selected across rows that came in").toEqual(off.selected)
+      expect(on.selected).toBeTruthy()
+    })
+  }
+
+  it("draws the same under the verifier, and the verifier finds no difference", () => {
+    for (const layout of ["absolute", "transform"] as const) {
+      const on = runRows(true, layout, FIRST, enterSteps)
+      const off = runRows(false, layout, FIRST, enterSteps)
+      expect(on.frames).toEqual(off.frames)
+      expect(on.mismatches.join("\n")).toBe("")
+      expect(on.counters.rowsBuilt, "the verifier compared a translate that built rows").toBeGreaterThan(0)
+    }
+  })
+
+  unverified("builds rows that a stylesheet styles by position, whole or as the frame built whole has them", () => {
+    const options = { sheet: ".row:nth-child(odd) { opacity: 0.6; border-left: 3px solid #cc3333 }" }
+    const on = runRows(true, "absolute", FIRST, enterSteps, options)
+    const off = runRows(false, "absolute", FIRST, enterSteps, options)
+    // Rows that leave from the front or come in before the others change which of them a position selector matches: the step that
+    // takes the first row out and the one that puts three in front are built whole, and every other is a translate.
+    expect(on.translated).toEqual([true, true, true, true, false, true, true, false])
+    heldFor(on, "Edited", 2)
+    expect(on.frames).toEqual(off.frames)
+    expect(on.clicks).toEqual(off.clicks)
+    expect(on.selected).toEqual(off.selected)
+  })
+
+  unverified("reports to a ref and a ResizeObserver what a row that came in measures, as the frame built whole does", () => {
+    const options = { measure: true }
+    const on = runRows(true, "absolute", FIRST, enterSteps, options)
+    const off = runRows(false, "absolute", FIRST, enterSteps, options)
+    expect(on.measured.length).toBeGreaterThan(FIRST.length)
+    expect(on.measured).toEqual(off.measured)
+    expect(on.observed.length).toBeGreaterThan(0)
+    expect(on.observed).toEqual(off.observed)
+    expect(on.frames).toEqual(off.frames)
+  })
+
+  unverified("reports to a ResizeObserver alone, with no read of the box, what a row that came in measures", () => {
+    const options = { observe: true }
+    const on = runRows(true, "absolute", FIRST, enterSteps, options)
+    const off = runRows(false, "absolute", FIRST, enterSteps, options)
+    expect(on.translated, "the rows came in by translates").toEqual(enterSteps.map(() => true))
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(9)
+    expect(on.observed.length).toBeGreaterThan(FIRST.length)
+    expect(on.observed).toEqual(off.observed)
+    expect(on.frames).toEqual(off.frames)
+  })
+
+  it("is no translate when the rows are the children of the scroller itself, which does not scroll its own box", () => {
+    // The scroller is the box that places the rows, and its box stays where it is while the rows move in it: the origin a row comes in
+    // at would miss the scroll offset. Rows of the first 100px (the scroller's box) are the ones that could be put down by a scroll.
+    const all = Array.from({ length: 10 }, (_, index) => index)
+    const without = (...out: number[]) => all.filter((index) => !out.includes(index))
+    const inScroller = { inScroller: true }
+    const rowSteps: RowStep[] = [
+      { by: 3, rows: without(1) },
+      { by: 2, rows: all },
+      { by: 4 },
+      { by: -2, rows: without(0) },
+      { by: -3, rows: all },
+      { by: 5, rows: without(0, 1) },
+      { by: -9, rows: all },
+    ]
+    const on = runRows(true, "absolute", all, rowSteps, inScroller)
+    const off = runRows(false, "absolute", all, rowSteps, inScroller)
+    expect(on.frames).toEqual(off.frames)
+    expect(on.clicks).toEqual(off.clicks)
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt, "no row is built by a translate").toBe(0)
+    expect(on.mismatches.join("\n")).toBe("")
+  })
+
+  for (const [what, options] of [
+    ["rows of 16.8px", { rowHeight: 16.8 }],
+    ["rows of 16.8px at a scale of 2", { rowHeight: 16.8, scale: 2 }],
+    ["rows of 16.75px, a percentage from the top, at a scale of 2", { rowHeight: 16.75, percentTop: true, scale: 2 }],
+    ["rows of 17.3px, a percentage from the top, at a scale of 4", { rowHeight: 17.3, percentTop: true, scale: 4 }],
+  ] as const) {
+    it(`is a translate whose rows come in where the layout of the page puts them, with ${what}`, () => {
+      const first = [0, 1, 2, 3, 4, 5, 6, 7]
+      const rowsFrom = (from: number) => Array.from({ length: 8 }, (_, index) => from + index)
+      const fractionalSteps: RowStep[] = [
+        { by: 3, rows: rowsFrom(0).concat(8) },
+        { by: 5, rows: rowsFrom(1).concat(9) },
+        { by: 8, rows: rowsFrom(2).concat(10) },
+        { by: -4, rows: rowsFrom(1).concat(10) },
+        { by: 6, rows: rowsFrom(3).concat(11) },
+        { by: 2 },
+        { by: 7, rows: rowsFrom(4).concat(12) },
+        { by: -12, rows: rowsFrom(0) },
+      ]
+      const on = runRows(true, "absolute", first, fractionalSteps, options)
+      const off = runRows(false, "absolute", first, fractionalSteps, options)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
+      expect(on.frames).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.mismatches.join("\n")).toBe("")
+    })
+  }
+
+  // Past 2^16 px the layout of the page sums in a coarser grid than the exact sum of the holder and the `top` of a row (the ulp of
+  // 336000 is 1/32), so a row that came in by a sum of exact lengths would be a rounding off the one the frame built whole has.
+  for (const scale of [1, 2]) {
+    it(`is a translate whose rows come in where the layout of the page puts them, far down a spacer past 2^16 px, at a scale of ${scale}`, () => {
+      const firstRow = 20_000
+      const rowHeight = 16.8
+      const options = { rowHeight, scale, firstRow, scrollTo: (firstRow + 3) * rowHeight }
+      const rowsFrom = (from: number) => Array.from({ length: 8 }, (_, index) => firstRow + from + index)
+      const first = rowsFrom(0)
+      const farSteps: RowStep[] = [
+        { by: 3, rows: rowsFrom(0).concat(firstRow + 8) },
+        { by: 5, rows: rowsFrom(1).concat(firstRow + 9) },
+        { by: 8, rows: rowsFrom(2).concat(firstRow + 10) },
+        { by: -4, rows: rowsFrom(1).concat(firstRow + 10) },
+        { by: 6, rows: rowsFrom(3).concat(firstRow + 11) },
+        { by: 2 },
+        { by: -12, rows: rowsFrom(0) },
+      ]
+      const on = runRows(true, "absolute", first, farSteps, options)
+      const off = runRows(false, "absolute", first, farSteps, options)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
+      // The boxes, getBoundingClientRect of the rows and the picture, bit for bit.
+      expect(on.frames).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.mismatches.join("\n")).toBe("")
+    })
+  }
+
+  // The origin of a row that comes in is read from the layout of the box that holds it and summed as taffy does, whatever is above that
+  // box (a header of a fractional height) and wherever the rows are: 2^17 px is crossed by the rows of the first, and 2^18 by the second.
+  for (const [firstRow, scale] of [[7_800, 1], [7_800, 2], [20_000, 1], [20_000, 2]] as const) {
+    it(`is a translate whose rows come in where the layout of the page puts them, below a header of a fractional height, from row ${firstRow} at a scale of ${scale}`, () => {
+      const rowHeight = 16.8
+      const options = { rowHeight, scale, firstRow, header: true, scrollTo: (firstRow + 3) * rowHeight }
+      const rowsFrom = (from: number) => Array.from({ length: 8 }, (_, index) => firstRow + from + index)
+      const first = rowsFrom(0)
+      const steps: RowStep[] = [
+        { by: 3, rows: rowsFrom(0).concat(firstRow + 8) },
+        { by: 5, rows: rowsFrom(1).concat(firstRow + 9) },
+        { by: 40, rows: rowsFrom(3).concat(firstRow + 11) },
+        { by: 8, rows: rowsFrom(4).concat(firstRow + 12) },
+        { by: -4, rows: rowsFrom(3).concat(firstRow + 12) },
+        { by: 6, rows: rowsFrom(5).concat(firstRow + 13) },
+        { by: -60, rows: rowsFrom(0) },
+      ]
+      const on = runRows(true, "absolute", first, steps, options)
+      const off = runRows(false, "absolute", first, steps, options)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
+      expect(on.frames).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.mismatches.join("\n")).toBe("")
+    })
+  }
+
+  it("replays and relocates a row a translate put in by the translates after it, and by a frame built whole", () => {
+    const first = [0, 1, 2, 3, 4, 5, 6, 7]
+    const rowsFrom = (from: number) => Array.from({ length: 8 }, (_, index) => from + index)
+    // Rows come in, a translate moves them (and takes some out), a frame built whole follows (the commit changes the scroller as well),
+    // then translates again over what that frame built.
+    const replaySteps: RowStep[] = [
+      { by: 3, rows: rowsFrom(0).concat(8) },
+      { by: 5, rows: rowsFrom(1).concat(9) },
+      { by: 4 },
+      { by: 6, rows: rowsFrom(2).concat(10), page: { tint: true } },
+      { by: 3, rows: rowsFrom(3).concat(11), page: { tint: true } },
+      { by: -7 },
+      { by: -9, rows: rowsFrom(0), page: { tint: true } },
+    ]
+    for (const options of [{ rowHeight: 16.8 }, { rowHeight: 16.75, percentTop: true, scale: 2 }, {}]) {
+      const on = runRows(true, "absolute", first, replaySteps, options)
+      const off = runRows(false, "absolute", first, replaySteps, options)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
+      expect(on.frames, JSON.stringify(options)).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+      expect(on.mismatches.join("\n")).toBe("")
+      if (!verifying) expect(on.translated, "only the commit that changes the scroller is a frame built whole").toEqual([true, true, true, false, true, true, true])
+    }
+  })
+
+  unverified("is a frame built whole when the box that held the absolute rows holds none any more, and gets a row", () => {
+    // A frame that found rows in the flow only forgets the box as a parent a scroll builds for: a row that comes in under it is a
+    // change of the box, and the frame built whole has it.
+    const trial = (translate: boolean) => {
+      const opened = open(translate, "absolute", { present: FIRST })
+      const renderer = opened.renderer
+      try {
+        renderer.nativeSimulateMouseMove(180, 60)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        for (const by of [4, -4]) {
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+        }
+        opened.render(<Page log={opened.log} layout="absolute" present={FIRST} absoluteFrom={COUNT} />)
+        renderer.drawFrame()
+        renderer.drawFrame()
+        const before = scroll(renderer)
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateScrollWheel(180, 60, 0, 3)
+        renderer.dispatchNativeEvents()
+        opened.render(<Page log={opened.log} layout="absolute" present={[0, 1, 2, 3, 4]} absoluteFrom={4} />)
+        renderer.drawFrame()
+        const after = scroll(renderer)
+        return { patched: after.patched - before.patched, built: after.rowsBuilt - before.rowsBuilt, edited: after.reasons.Edited - before.reasons.Edited, frame: seenRows(opened, [0, 1, 2, 3, 4]) }
+      } finally {
+        opened.unmount()
+      }
+    }
+    const on = trial(true)
+    const off = trial(false)
+    expect(on.patched).toBe(0)
+    expect(on.built).toBe(0)
+    expect(on.edited).toBe(1)
+    expect(on.frame).toEqual(off.frame)
+  })
+
+  for (const [what, shownBeforeRows] of [["is a translate again once it shows them", true], ["is a frame built whole when it shows them in the commit the rows come in with", false]] as const) {
+    unverified(`${what}, after the box that holds the absolute rows skipped its content`, () => {
+      // The build of the box forgets what it was noted as before it finds that it builds none of its children, so a box whose content
+      // `content-visibility` skips is no parent a scroll builds children for until a build that shows them notes it again.
+      const trial = (translate: boolean) => {
+        const opened = open(translate, "absolute", { present: FIRST })
+        const renderer = opened.renderer
+        try {
+          renderer.nativeSimulateMouseMove(180, 60)
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+          for (const by of [4, -4]) {
+            renderer.clockAdvance(VSYNC)
+            renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+            renderer.dispatchNativeEvents()
+            renderer.drawFrame()
+          }
+          opened.render(<Page log={opened.log} layout="absolute" present={FIRST} skipHolder />)
+          renderer.drawFrame()
+          renderer.drawFrame()
+          if (shownBeforeRows) {
+            opened.render(<Page log={opened.log} layout="absolute" present={FIRST} />)
+            renderer.drawFrame()
+            renderer.drawFrame()
+            // A wheel and its way back record the rows the frames built whole just built.
+            for (const by of [4, -4]) {
+              renderer.clockAdvance(VSYNC)
+              renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+              renderer.dispatchNativeEvents()
+              renderer.drawFrame()
+            }
+          }
+          const before = scroll(renderer)
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(180, 60, 0, 3)
+          renderer.dispatchNativeEvents()
+          opened.render(<Page log={opened.log} layout="absolute" present={[0, 1, 2, 3, 4]} />)
+          renderer.drawFrame()
+          const after = scroll(renderer)
+          return { patched: after.patched - before.patched, built: after.rowsBuilt - before.rowsBuilt, frame: seenRows(opened, [0, 1, 2, 3, 4]) }
+        } finally {
+          opened.unmount()
+        }
+      }
+      const on = trial(true)
+      const off = trial(false)
+      expect(on.patched).toBe(shownBeforeRows ? 1 : 0)
+      expect(on.built).toBe(shownBeforeRows ? 1 : 0)
+      expect(on.frame).toEqual(off.frame)
+    })
+  }
+
+  unverified("is a frame built whole when the scroller runs its inline axis from the right, which puts a box that names no left there", () => {
+    const options = { rtl: true }
+    const on = runRows(true, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
+    const off = runRows(false, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
+    expect(on.translated).toEqual([false])
+    heldFor(on, "Edited", 1)
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
+    expect(on.frames).toEqual(off.frames)
+  })
+
+  unverified("is a frame built whole when a row that comes in is beside a row of another z-index", () => {
+    const on = runRows(true, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], { selectedZ: 3 })
+    const off = runRows(false, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], { selectedZ: 3 })
+    expect(on.translated).toEqual([false])
+    heldFor(on, "Edited", 1)
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
+    expect(on.frames).toEqual(off.frames)
+  })
+
+  unverified("is a frame built whole when a row that comes in is translated out of the box that holds the rows", () => {
+    const options = { transformRow: 4, transformBy: COUNT * ROW }
+    const on = runRows(true, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
+    const off = runRows(false, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
+    expect(on.translated).toEqual([false])
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
+    expect(on.frames).toEqual(off.frames)
+  })
+
+  unverified("leaves nothing of a translate that was declined for the frames after it", () => {
+    const trial = (translate: boolean) => {
+      const opened = open(translate, "absolute", { hover: true })
+      const renderer = opened.renderer
+      try {
+        renderer.nativeSimulateMouseMove(180, 60)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        for (const by of [4, -4]) {
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+        }
+        const patched = scroll(renderer).patched
+        // A commit that only takes a row out, with a pointer that moves onto another row: a hover change holds the frame whole.
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateMouseMove(20, 10)
+        renderer.nativeSimulateScrollWheel(20, 10, 0, 5)
+        renderer.dispatchNativeEvents()
+        opened.render(<Page log={opened.log} layout="absolute" hover removed={[9]} />)
+        renderer.drawFrame()
+        const declined = scroll(renderer).patched === patched
+        // The rows are reordered, and a plain wheel follows.
+        opened.render(<Page log={opened.log} layout="absolute" hover removed={[9]} reverse />)
+        renderer.drawFrame()
+        renderer.drawFrame()
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateScrollWheel(20, 10, 0, 4)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        const selected = renderer.dragSelect(10, 5, 140, 95)
+        renderer.dispatchNativeEvents()
+        return { declined, translated: scroll(renderer).patched > patched, selected, picture: picture(renderer) }
+      } finally {
+        opened.unmount()
+      }
+    }
+    const on = trial(true)
+    const off = trial(false)
+    expect(on.declined, "the frame with the commit was built whole").toBe(true)
+    expect(on.selected).toBeTruthy()
+    expect(on.selected, "the text selected across the rows, in the order the tree has them").toEqual(off.selected)
+    expect(on.picture).toEqual(off.picture)
+  })
+
+  unverified("is a frame built whole when a row that comes in has no height of its own", () => {
+    const on = runRows(true, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], { tallerRow: 4 })
+    const off = runRows(false, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], { tallerRow: 4 })
+    expect(on.translated).toEqual([false])
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
+    expect(on.frames).toEqual(off.frames)
+  })
+
+  unverified("is a frame built whole when the height of the box that holds the rows changes with the commit", () => {
+    const opened = open(true, "absolute", { present: FIRST })
+    const renderer = opened.renderer
+    try {
+      renderer.nativeSimulateMouseMove(180, 60)
+      renderer.dispatchNativeEvents()
+      renderer.drawFrame()
+      for (const by of [4, -4]) {
+        renderer.clockAdvance(VSYNC)
+        renderer.nativeSimulateScrollWheel(180, 60, 0, by)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+      }
+      const before = scroll(renderer)
+      renderer.clockAdvance(VSYNC)
+      renderer.nativeSimulateScrollWheel(180, 60, 0, 5)
+      renderer.dispatchNativeEvents()
+      opened.render(<Page log={opened.log} layout="absolute" present={[0, 1, 2, 3, 4]} spacerHeight={COUNT * ROW + 40} />)
+      renderer.drawFrame()
+      const after = scroll(renderer)
+      expect(after.patched - before.patched).toBe(0)
+      expect(after.rowsBuilt - before.rowsBuilt).toBe(0)
+      expect(after.reasons.Edited - before.reasons.Edited).toBe(1)
+    } finally {
+      opened.unmount()
+    }
+  })
+
+  unverified("is a frame built whole when a row that comes in takes focus or is in the flow", () => {
+    for (const options of [{ autoFocusRow: 4 }, { flowRow: 4 }]) {
+      const on = runRows(true, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
+      const off = runRows(false, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
+      expect(on.translated, JSON.stringify(options)).toEqual([false])
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
+      expect(on.frames).toEqual(off.frames)
+    }
+  })
+
+  unverified("builds rows with a hover style, which a patch repaints, and a row that comes in under the pointer", () => {
+    const hovered = (translate: boolean) => {
+      const opened = open(translate, "transform", { hover: true, present: FIRST })
+      const renderer = opened.renderer
+      try {
+        renderer.nativeSimulateMouseMove(20, 50)
+        renderer.dispatchNativeEvents()
+        renderer.drawFrame()
+        renderer.drawFrame()
+        for (const by of [4, -4]) {
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(20, 50, 0, by)
+          renderer.dispatchNativeEvents()
+          renderer.drawFrame()
+        }
+        const frames: unknown[] = []
+        let present = FIRST
+        for (const hop of [{ by: 30, rows: [0, 1, 2, 3, 4] }, { by: 30, rows: [1, 2, 3, 4, 5] }, { by: -20, rows: [0, 1, 2, 3, 4, 5] }]) {
+          renderer.clockAdvance(VSYNC)
+          renderer.nativeSimulateScrollWheel(20, 50, 0, hop.by)
+          renderer.dispatchNativeEvents()
+          present = hop.rows
+          opened.render(<Page log={opened.log} layout="transform" hover present={present} />)
+          renderer.drawFrame()
+          frames.push({ under: renderer.getElementsAt(20, 50), picture: picture(renderer) })
+        }
+        renderer.advanceTime(500)
+        renderer.dispatchNativeEvents()
+        for (let frame = 0; frame < 3; frame++) renderer.drawFrame()
+        frames.push({ under: renderer.getElementsAt(20, 50), picture: picture(renderer), rects: seenRows(opened, present).rects })
+        return { patched: scroll(renderer).patched, built: scroll(renderer).rowsBuilt, frames }
+      } finally {
+        opened.unmount()
+      }
+    }
+    const on = hovered(true)
+    const off = hovered(false)
+    expect(on.built).toBeGreaterThan(0)
+    expect(on.frames).toEqual(off.frames)
+  })
+})
