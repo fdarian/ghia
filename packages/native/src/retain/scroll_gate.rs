@@ -216,8 +216,6 @@ impl ScrollGate {
                             view.update(cx, |view, cx| view.build_entering(child, index, start.clone(), shape, window, cx))
                                 .expect("the view of a window lives as long as the window draws")
                         }),
-                        // The width is the parent's area, which the window reads from its layout in device pixels.
-                        available: gpui::size(gpui::AvailableSpace::MinContent, gpui::AvailableSpace::MinContent),
                         size: gpui::size(gpui::px(placed.size.0 as f32), gpui::px(placed.size.1 as f32)),
                         origin: placed.origin,
                         scrolls: true,
