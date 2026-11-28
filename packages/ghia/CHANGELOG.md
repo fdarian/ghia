@@ -1,5 +1,42 @@
 # ghia
 
+## 0.15.0
+
+### Minor Changes
+
+- daba3d7: `window.location`, `window.history`, `localStorage` and `sessionStorage` exist on the native build, so `@solidjs/router` and other History API routers run unchanged. `history` is an in-memory session history with `pushState`, `replaceState`, `back`, `forward`, `go`, `popstate` and `hashchange` (`PopStateEvent` and `HashChangeEvent` are globals); a navigation that would load a document, and `location.reload()`, throw `NotSupportedError`. `localStorage` persists to `~/Library/Application Support/<appId>/Local Storage/localStorage.json`; `ghia({ appId })` names the directory and defaults to the `name` in `package.json`.
+  
+  `<a>` and `<area>` have the link members of the HTML standard (`href` resolved against `location.href`, `origin`, `protocol`, `host`, `hostname`, `port`, `pathname`, `search`, `hash`, `target`, `download`, `rel`, `relList`, `referrerPolicy` and more), and a click that nothing canceled on an `<a href>` follows a fragment link; any other URL only warns once. A click on `<A>` or `<a>` inside `@solidjs/router`'s `<Router>` navigates.
+- cbae2c5: `@font-face` in a sheet registers the face with the window's text system, under the family the rule names: `font-family`, `src` (`url()` of a path, a `file://` or a `data:` URL, and `local()`, with `format()` hints), `font-weight`, `font-style`, `font-stretch` and `unicode-range`, under `@media`, `@supports` and `@layer`. TrueType, OpenType, WOFF and WOFF2 files load; a file that cannot load is skipped with a reason and the next `src` item is tried. Text that uses the family is laid out again once the face is there. `ghia()` inlines a font that CSS text (`import css from "./app.css?inline"`) refers to as a `data:` URL in `ghia dev` and `ghia build`, which is what a sheet can load.
+- 55fd1e3: WOFF and WOFF2 fonts load: an `@font-face` `src` of `url(font.woff2) format("woff2")` (a path, a `file://` URL or a `data:` URL), `registerFont()` and the window `fonts` option take `.woff` and `.woff2` files as well as `.ttf` and `.otf`, and `@supports font-format(woff2)` is true. A broken file, or one without the family, full or PostScript name or an "m" glyph, is skipped with a log, and the next `src` item is tried. `ghia()` turns a `.woff` or `.woff2` `url()` in the CSS of a Vite app into a `data:` URL, as it does for `.ttf`. macOS reads both through Core Text, which the zed fork now hands them to.
+
+### Patch Changes
+
+- Updated dependencies [77cb55d]
+- Updated dependencies [c573a87]
+- Updated dependencies [d5cdaab]
+- Updated dependencies [cc783b8]
+- Updated dependencies [5781875]
+- Updated dependencies [8666606]
+- Updated dependencies [f27cc77]
+- Updated dependencies [f1d4951]
+- Updated dependencies [5e825b5]
+- Updated dependencies [5969b04]
+- Updated dependencies [daba3d7]
+- Updated dependencies [2280620]
+- Updated dependencies [734d830]
+- Updated dependencies [ce75fe2]
+- Updated dependencies [3064b0e]
+- Updated dependencies [89f8d8c]
+- Updated dependencies [cbae2c5]
+- Updated dependencies [5fb8a50]
+- Updated dependencies [1550c03]
+- Updated dependencies [5fbf6b4]
+- Updated dependencies [9ed9ca4]
+- Updated dependencies [e874ce2]
+- Updated dependencies [55fd1e3]
+  - @ghia/native@0.15.0
+
 ## 0.14.0
 
 ### Performance

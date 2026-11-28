@@ -1,5 +1,48 @@
 # @ghia/react
 
+## 0.15.0
+
+### Minor Changes
+
+- 734d830: An app has several windows. Each `GpuixRenderer` that calls `init()` opens a window on the one app (macOS), and one shared frame loop serves them all: a window closed alone leaves the others running, and the app ends with its last window or on a quit, running `onTerminated` once. Every window has its own `document` and `window` (`documentOf(renderer)`, `windowOf(renderer)`), with its own `<html>`, `<head>` and `<body>`, `activeElement`, selection, `matchMedia`, size and `resize`, and an event is heard by the window it happened in; the global `document` and `window` are the first window's. The test renderer opens several test windows at once.
+  
+  `window.open('', name, 'width=..,height=..,left=..,top=..')` opens a new native window and returns a `Window` object (`document`, `opener`, `name`, `closed`, `close()`, `focus()`, `resizeTo()`, `innerWidth`, `devicePixelRatio`, `beforeunload`/`pagehide`/`unload`), reusing an open window of the same name; a link to another origin goes to the system, and any other URL throws `NotSupportedError`.
+  
+  Solid and React render into the new window the web way. Solid: `render(() => <App />, win.document.body)`, which returns the dispose, like `solid-js/web`. React: `createRoot(win.document.body).render(<App />)`, like `react-dom/client`. `<Portal mount={win.document.body}>` and `createPortal(children, win.document.body)` reach another window too. Both adapters register the factory `window.open` needs for every root they own, closing a window unmounts what was rendered in it (cleanups run), and `render()` keeps a slot for each renderer instead of one global.
+  
+  `window.close()` sets `closed` at once and runs `beforeunload`, `pagehide`, `unload` and the unmount of the window's root in a later task. A window's root unmounts when the window closes, the first window's too (the global `window` hears `pagehide` and `unload` and stays that window's). `window.open` with `noopener` returns `null` on an open window it finds, a named window whose root is gone gets a fresh one, and `ghia dev` closes the popups when it runs the entry again. `render(code, element)` and `createRoot(element)` throw a `TypeError` for an element in no mounted window instead of mounting the app again, and Solid's dispose removes only the nodes its own render put in the element. `@ghia/native/host` has the render slots both adapters share (`ownRenderer()` is the renderer of the window `render()` opened) and `registerWindowDisposer`.
+
+### Patch Changes
+
+- 2280620: `render()` mounts the tree before it starts the frame loop, so the window's first frame has content instead of presenting empty and filling in ~50 ms later
+  
+  The frame loop's first tick is a task of its own, after the microtasks the mount queued and the code after `render()`, and a mount that throws still starts the loop.
+- Updated dependencies [77cb55d]
+- Updated dependencies [c573a87]
+- Updated dependencies [d5cdaab]
+- Updated dependencies [cc783b8]
+- Updated dependencies [5781875]
+- Updated dependencies [8666606]
+- Updated dependencies [f27cc77]
+- Updated dependencies [f1d4951]
+- Updated dependencies [5e825b5]
+- Updated dependencies [5969b04]
+- Updated dependencies [daba3d7]
+- Updated dependencies [2280620]
+- Updated dependencies [734d830]
+- Updated dependencies [ce75fe2]
+- Updated dependencies [3064b0e]
+- Updated dependencies [89f8d8c]
+- Updated dependencies [cbae2c5]
+- Updated dependencies [5fb8a50]
+- Updated dependencies [1550c03]
+- Updated dependencies [5fbf6b4]
+- Updated dependencies [9ed9ca4]
+- Updated dependencies [e874ce2]
+- Updated dependencies [55fd1e3]
+  - @ghia/native@0.15.0
+  - ghia@0.15.0
+
 ## 0.14.0
 
 `contenteditable` and the DOM editing model are in, so Lexical runs unchanged: editing hosts, live ranges, `Selection`, `beforeinput`, clipboard and paste events, and an Edit menu. Scrolling and text are faster (scroll pixel reuse, a per-glyph advance cache), a scroll no longer freezes when frames outlast a vsync, and stylesheets gain structural, form-state and `:has()` selectors. `<code code=... language=...>` is renamed `<code-block>`.

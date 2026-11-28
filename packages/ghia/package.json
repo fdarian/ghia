@@ -1,6 +1,6 @@
 {
   "name": "ghia",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "The ghia command and Vite plugin: dev and build for Ghia apps",
   "license": "Apache-2.0",
   "type": "module",
