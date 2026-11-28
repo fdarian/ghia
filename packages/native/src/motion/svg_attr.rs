@@ -188,6 +188,12 @@ impl SvgAttr {
         attributes.get(self.name()).or_else(|| attributes.get(attribute))
     }
 
+    /// Whether the attribute is a paint (`fill`, `stroke`, `stop-color`, `flood-color`): a transition of it
+    /// changes what an `<svg>` paints and nothing else.
+    pub(super) fn is_colour(self) -> bool {
+        matches!(self.kind(), Kind::Colour)
+    }
+
     /// Whether CSS has a property of this name that `@keyframes` can animate on
     /// an SVG element. The draw keys and the attributes that exist only in the
     /// markup (`x1`, `stdDeviation`, `dx`, `refX`...) are not CSS properties.

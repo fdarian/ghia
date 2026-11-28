@@ -34,6 +34,31 @@ pub(crate) const PATCH_ROOT_MAX_ELEMENTS: u32 = 64;
 /// The most elements that a changed `color` is checked to reach: a root holds no more.
 const WALK_LIMIT: usize = PATCH_ROOT_MAX_ELEMENTS as usize;
 
+/// The properties whose `var()` declaration a hover that paints only may hold: a colour, and what draws one. What one
+/// resolves to is checked against the custom properties of the element when the hover happens (`hover_vars`); that it
+/// cannot lift the element or lay it out is what the key says.
+const PAINT_KEYS: [&str; 19] = [
+    "color",
+    "backgroundColor",
+    "background",
+    "outline",
+    "outlineColor",
+    "textDecorationColor",
+    "boxShadow",
+    "border",
+    "borderBlock",
+    "borderInline",
+    "borderColor",
+    "borderTop",
+    "borderRight",
+    "borderBottom",
+    "borderLeft",
+    "borderTopColor",
+    "borderRightColor",
+    "borderBottomColor",
+    "borderLeftColor",
+];
+
 /// What the styles alone say of whether a change only paints. A colour is inherited, and a transition below the
 /// element that can run on more than a colour would start from the old one, so what the styles do not settle is left to
 /// the tree below the element:
@@ -69,12 +94,34 @@ impl Paints {
 /// Whether the `hover` refinement of `style` only changes how the element paints. The element
 /// has to be in `tree` for its `color` to be followed to the elements that inherit it.
 pub(crate) fn hover_paints_only(tree: &RetainedTree, id: u64, style: &StyleDesc) -> bool {
-    paints_only(style, PointerStates { hovered: true, ..Default::default() }).settled(tree, id)
+    let states = PointerStates { hovered: true, ..Default::default() };
+    paints_only(style, states).settled(tree, id) && vars_paint_only(tree, id, style, states)
 }
 
 /// Whether the `hasHover` refinement of `style` (`:has(:hover)`) only changes how the element paints.
 pub(crate) fn has_hover_paints_only(tree: &RetainedTree, id: u64, style: &StyleDesc) -> bool {
-    paints_only(style, PointerStates { has_hovered: true, ..Default::default() }).settled(tree, id)
+    let states = PointerStates { has_hovered: true, ..Default::default() };
+    paints_only(style, states).settled(tree, id) && vars_paint_only(tree, id, style, states)
+}
+
+/// Whether the colours a state gives through `var()` resolve, against the custom properties of the element, to a pair
+/// that only paints: the rules a literal pair passes, which the styles alone (`paints_only`) could not apply to text that
+/// is not a colour yet. A style that holds no `var()` has nothing to resolve. One of an element whose custom properties
+/// are not known (`hover_vars`) is not paint only.
+fn vars_paint_only(tree: &RetainedTree, id: u64, style: &StyleDesc, states: PointerStates) -> bool {
+    if !style.holds_var_declarations() {
+        return true;
+    }
+    let Some(custom) = crate::events::hover_vars::custom_properties_of(tree, id) else {
+        return false;
+    };
+    let (off, on) = (resolve_pointer_states(style, PointerStates::default()), resolve_pointer_states(style, states));
+    if ![&off, &on].into_iter().all(|folded| crate::css::var_substitution::all_resolve(folded, &custom)) {
+        return false;
+    }
+    let resolved = |folded: StyleDesc| crate::css::var_substitution::resolve(&folded, &custom).map_or(folded, |resolved| *resolved);
+    let (off, on) = (resolved(off), resolved(on));
+    transitions_stay_colours(&off, &on) && differs_by_paint_only(&off, &on, false)
 }
 
 /// Whether an element declares a group or follows one (`groupHover`, `groupActive`, `groupFocusWithin`): the state of a
@@ -117,9 +164,10 @@ pub(crate) fn may_lift(style: &StyleDesc) -> bool {
 
 /// Whether the style the build lays out for an element may be other than the one it declares by anything but a
 /// hover that paints only: an animation, a transition that can run on more than a colour (one of colours only is run
-/// by a patch, as a hover that paints starts it), Motion (`motion`, `motionValues`, `layout`), a `var()`
-/// (one in a state block too: `holds_var_declarations`, as the paint check of a hover does not see a `var()` a state
-/// holds), an `@container` block, a state variant other than `hover` and `hasHover`, or a `hover` or `hasHover` that is
+/// by a patch, as a hover that paints starts it), Motion (`motion`, `motionValues`, `layout`), a `var()` in a property
+/// that is not in `PAINT_KEYS` (one in a state block too: `holds_var_declarations_beyond`, since what it resolves to is not
+/// read before the build and could lift the element; a colour is checked against the custom properties when the hover
+/// happens, `vars_paint_only`), an `@container` block, a state variant other than `hover` and `hasHover`, or a `hover` or `hasHover` that is
 /// more than paint (`hover` is its `paint_hover_of`: an opacity that crosses 1, a transform, a size). It is taken from the
 /// caller's memo, not computed here: folding the states clones the style. Only a paint-only hover is ignored, since it
 /// never changes what an element lifts. A fold like the others can give the element an opacity, a
@@ -132,7 +180,7 @@ fn restyles_beyond_hover(element: &RetainedElement, style: Option<&StyleDesc>, h
     style.is_some_and(|style| {
         let declares_hover = style.hover.is_some() || style.has_hover.is_some();
         style.container_rules.is_some()
-            || style.holds_var_declarations()
+            || style.holds_var_declarations_beyond(&PAINT_KEYS)
             || (declares_hover && hover == Some(Paints::No))
             || crate::motion::declares_animation(style)
             || !crate::motion::transitions_only_colours(style)
@@ -235,7 +283,7 @@ pub(crate) fn restyle_paints_of(old: &StyleDesc, new: &StyleDesc) -> Paints {
     let mut colour_changed = false;
     for states in declared_states(old, new) {
         let (off, on) = (resolve_pointer_states(old, states), resolve_pointer_states(new, states));
-        if !transitions_stay_colours(&off, &on) || !differs_by_paint_only(&off, &on) {
+        if !transitions_stay_colours(&off, &on) || !differs_by_paint_only(&off, &on, false) {
             return Paints::No;
         }
         colour_changed |= off.color != on.color;
@@ -277,10 +325,11 @@ fn declared_states(old: &StyleDesc, new: &StyleDesc) -> Vec<PointerStates> {
 fn paints_only(style: &StyleDesc, states: PointerStates) -> Paints {
     let off = resolve_pointer_states(style, PointerStates::default());
     let on = resolve_pointer_states(style, states);
-    if !transitions_stay_colours(&off, &on) || !differs_by_paint_only(&off, &on) {
+    if !transitions_stay_colours(&off, &on) || !differs_by_paint_only(&off, &on, true) {
         return Paints::No;
     }
-    if off.color == on.color { Paints::Yes } else { Paints::UnlessTransitionBelow }
+    // A colour through `var()` is not in `color` yet: one that differs may be the one below inherits.
+    if off.color == on.color && off.var_declarations == on.var_declarations { Paints::Yes } else { Paints::UnlessTransitionBelow }
 }
 
 /// Whether the transitions of the two styles can only run on colours. A hover that paints only changes what
@@ -315,8 +364,10 @@ fn reaches_no_transition(tree: &RetainedTree, id: u64) -> bool {
     true
 }
 
-/// Whether `on` is `off` with some paint properties set otherwise.
-fn differs_by_paint_only(off: &StyleDesc, on: &StyleDesc) -> bool {
+/// Whether `on` is `off` with some paint properties set otherwise. With `held` the colours that a `var()` gives
+/// (`PAINT_KEYS`, held as text until the element is built) may differ too, when every other declaration of that kind is
+/// the same in both: what the text resolves to is for `vars_paint_only` to say.
+fn differs_by_paint_only(off: &StyleDesc, on: &StyleDesc, held: bool) -> bool {
     if !opacity_keeps_layer(off.opacity, on.opacity)
         || !colours_keep_visibility(off, on)
         || !shadow_keeps_geometry(off, on)
@@ -328,6 +379,11 @@ fn differs_by_paint_only(off: &StyleDesc, on: &StyleDesc) -> bool {
         return false;
     }
     let mut probe = off.clone();
+    if held
+        && crate::css::var_substitution::held_outside(off, &PAINT_KEYS) == crate::css::var_substitution::held_outside(on, &PAINT_KEYS)
+    {
+        probe.var_declarations = on.var_declarations.clone();
+    }
     probe.background_color = on.background_color.clone();
     probe.background = on.background.clone();
     probe.color = on.color.clone();
@@ -591,6 +647,119 @@ mod tests {
             );
         }
         assert!(!hover_paints(r##"{"opacity":0.5,"transition":"opacity 1s","hover":{"opacity":0.8}}"##), "an opacity that a transition runs");
+    }
+
+    #[test]
+    fn tailwinds_transition_colors_is_a_transition_of_colours() {
+        let list = "color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to";
+        let held = |json: &str| {
+            let style = crate::css::var_substitution::parse(json.as_bytes()).unwrap();
+            let (tree, id) = tree_of(style.clone());
+            hover_paints_only(&tree, id, &style)
+        };
+        let v4 = format!(
+            r##"{{"--default-transition-timing-function":"ease","--default-transition-duration":"150ms","color":"#fff","backgroundColor":"#223344","transitionProperty":"{list}","transitionTimingFunction":"var(--tw-ease, var(--default-transition-timing-function))","transitionDuration":"var(--tw-duration, var(--default-transition-duration))","hover":{{"color":"red","backgroundColor":"#eee"}}}}"##
+        );
+        assert!(held(&v4), "v4, with a duration and a timing function that are var()");
+        assert!(hover_paints(&format!(
+            r##"{{"color":"#fff","backgroundColor":"#223344","transitionProperty":"{list}","transitionDuration":"150ms","hover":{{"color":"red","backgroundColor":"#eee"}}}}"##
+        )));
+        // A duration that is a var() and no list names the properties `all`.
+        assert!(!held(
+            r##"{"backgroundColor":"#223344","transitionDuration":"var(--d)","hover":{"backgroundColor":"#eee"}}"##
+        ));
+        assert!(!held(
+            r##"{"backgroundColor":"#223344","transitionProperty":"var(--p)","transitionDuration":"1s","hover":{"backgroundColor":"#eee"}}"##
+        ));
+        assert!(!hover_paints(&format!(
+            r##"{{"backgroundColor":"#223344","transitionProperty":"{list}, width","transitionDuration":"1s","hover":{{"backgroundColor":"#eee"}}}}"##
+        )));
+    }
+
+    #[test]
+    fn a_colour_an_icon_below_inherits_is_paint_only_under_a_transition_of_fill() {
+        let parent = style(r##"{"color":"blue","hover":{"color":"red"}}"##);
+        let (tree, id) = with_child(parent.clone(), style(r##"{"transitionProperty":"color, fill, stroke","transitionDuration":"1s"}"##));
+        assert!(hover_paints_only(&tree, id, &parent));
+        let (tree, id) = with_child(parent.clone(), style(r##"{"transitionProperty":"fill, stroke-width","transitionDuration":"1s"}"##));
+        assert!(!hover_paints_only(&tree, id, &parent), "a stroke width changes more than a colour");
+    }
+
+    #[test]
+    fn a_transition_of_a_paint_does_not_make_an_element_restyle_beyond_a_hover() {
+        let (tree, id) = tree_of(style(
+            r##"{"backgroundColor":"#fff","transitionProperty":"fill, stroke, --tw-gradient-to","transitionDuration":"1s","hover":{"backgroundColor":"#eee"}}"##,
+        ));
+        let element = &tree.elements[&id];
+        let hover = element.style.as_deref().map(paint_hover_of);
+        let (colors, lengths) = (ColorContext::root(Scheme::Light), LengthContext::initial(0.0, 0.0));
+        assert!(!may_lift_in_any_state(element, hover, &colors, &lengths));
+    }
+
+    fn held_hover_paints(json: &str) -> bool {
+        let style = crate::css::var_substitution::parse(json.as_bytes()).unwrap();
+        let (tree, id) = tree_of(style.clone());
+        hover_paints_only(&tree, id, &style)
+    }
+
+    #[test]
+    fn a_hover_whose_colours_are_vars_is_paint_when_they_resolve_to_a_pair_that_paints() {
+        let theme = r##""--blue":"#3b82f6","--red":"#ef4444","--white":"#ffffff","--clear":"transparent""##;
+        assert!(held_hover_paints(&format!(r##"{{{theme},"backgroundColor":"var(--blue)","hover":{{"backgroundColor":"var(--red)"}}}}"##)));
+        assert!(held_hover_paints(&format!(r##"{{{theme},"color":"var(--white)","hover":{{"color":"var(--red)"}}}}"##)));
+        assert!(held_hover_paints(&format!(r##"{{{theme},"backgroundColor":"#223344","hover":{{"backgroundColor":"var(--red)"}}}}"##)));
+        assert!(held_hover_paints(&format!(r##"{{{theme},"borderBottom":"1px solid #112233","hover":{{"borderBottomColor":"var(--red)"}}}}"##)));
+        // A background keeps its quad, so one that turns transparent is written over it, as a literal one is.
+        assert!(held_hover_paints(&format!(r##"{{{theme},"backgroundColor":"var(--blue)","hover":{{"backgroundColor":"var(--clear)"}}}}"##)));
+        assert!(hover_paints(r##"{"backgroundColor":"#3b82f6","hover":{"backgroundColor":"transparent"}}"##));
+    }
+
+    #[test]
+    fn a_hover_whose_vars_change_what_is_painted_in_kind_is_not() {
+        let theme = r##""--red":"#ef4444","--white":"#ffffff","--clear":"transparent","--w":"4px""##;
+        // A text and a border that turn transparent paint nothing: an operation less.
+        assert!(!held_hover_paints(&format!(r##"{{{theme},"color":"var(--white)","hover":{{"color":"var(--clear)"}}}}"##)));
+        assert!(!held_hover_paints(&format!(r##"{{{theme},"borderBottom":"1px solid #112233","hover":{{"borderBottomColor":"var(--clear)"}}}}"##)));
+        // A state that sets a custom property, whatever it feeds.
+        assert!(!held_hover_paints(&format!(r##"{{{theme},"color":"var(--white)","hover":{{"--white":"#000000"}}}}"##)));
+        assert!(!held_hover_paints(&format!(r##"{{{theme},"color":"var(--white)","hover":{{"color":"var(--red)","--red":"#000000"}}}}"##)));
+        // A property that is not a colour, and a value that is not one.
+        assert!(!held_hover_paints(&format!(r##"{{{theme},"width":10,"hover":{{"width":"var(--w)"}}}}"##)));
+        assert!(!held_hover_paints(&format!(r##"{{{theme},"opacity":0.5,"hover":{{"opacity":"var(--w)"}}}}"##)));
+        assert!(!held_hover_paints(&format!(r##"{{{theme},"color":"var(--white)","hover":{{"color":"var(--missing)"}}}}"##)));
+        assert!(!held_hover_paints(&format!(r##"{{{theme},"color":"var(--white)","hover":{{"color":"var(--w)"}}}}"##)));
+        assert!(!held_hover_paints(&format!(r##"{{{theme},"backgroundColor":"var(--red)","hover":{{"background":"linear-gradient(red, var(--red))"}}}}"##)));
+    }
+
+    #[test]
+    fn the_custom_properties_come_from_the_elements_above() {
+        let parent = crate::css::var_substitution::parse(br##"{"--blue":"#3b82f6","--clear":"transparent"}"##).unwrap();
+        let child = crate::css::var_substitution::parse(br##"{"color":"var(--blue)","hover":{"color":"var(--clear)"}}"##).unwrap();
+        let (mut tree, id) = with_child(parent, child.clone());
+        assert!(!hover_paints_only(&tree, 2, &child), "the text turns transparent");
+        let paler = crate::css::var_substitution::parse(br##"{"--blue":"#3b82f6","--clear":"#00000080"}"##).unwrap();
+        tree.set_style_desc(id, paler);
+        assert!(hover_paints_only(&tree, 2, &child));
+        // An element above that declares one in a state may be in it: not known.
+        let conditional = crate::css::var_substitution::parse(br##"{"--blue":"#3b82f6","focusWithin":{"--clear":"transparent"}}"##).unwrap();
+        tree.set_style_desc(id, conditional);
+        assert!(!hover_paints_only(&tree, 2, &child));
+    }
+
+    #[test]
+    fn a_var_does_not_make_an_element_restyle_beyond_a_hover_unless_it_is_not_a_colour() {
+        let lifts = |json: &str| {
+            let style = crate::css::var_substitution::parse(json.as_bytes()).unwrap();
+            let (tree, id) = tree_of(style);
+            let element = &tree.elements[&id];
+            let hover = element.style.as_deref().map(paint_hover_of);
+            let (colors, lengths) = (ColorContext::root(Scheme::Light), LengthContext::initial(0.0, 0.0));
+            may_lift_in_any_state(element, hover, &colors, &lengths)
+        };
+        assert!(!lifts(r##"{"backgroundColor":"var(--a)","color":"var(--b)","hover":{"backgroundColor":"var(--c)"}}"##));
+        assert!(lifts(r##"{"opacity":"var(--a)","hover":{"backgroundColor":"var(--c)"}}"##));
+        assert!(lifts(r##"{"backgroundColor":"red","hover":{"opacity":"var(--c)"}}"##));
+        assert!(lifts(r##"{"width":"var(--a)"}"##));
     }
 
     #[test]
