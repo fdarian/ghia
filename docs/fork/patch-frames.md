@@ -1307,6 +1307,18 @@ what the frame shown cut moved by the offset would be. So for each row it makes 
   the same iterator `Scene::replay_translated` puts a relocated replay into the scene with, and overwrite the row's range of
   `Scene::paint_operations` (`TranslatedOperations::overwrite`, one operation at a time into its slot: no vector of the translated operations is made). The scene is then made again from the log with the draw orders worked out again (`Scene::rebuild_moved`;
   `rebuild_from_operations` reuses the orders of the log, which holds for a patch that changes how operations paint and not where).
+- **A row that is clipped away where it was and where it goes is not written.** A `div` scroller mounts the overscan of TanStack (10 rows each
+  side, painted and cut by the clip), and the translate used to overwrite those rows' operations and take their extents twice for the damage:
+  a share of the tick that grows with the mounted rows. `ScrollRun::is_clipped_away_at` (zed `scene.rs` `RecordedReach`) tells it from the
+  recording alone: the union of what the recorded operations draw, or open a layer for, moved by the delta and cut by the clip, one pixel to spare.
+  A run for which that is empty before and after keeps its operations as the frame holds them (clipped away, so the scene places nothing for
+  them and their extents are not taken for the damage), and everything else of the move still runs: `run.delta`, `reach`, the hitboxes, `scrolled_to`, the hook. The
+  total a later translate puts it at is made from the recording by the absolute delta, so the stale operations carry nothing. Not told by a box,
+  so written as before (`RecordedReach::Unsaid`): a recording with a group, a surface or a native surface; an operation that draws, or a non-empty
+  `StartLayer`, under a mask that replaced the one around it and that the clip does not cut (`Replaced { derived: false }`); and any `WidenGroups`, an empty box
+  too, because it unions its box into the content mask of every open group, so an empty rectangle at a point still widens a group to the point and a skipped
+  run would keep the old point where a build has the new one. Measured (mailbox proxy, `PHASE=scroll A11Y=0`, 3 runs each, translated ticks of the
+  div scroller): 6.30 to 6.37M instructions before, 5.45 to 5.46M after; the plain list is unchanged (3.4M), it paints no row beyond its clip.
 - **The hitboxes.** `Hitbox::relocated` of the recorded hitboxes with the total delta and the prepaint mask, keeping the id and the parent
   of the one in the frame. `hitboxes_changed` and the hit test at the pointer are redone (`mouse_hit_test`), as a draw does; the cursor
   is asked again.
