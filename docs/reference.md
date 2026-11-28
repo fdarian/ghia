@@ -11395,6 +11395,7 @@ wheel over a `<virtual-list>` or a `div` scroller (`overflow: auto` or `scroll`)
 says why the others that could be were not; `held` counts each reason that holds a frame whole, and by cause under it, so a `div` scroller's frame names what held it:
 `NotRelocatable.entered` (a child culling left out would come into reach), `.unrooted` (the content paints or inserts something no relocatable root holds), `.nested`
 (a list or another scroller is inside it), `.layered` (its children are in a stacking context of their own or an order of their own, or hold a sticky or escaping box) and `.noRun` (none of the content is a relocatable root);
+a commit that only takes absolutely positioned children out of the scroller (a virtualizer's rows that leave) is a translate that takes them out of the frame as well, counted in `membershipFrames` and `rowsRemoved`, a commit that does anything else besides is `Edited`;
 a scrollbar's thumb is moved with the content, and `Thumb.*` says when it cannot be; `GPUIX_SCROLL_PATCH_OFF=1`, or `setScrollPatchEnabled(false)`, turns it off and draws every frame whole; `rowsMeasuredByLayout`, `rowsMeasuredByDeclaration` and `declarationMismatches` count how the lists measured their rows, and `GPUIX_LIST_SIZES_OFF=1`, or `setListSizesEnabled(false)`, makes them all by layout), and
 `GPUIX_RETAIN_VERIFY=1` to build each frame that replayed a second time, whole,
 and compare the two: a difference is printed as `[retained]` and fails
