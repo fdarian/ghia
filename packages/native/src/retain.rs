@@ -204,8 +204,6 @@ pub(crate) enum Exclusion {
     /// glide starts where a commit moved it; whether a glide runs is asked of a tick by
     /// [`Retain::preview`], not recorded.
     LayoutAnimation,
-    /// Built as part of a paragraph's line.
-    AtomicInline,
     /// `position: absolute`, an intrinsic width keyword or a natural width: gpui's layout
     /// rewrites the box after it is requested, so the layout nodes it left are not the next
     /// frame's to use.
@@ -213,7 +211,7 @@ pub(crate) enum Exclusion {
 }
 
 impl Exclusion {
-    const ALL: [Exclusion; 14] = [
+    const ALL: [Exclusion; 13] = [
         Self::PaintReporter,
         Self::Highlight,
         Self::CustomElement,
@@ -226,7 +224,6 @@ impl Exclusion {
         Self::Fixed,
         Self::Scroller,
         Self::LayoutAnimation,
-        Self::AtomicInline,
         Self::UnstableLayout,
     ];
 
@@ -255,7 +252,6 @@ impl Exclusion {
             Self::Fixed => "fixed",
             Self::Scroller => "scroller",
             Self::LayoutAnimation => "layout-animation",
-            Self::AtomicInline => "atomic-inline",
             Self::UnstableLayout => "unstable-layout",
         }
     }
@@ -2904,6 +2900,20 @@ impl Retain {
         self.plan.patch_root_ids.contains(&id)
     }
 
+    /// Whether a root the frame holds as a patch root is above the element `id`. A frame built whole builds what is in a patch root
+    /// whole and records no root of its own in it (`begin_patch_root`), so a root that a late build of that patch root skipped is no
+    /// patch root of the next frame: a patch of it would be of a retained root that the frame built whole after it does not make.
+    pub(crate) fn is_under_patch_root(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
+        let mut up = tree.elements.get(&id).and_then(|element| element.parent);
+        while let Some(above) = up {
+            if self.plan.patch_root_ids.contains(&above) {
+                return true;
+            }
+            up = tree.elements.get(&above).and_then(|element| element.parent);
+        }
+        false
+    }
+
     /// Keeps the root that a patch repaints, for the ticks that follow the frame.
     pub(crate) fn add_patch_root(&mut self, unit: Unit) {
         if self.reference {
@@ -3161,9 +3171,7 @@ impl Retain {
         let moved = self.nodes.get(parent as usize).is_some_and(|parent| {
             parent.moved || self.deltas.scrolled.contains(&parent.id)
         });
-        let exclusion = if entry.atomic_root {
-            self.unless_lifted(Exclusion::AtomicInline)
-        } else if entry.anchor_scope {
+        let exclusion = if entry.anchor_scope {
             self.unless_lifted(Exclusion::Anchored)
         } else if entry.inherited.highlight.is_some() {
             self.unless_lifted(Exclusion::Highlight)
@@ -6783,12 +6791,12 @@ mod tests {
         for _ in 0..2 {
             page.frame(&[], false, |page| {
                 page.element(1, None, |page| {
-                    page.element(2, Some(true), |page| page.retain.exclude(Exclusion::AtomicInline));
+                    page.element(2, Some(true), |page| page.retain.exclude(Exclusion::Sticky));
                 });
             });
         }
         assert_eq!(page.ids(), Vec::<u64>::new());
-        assert_eq!(page.preview(&[], false), Err(Unpatchable::Refused(Refusal::Excluded(Exclusion::AtomicInline))));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Refused(Refusal::Excluded(Exclusion::Sticky))));
     }
 
     #[test]
@@ -6922,7 +6930,7 @@ mod tests {
     #[test]
     fn a_refusal_is_counted_under_a_key_that_names_it() {
         let keys: Vec<String> = [
-            Refusal::Excluded(Exclusion::AtomicInline),
+            Refusal::Excluded(Exclusion::Sticky),
             Refusal::ExcludedBelow(Exclusion::Svg),
             Refusal::Escapes,
             Refusal::Lifts,
@@ -6934,7 +6942,7 @@ mod tests {
         .to_vec();
         assert_eq!(
             keys,
-            ["Excluded:atomic-inline", "ExcludedBelow:svg", "Escapes", "Lifts", "Scrolls", "LayoutAnimation", "TooLarge"]
+            ["Excluded:sticky", "ExcludedBelow:svg", "Escapes", "Lifts", "Scrolls", "LayoutAnimation", "TooLarge"]
         );
     }
 

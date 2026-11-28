@@ -1,9 +1,8 @@
 /// Absolute rows placed with `top`, each holding a paragraph with an atomic inline (`display: inline-block`) in the
-/// middle of it, with something inserted before them. An atomic inline keeps the rows that hold it from being retained
-/// roots (`Exclusion::AtomicInline`), so every frame builds them and the verifier has no replay to compare with a
-/// build: this holds that the text in the boxes is copied in document order, and that nothing about it is recorded
-/// wrongly. How a position inside a box of a paragraph of a root is rebased is held by the unit tests in
-/// `text/selection.rs`.
+/// middle of it, with something inserted before them. The rows are retained roots, so the frames after the insertion
+/// replay them where they were recorded (the verifier compares each with a build): this holds that the text in the boxes
+/// is copied in document order, and that nothing about it is recorded wrongly. How a position inside a box of a paragraph
+/// of a root is rebased is held by the unit tests in `text/selection.rs`.
 
 import { describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
