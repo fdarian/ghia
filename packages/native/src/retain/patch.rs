@@ -412,9 +412,10 @@ impl GpuixView {
         (ids == prepared.ids).then_some(prepared.built)
     }
 
-    /// How far a scroll moved the row `id` from where it was built, nothing for what is no row.
+    /// How far a frame that moved the content of a scroller in place moved the root `id` from where it was built: the row of a
+    /// list, or a root in a `div` scroller. A root nothing moved has not moved.
     fn moved_row(&self, id: u64) -> gpui::Point<gpui::Pixels> {
-        if self.is_virtual_row(id) { self.tapes.moved(id) } else { gpui::Point::default() }
+        self.tapes.moved(id)
     }
 
     fn is_virtual_row(&self, id: u64) -> bool {

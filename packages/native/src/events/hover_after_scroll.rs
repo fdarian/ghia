@@ -11,7 +11,8 @@
 //! - a scroll that code made (`scrollTop = n`, `scrollTo`, `scrollIntoView`, a key, a scrollbar, a
 //!   row), when it has moved, or when its smooth animation ends;
 //! - a build that changed the tree, a style or the layout, or that ran an animation of the layout
-//!   (`LocalFrameView::PerformPostLayoutTasks`).
+//!   (`LocalFrameView::PerformPostLayoutTasks`), unless a wheel is in flight: the commit it asked for is part of the scroll
+//!   and the hover follows at its end.
 //!
 //! A pointer that moved follows at once, as it does without a scroll.
 //!
@@ -196,7 +197,9 @@ impl HoverAfterScroll {
     }
 
     fn after_build(&self) -> bool {
-        let changed = self.build_changed.take();
+        // The commit a wheel asks for (a virtual list's rows for the new offset) is part of the scroll: the hover follows when the
+        // wheel is quiet, as Chrome's does when a gesture ends. A build while no wheel is in flight follows at the next frame.
+        let changed = self.build_changed.take() && self.wheel.deadline.get().is_none();
         let due = self.due.take();
         self.follows(changed || due)
     }
@@ -338,14 +341,22 @@ mod tests {
         state.note_build(1, size, false);
         assert!(state.after_build(), "the first build is a change");
         assert!(state.after_build(), "no scroll moved anything");
-        state.wheel_at("moved", Instant::now());
+        let start = Instant::now();
+        let (generation, wake) = state.wheel_at("moved", start).expect("armed");
         state.note_build(1, size, false);
         assert!(!state.after_build(), "a scroll is all the frame is for");
         state.note_build(2, size, false);
-        assert!(state.after_build(), "a commit follows");
-        state.wheel_at("moved", Instant::now());
+        assert!(!state.after_build(), "the commit a wheel in flight asks for is part of the scroll");
         state.note_build(2, (800.0, 700.0), false);
-        assert!(state.after_build(), "a resize follows");
+        assert!(!state.after_build(), "so is a resize while it goes on");
+        assert_eq!(state.woke(generation, wake), Woke::Follow, "the hover follows when the wheel is quiet");
+        assert!(state.after_build(), "nothing is left to wait for");
+        state.note_build(3, size, false);
+        assert!(state.after_build(), "a commit with no wheel in flight follows");
+        state.wheel_at("moved", Instant::now());
+        state.pointer_moved();
+        state.note_build(4, size, false);
+        assert!(state.after_build(), "a pointer that moved follows at once");
     }
 
     #[test]
@@ -354,11 +365,13 @@ mod tests {
         let size = (800.0, 600.0);
         state.note_build(1, size, false);
         state.after_build();
-        state.wheel_at("moved", Instant::now());
+        // No wheel is in flight: a box that moves under the pointer follows at every frame.
         state.note_build(1, size, true);
         assert!(state.after_build(), "a box that moves under the pointer");
         state.wheel_at("moved", Instant::now());
         state.note_build(1, size, false);
         assert!(!state.after_build(), "paint-only motion is not asked about");
+        state.note_build(1, size, true);
+        assert!(!state.after_build(), "a layout animation while the wheel goes on follows at its end");
     }
 }

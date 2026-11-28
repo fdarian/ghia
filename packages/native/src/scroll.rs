@@ -170,6 +170,38 @@ pub(crate) fn apply_container<E: gpui::Styled + gpui::StatefulInteractiveElement
     el
 }
 
+/// What a frame that moved the content of the scroller `id` in place (`Window::note_scroll_moved`) leaves to its
+/// owner: the boxes the build wrote for the elements between it and the roots that moved, which no root's tape moves
+/// (`WindowBounds::shift_built`).
+pub(crate) fn on_translated<E: gpui::StatefulInteractiveElement>(
+    el: E,
+    window: gpui::WindowId,
+    id: u64,
+    tree: std::sync::Arc<std::sync::Mutex<crate::retained_tree::RetainedTree>>,
+) -> E {
+    let ready = tree.clone();
+    el.on_scroll_translated(
+        move || ready.try_lock().is_ok(),
+        move |_, _, translation| {
+            let tree = tree.try_lock().expect("the translate was planned with the tree free; what runs between the plan and the write (thumb moved callbacks, `RetainedPhase::Scrolled` hooks) does not hold its lock");
+            let roots: rustc_hash::FxHashSet<u64> = translation.roots.iter().filter_map(crate::renderer::retained_root_of).collect();
+            let mut built = Vec::new();
+            let scroller = tree.elements.get(&id).expect("the gate found the tree as the frame shown was built from, which has the scroller");
+            let mut pending: Vec<u64> = scroller.children.clone();
+            while let Some(child) = pending.pop() {
+                if roots.contains(&child) {
+                    continue;
+                }
+                built.push(child);
+                if let Some(element) = tree.elements.get(&child) {
+                    pending.extend(element.children.iter().copied());
+                }
+            }
+            crate::automation::shift_built(window, &built, translation.shift);
+        },
+    )
+}
+
 /// `[scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight]` as the DOM
 /// reports them. The scroll position is a whole device pixel (see [`dom_position`]). `painted` is the element's box, which an element that does not scroll has no
 /// scroll handle for: its content is as big as it is.

@@ -1131,7 +1131,10 @@ the patcher turns it on with `Window::set_contained_patches`.
 - **What the splice and the rewrite changed.** The anchor is built flat, so the patch registers other counts than the recording: gpui
   splices the ranges of the anchor into the frame (`PatchDecline::Splice` when it cannot) instead of declining `Operations`,
   `Hitboxes` and `Registrations`. An anchor that holds roots (text, boxes with children) and a keyed swap of the content with
-  another number of elements are patched. gpui then rewrites the recording of the anchor from the patch
+  another number of elements are patched. A bar of a `div` scroller in the anchor (its thumb is noted for the scroll patch) goes with the splice: the
+  thumbs the patch's own paint noted take the place of every thumb the frame kept for that scroller (whatever it painted, so a bar that was off leaves
+  nothing behind), where the first of them was, and the splice declines (`PatchDecline::Splice`) only for a bar the patch did not paint, a list's (in the
+  part or in the scratch frame), or a thumb of one of those scrollers that the scratch frame painted outside the part. gpui then rewrites the recording of the anchor from the patch
   (`rewrittenRecordings`), which is what lets the next commit patch it again. A root that published (every host element of Ghia
   reports its box through a layout probe) keeps its rewritten recording when it has an `on_replay` hook, as a frame built
   whole accepts for the recording (zed `c4590da472`), so consecutive commits in an anchor are all patches. Ghia reads the outcome after
@@ -1246,7 +1249,7 @@ that holds is counted in `held`, so what else would stop the frame is known too:
 | Reason | It holds when |
 |---|---|
 | `Other` | the owner has no whole frame shown (no gate, planning off, a layout-only pass since, an element that follows the clock), the frame has no list, more than one list moved, the list is settling its position (a reset, a pending scroll adjustment, following its tail), or the window was resized |
-| `Edited` | the tree's root revision is not the one the frame shown was built from (a commit), a view other than the list's was notified, the window was refreshed, or a source other than the scroll differs from the frame shown (a press that restyles with `:active`, the focus, a selection, a measurement, a link, a command, a custom element, the scroll of a scroller that is no list: the owner says it, below) |
+| `Edited` | the tree's root revision is not the one the frame shown was built from (a commit), a view other than the list's was notified, the window was refreshed, or a source other than the scroll that moved differs from the frame shown (a press that restyles with `:active`, the focus, a selection, a measurement, a link, a command, a custom element, the scroll of any scroller other than the one gpui moves the content of, such as one inside a row that a script moved: the owner says it, below) |
 | `Membership` | a layout at the new position would build a row the frame shown did not paint, or measure one (`ListState::rows_needed` replays the walk of `layout_items` over the rows already measured; a row that only leaves is fine, because its operations stay and the clip hides them). The rows of the overdraw that are not measured are measured first, inside the draw, so only a row that shows with no size holds it ([slice G3d](#overdraw-measured-and-rows-built-again-slice-g3d)) |
 | `Hover` | the pointer moved since the frame shown. A pointer that did not move is not a reason whatever rows come under it: a scroll does not recompute the hover, which follows when the scroll ends ([scroll.md](scroll.md#the-hover-under-a-still-pointer)). `hoverOnly` counts the `Hover` frames that nothing else stops: eligible with the pointer where the frame shown had it |
 | `Place`, `Region`, `Clip` | `Recorded::place` would not put a row there (a `Region` or `Clip` miss of a row that stays is built again in the translate when the list has a builder, which Ghia's lists have, though since [slice G4a](#a-row-of-a-list-is-recorded-for-its-travel-slice-g4a) a row of a list does not miss `Region` while it shows, so for them only `Place` holds the frame, [slice G3d](#overdraw-measured-and-rows-built-again-slice-g3d)): what it reads of its surroundings differs in more than the offset (a scale factor that is not a power of two, an exact or rounded clip around, a general transform), the region the row was recorded in no longer covers the clip around it, or a rounded clip in it meets the clip differently (`ReplayKey::relocates_by`, `RelocationInfo::fits`, asked of the recording by `RetainedState::would_place`). `held` also counts `Region.top`, `Region.bottom` and `Region.side`: the edge of the clip the moved region leaves bare (the rows moved up by more than the overscan leave the bottom bare) |
@@ -1390,6 +1393,124 @@ hidden (5.4M in the previous measurement). The 392 ticks that stay whole are the
 first wheel after a commit, slice 3's.
 
 **Not in 2b.** The row that comes in at an edge (`Membership`: a layout that builds a row, slice G3 below), and the hover that changes what is under the pointer (`Hover`).
+
+### A `div` scroller (slice D1a)
+
+A wheel over a `div` scroller (`overflow: auto` or `scroll`, one with a `ScrollHandle`) is classified like a list's: `Div`'s wheel listeners say
+`Window::note_scroll_moved(view)` (the same mark as a list's), and the draw that follows classifies the frame as a list's is: a pure move of what the scroller's roots recorded is drawn as a translate, builds nothing, and shifts the
+scroller's pixels on both axes (`ShiftPlan` takes `shift.x` too). Code: zed `window/scroll_patch/div.rs`; the wiring in `elements/div.rs`.
+
+- **Runs.** The relocatable roots painted inside the scroller are runs, as the rows of a list are, numbered by the order they are prepainted in. A
+  root that is lifted into a stacking context (every positioned element is, in Ghia's window: TanStack's rows and the box that holds them) has its
+  hitboxes taken out of the frame where it noted them and put elsewhere by the context, so a div run keeps the **ids** of its hitboxes
+  (`ScrollRun::hitbox_ids`) and a translate finds them in the frame by id. A root that culling left out is a run with an empty recording
+  (`RetainedState::is_recorded_culled`): it moves nothing.
+- **`DivFrame`** (in `rendered_frame.scroll.divs`): the offset the content was built at, the clip around the children, the children culling left out
+  with where it looked for each (`Window::lies_outside_the_mask` notes both reaches), the hitboxes the content inserted that no root holds, and the
+  operations its paint left (and the ones a stacking context painted for its lifted children that are no root). A splice of the frame marks it stale
+  (`Other`: the next frame is built whole).
+- **The classifier** (`Window::div_verdict`) runs the checks of a list's (`Edited`, `Hover`, `Place`, `Region`, `Clip`, `A11y`, `ScrollAnimation`,
+  `Clock`, `Thumb`) with the shift on both axes, and new causes of `NotRelocatable`:
+
+| Cause (`held`) | It holds when |
+|---|---|
+| `NotRelocatable.entered` | a child culling left out (it was apart from the clip by the overscan) would not be apart at the new offset: it has to be built, so the frame is built whole and never paints it empty |
+| `NotRelocatable.unrooted` | the content painted an operation no root holds (a background on the box that holds the rows), or inserted a hitbox no root holds that is not a plain box under the scroller's clip (a hitbox of a plain element, such as the box that holds the rows, is moved by the shift) |
+| `NotRelocatable.nested` | a list or another scroller is inside the scroller |
+| `NotRelocatable.layered` | the scroller's children are painted in a stacking context of its own or in an order of its own, or hold a sticky or escaping box |
+| `NotRelocatable.noRun` | none of the content is a root |
+
+- **Roots with differing z-indexes decline.** Roots that differ in `z-index` and are lifted into a stacking context outside the scroller are painted where that
+  context paints them, ordered by it, so what a run left in the frame is not the recording's operations placed one after the other. The classifier calls such a frame
+  eligible and the apply declines it as `Operations` at every tick (`applyDeclines`), so the frame is built whole. Not a cause of `held`; known, and not changed.
+- **The translate** writes the runs as a list's, then the hitboxes no root holds (`Hitbox::scrolled_by`: the box moved, the clip around it stays), the
+  scroller's `ScrollAnchoring` as its prepaint would leave it (`note_scrolled_in_place`: the anchor is dropped, the offset is the one the last step
+  left, and the next layout picks another), the thumbs, the runs' hooks (`RetainedPhase::Scrolled`, which moves what the roots wrote into the
+  registries), and tells the owner of the scroller (`InteractiveElement::on_scroll_translated(shift)`): Ghia's moves the boxes the build wrote for the
+  elements between the scroller and the roots (`automation::shift_built`; a box a root's tape holds moves with the root). The `scroll` event of
+  `onScroll` is not the translate's: it is reported from the offset by the frame steps ahead of the draw (`frame_steps.rs`), the same for a built frame.
+  The owner says whether it can be told before anything is written (`on_scroll_translated(ready, ..)`): Ghia's can when the tree is not locked by an update, and
+  a translate that finds it cannot is declined (`applyDeclines.Window`) and the frame is built whole.
+- **The gate.** gpui gives the gate the key of the scroller the frame would be a move of (`Window::set_scroll_patch_gate`: the one scroller of the frame
+  shown, a list or a `div`, that moved, `None` when it is not exactly one). The scroll of that scroller is not an `Edited` source (`Retain::sources_changed`
+  leaves it out); the scroll of **any other** scroller is. gpui knows only the scrollers in `rendered_frame.scroll.divs` and the lists: a scroller inside a
+  relocatable root or a row is recorded with it (`scroll_patch_begin_div` notes nothing while a relocation records) and no translate moves its content, so one that
+  script moved (`scrollTop = n` from the `onScroll` of another scroller, instant, with no commit) would be left where the frame shown had it. Such a wheel step is a
+  frame built whole, which shows it.
+- **The thumb.** A scroller's bar notes its thumbs (`Window::paint_scroll_thumb(scroll_key, ..)`, one per axis, x then y, every frame whether the bar shows the thumb or not: the place among a scroller's thumbs is what names one) and is planned and moved as a list's; the
+  fade of its thumb is still a built frame (`repaint_thumb` is a list's). A bar painted inside a recording (a scroller that is a retained root of its own, or one a
+  non-Ghia owner records) notes nothing: the recording that holds it moves with its root and it is no scroller of the frame shown, so `plan_thumbs` has no thumb to hold the
+  translate for (`Thumb.track`). A row that holds a scroller with `overflow: auto` is never recorded (`Exclusion::Scroller`); one with `overflow: hidden` is, and is recorded with its scroller.
+- **After a translate the offsets are the frame shown's.** `Retain::seen.scrolls` is what the next frame or tick compares a scroller's
+  offset with, and a frame that built nothing left it at the offset of the frame built whole, so the next tick (a hover that follows the
+  scroll, a caret's blink) declined `Sourced` for a scroll the translate had drawn. The settled callback of the translate
+  (`install_scroll_gate`) takes the offset of the scroller it moved as it is now (`Retain::note_scrolls_translated`, given the key of that scroller by gpui) and
+  of no other: one that script moved in the meantime is moved for the next frame that builds. A wheel step is still a source of the tick
+  its own `note_scroll_moved` asks for, since the offset moved after the frame shown.
+- **What a root built in the frame hands to its own stacking context is the root's.** A row that comes into a scroller is built, and
+  recorded in a region of its own: what it paints is painted into a scene that holds only it, so the operations are numbered there. A row
+  with positioned boxes in it (TanStack's rows: absolute, moved by a `translateY`, with an avatar and a column of lines positioned in it) hands
+  them to the stacking context the row forms, and `scroll_patch_note_lifted_child` took each for a child of the scroller that no root holds:
+  the operations it painted were counted as `NotRelocatable.unrooted` against the numbers of the frame (75 to 82 of them, at positions 1 to
+  145, where a recording has them and a frame of the stack app has the sidebar). A frame that built any row therefore was never a frame to
+  translate from, and in the stack app that is the frame of every second tick. The scroller notes a lifted child only when no recording is
+  open around it (`Window::is_recording_any_relocation`): inside one the root's run holds it.
+
+Tests: zed `window/scroll_patch_div_tests.rs` (the translate is the frame built whole for the box that holds the rows, with a hitbox, rows in the flow,
+rows with no hitbox and rows not culled; each cause; the thumb; the verifier; the anchoring; the owner told), `scrollbar.rs`, `retain.rs`
+(`a_frame_that_only_moves_the_rows_of_a_list_asks_for_the_sources_a_tick_asks_for`; `a_translate_notes_the_scroller_it_moved_and_not_another_so_the_next_frame_finds_the_other_moved`),
+and react `scroll-patch-div.test.tsx` (every step a translate, pictures, boxes, hit points, clicks, `scroll` events and `scrollTop`, a culled child that comes
+into reach, the scrollbar, the verifier). A scroller inside a row that script moved: zed `a_scroller_inside_a_root_is_no_scroller_of_the_frame_shown` (the gate
+is given the key of the one scroller the wheel moved, and the scroller in the root is not noted as the frame shown's), and react `scroll-patch-div.test.tsx`
+(`script moved a scroller inside a row`, written from the `scroll` event, which the gate holds as `Edited`, or between two steps, which the recording of the row holds as
+`NotRelocatable.unmovable`) and `scroll-patch-translate.test.tsx` (the same for the rows of a list, five steps held as `Edited`).
+
+### What kept the stack app's ticks whole (slice D1b)
+
+D1a left the stack app at 0 translates of 720. Three things held it, and one of them is not the wheel's.
+
+1. **The hover followed the commit, not the wheel.** A wheel over a `div` did not follow the hover (`follows_build` is `no` for a frame whose only
+   cause is the scroll offset, as for a list), and the translates leave it where it was. What followed it was the frame after a **batch tick**:
+   TanStack's commit for the rows the offset needs changes the tree, and a frame that changed the page followed the hover at the next frame. In the
+   stack app 356 ticks of 720 carry a batch, and every one of the 299 ticks whose pointer chain changed came right after one (272 of them carry no
+   batch of their own). A list had the same rule (the 51 `Edited` of the plain mailbox are its commits and the hover tick after each) and fewer
+   commits. That tick was a hover that paints with a wheel step in it: the hover patch declines `Relocated` (`Placement::Deferred`: TanStack's rows
+   are lifted, the patch paints a lifted root in its region only when it is put where it was recorded, and the roots a translate moved are not), so
+   the frame was built whole.
+   **Decided (coordinator, option a): while a wheel is in flight a build that changed the page does not make the hover follow** (`HoverAfterScroll::after_build`
+   ignores `build_changed` while the wheel's deadline is pending); it follows when the wheel is quiet. Lists and divs alike, as Chrome holds the hover
+   during a scroll. Every ordinary tick of the stack app is then a translate (362 of 720); what is left is the 356 batch ticks (D2).
+2. **`Retain::seen.scrolls`** is the offsets of the frame shown after a translate (above).
+3. **`NotRelocatable.unrooted`** (above).
+
+**Measured** (`PHASE=scroll APP=stack A11Y=0`, release addon, test renderer, ghia-bench's data; per tick instructions are `input + clock + drawFrame`):
+
+| | translated | mean | median | no batch ticks: median | batch ticks: median |
+|---|---|---|---|---|---|
+| D1a (`cba5569a`) | 0 of 720 | 12.22M | 10.34M | 10.20M | 13.46M |
+| + `seen.scrolls` after a translate | 0 of 720 | 12.23M | 10.36M | 10.20M | 13.38M |
+| + the lifted children of a root are the root's | 92 of 720 (the no-batch ticks that do not follow a commit) | 11.97M | 10.28M | 10.19M | 13.42M |
+| + the hover held while a wheel is in flight | 362 of 720 (every no-batch tick) | 10.62M to 10.73M | 9.53M | 6.12M | 13.66M to 14.03M |
+
+A translated tick costs 6.3M to 6.4M in the stack app (the list's is 3.5M to 5M; the roots are ~24 rows of 140 operations each, and a div
+scroller's translate also moves what the box that holds them has). The first reason for the others is `Edited` for every one (the batch,
+or the hover that follows it); the declines of the apply (`applyDeclines`) and `mispredicted` are 0.
+
+**The end of the scroll.** The hover follows once the wheel is quiet. For rows in a `div` scroller that are not lifted (in the flow) that frame is a patch of the
+two rows now: the patch of a root that a translate moved compares its tape with the recorded one moved by how far the translate moved it
+(`moved_row`), for a root in a `div` scroller as for a list's row. For lifted rows (TanStack's, absolute) it is
+still a frame built whole after a `Relocated` decline of the hover patch, which is the engine's (`region` of `prepare_unit` needs `Placement::InPlace`) and costs one
+frame per scroll. For a list the follow at the end of a scroll whose rows left the frame (the row the hover was on is no longer built) is a patch of the row it enters
+when the commit's frames were drawn before the wheel went quiet, as `scroll-patch-hover.test.tsx` asserts (the commit's frame is the one built whole, the follow one patch and no
+frame built whole). A follow that finds the commit's view still queued at the end of the wheel (`PendingView`) is built whole: it is the case of a clock advanced before the commit's frames were drawn.
+
+Tests: zed `scroll_patch_div_tests.rs` (`what_a_root_built_in_the_frame_hands_to_a_context_of_its_own_is_the_roots`: the roots rebuilt in the
+frame shown, then a translate that is the frame built whole), `retain.rs` (`a_scroller_whose_content_a_frame_moved_in_place_is_where_the_next_frame_finds_it`),
+react `scroll-patch-div.test.tsx` (rows with a hover colour and a pointer that stays through wheel steps that cross row borders, the hover at the end
+of the scroll (a patch for rows in the flow), commits with every wheel step that leave the hover and its `pointerenter` and `pointerleave` until the wheel is quiet, a tick after
+translates, rows that come in with a wheel step, plain and under the verifier), `hover-after-scroll.test.tsx` (a commit or a transition while a wheel runs, in a list and a
+scroller), `hover_after_scroll.rs`. The two react cases that
+concern the two fixes pass with the fixes taken out: only the stack app discriminates them, as the table above does.
 
 ### Rows that come in and leave (slice G3)
 
@@ -1650,7 +1771,8 @@ thumb changes in a step, so a step is not built.
   changed (the thumb would move, grow, appear or lie on another track; the pointer thickens the bar, which paints a track under the thumb; the offset moved,
   which is a scroll's frame). `paint_scroll_thumb` returns whether the frame notes the bar, and a window that does not (scroll patch off) keeps asking for built frames.
 - **`Window::plan_scroll_thumb_repaints`, then `Window::repaint_scroll_thumbs`.** The first asks every bar of the frame shown and writes nothing; the second
-  writes the color over the operation of each thumb that differs (the quad's background under the element opacity it was painted with, nothing else of it),
+  writes the color over the operation of each thumb that differs, found by the scroller and axis of its bar when it writes and not by where the frame kept it at the plan
+  (a splice between the two moves the thumbs; a thumb a splice replaced since the plan is not written, the build painted it in the color of now) (the quad's background under the element opacity it was painted with, nothing else of it),
   in place in the scene when the operation fits (`Scene::patch_in_place`) and by making the scene again otherwise, sets that the frame is presented, counts
   `PatchCounters::thumb_repaints` (`getPatchCounters().thumbRepaints`) and runs the owner's `done`: the bar's alpha and `painted` state, the next tick while it fades, the
   timer for a hold that began again. A miss is a tick the patcher declines (`unpatchable["Thumb:Alpha"]` and the like), drawn whole in the same draw.
