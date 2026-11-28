@@ -1456,6 +1456,14 @@ impl RetainedTree {
         self.scroll_content_parents.borrow_mut().insert(parent);
     }
 
+    /// A build of `parent` that found no absolute children placed by it in a `div` scroller's content: a scroll builds no child for it.
+    pub(crate) fn forget_scroll_content_parent(&self, parent: u64) {
+        let mut parents = self.scroll_content_parents.borrow_mut();
+        if !parents.is_empty() {
+            parents.remove(&parent);
+        }
+    }
+
     /// Classifies paint-only restyles for patch frames from now on, or stops.
     pub fn set_commit_patching(&mut self, on: bool) {
         self.commit_patching = on;
@@ -1897,6 +1905,7 @@ impl RetainedTree {
             element.parent = None;
         }
         self.detached_from.insert(id, parent_id);
+        self.scroll_content_parents.get_mut().remove(&id);
         self.mark_fresh_subtree(id);
         if self.sheets.enabled {
             self.sheets_linked(id);
@@ -1951,6 +1960,9 @@ impl RetainedTree {
             child.parent = Some(parent_id);
         }
         let placed_before = old_parent_id.is_some() || self.detached_from.contains_key(&child_id);
+        if old_parent_id.is_some_and(|old| old != parent_id) {
+            self.scroll_content_parents.get_mut().remove(&child_id);
+        }
         self.count_reparent(child_id, old_parent_id, parent_id);
         // Add to new parent's children
         if let Some(parent) = self.elements.get_mut(&parent_id) {
@@ -1996,6 +2008,9 @@ impl RetainedTree {
             child.parent = Some(parent_id);
         }
         let placed_before = old_parent_id.is_some() || self.detached_from.contains_key(&child_id);
+        if old_parent_id.is_some_and(|old| old != parent_id) {
+            self.scroll_content_parents.get_mut().remove(&child_id);
+        }
         self.count_reparent(child_id, old_parent_id, parent_id);
         // Insert before the target
         if let Some(parent) = self.elements.get_mut(&parent_id) {
@@ -4922,6 +4937,22 @@ mod tests {
         append_rows(&mut tree, 5_000);
         assert!(tree.added.borrow().is_empty() && tree.added_ids.borrow().is_empty(), "no list to scan for a parent a scroll cannot build for");
         assert_eq!(tree.pure_membership_since(shown), None);
+    }
+
+    #[test]
+    fn a_parent_that_left_the_scroller_is_no_parent_a_scroll_builds_children_for() {
+        let mut tree = rows_in_a_positioned_box();
+        apply(&mut tree, r##"[["detachChild",2]]"##);
+        assert!(!tree.scroll_content_parents.borrow().contains(&2), "taken out of the tree");
+        let mut tree = rows_in_a_positioned_box();
+        apply(&mut tree, r##"[["createElement",4,"div"],["appendChild",1,4],["appendChild",4,2]]"##);
+        assert!(!tree.scroll_content_parents.borrow().contains(&2), "moved under another parent");
+        let mut tree = rows_in_a_positioned_box();
+        tree.note_scroll_content_parent(3);
+        apply(&mut tree, r##"[["createElement",4,"div"],["appendChild",2,4],["insertBefore",2,3,4]]"##);
+        assert!(tree.scroll_content_parents.borrow().contains(&3), "moved among its siblings, it is in the same scroller");
+        tree.forget_scroll_content_parent(2);
+        assert!(!tree.scroll_content_parents.borrow().contains(&2), "a build that found no absolute children of it");
     }
 
     #[test]

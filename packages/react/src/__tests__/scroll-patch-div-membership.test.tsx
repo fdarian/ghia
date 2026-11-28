@@ -55,6 +55,8 @@ type Options = {
   spacerHeight?: number
   /** Rows are measured when they are attached and observed. */
   measure?: boolean
+  /** Rows are only observed when they are attached: nothing reads their box. */
+  observe?: boolean
   /** A stylesheet that styles the rows by class, which they all have. */
   sheet?: string
   rtl?: boolean
@@ -67,9 +69,11 @@ type Options = {
   transformBy?: number
 }
 
-function measureRow(log: Log, index: number, instance) {
-  const box = instance.getBoundingClientRect()
-  log.measured.push([index, box.x, box.y, box.width, box.height])
+function measureRow(log: Log, index: number, instance, read: boolean) {
+  if (read) {
+    const box = instance.getBoundingClientRect()
+    log.measured.push([index, box.x, box.y, box.width, box.height])
+  }
   log.observer ??= new ResizeObserver((entries) => {
     for (const entry of entries) {
       const index = Object.keys(log.nodes).find((key) => log.nodes[key] === entry.target)
@@ -94,7 +98,7 @@ function Page(props: { log: Log; layout: Layout } & Options) {
           if (instance === null) return
           const attached = props.log.nodes[index] !== instance
           props.log.nodes[index] = instance
-          if (props.measure && attached) measureRow(props.log, index, instance)
+          if ((props.measure || props.observe) && attached) measureRow(props.log, index, instance, props.measure === true)
         }}
         onClick={() => props.log.clicks.push(index)}
         style={{
@@ -179,6 +183,13 @@ function boxes(renderer) {
 }
 
 const scroll = (renderer) => renderer.getPatchCounters().scrollPatch
+
+/** The frames of the run were held for `reason` as many times as `count`, and for no other: what the counters say of why a step was no translate. */
+function heldFor(run: { counters; before }, reason: string, count: number) {
+  for (const [key, held] of Object.entries<number>(run.counters.held)) {
+    expect(held - (run.before.held[key] ?? 0), `held for ${key}`).toBe(key === reason ? count : 0)
+  }
+}
 
 const points: Array<[number, number]> = [[20, 10], [20, 50], [20, 90], [180, 60]]
 
@@ -493,6 +504,10 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     const options = { sheet: ".row:nth-child(odd) { opacity: 0.6; border-left: 3px solid #cc3333 }" }
     const on = runRows(true, "absolute", FIRST, enterSteps, options)
     const off = runRows(false, "absolute", FIRST, enterSteps, options)
+    // Rows that leave from the front or come in before the others change which of them a position selector matches: the step that
+    // takes the first row out and the one that puts three in front are built whole, and every other is a translate.
+    expect(on.translated).toEqual([true, true, true, true, false, true, true, false])
+    heldFor(on, "Edited", 2)
     expect(on.frames).toEqual(off.frames)
     expect(on.clicks).toEqual(off.clicks)
     expect(on.selected).toEqual(off.selected)
@@ -509,11 +524,24 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     expect(on.frames).toEqual(off.frames)
   })
 
+  unverified("reports to a ResizeObserver alone, with no read of the box, what a row that came in measures", () => {
+    const options = { observe: true }
+    const on = runRows(true, "absolute", FIRST, enterSteps, options)
+    const off = runRows(false, "absolute", FIRST, enterSteps, options)
+    expect(on.translated, "the rows came in by translates").toEqual(enterSteps.map(() => true))
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(9)
+    expect(on.measured).toEqual([])
+    expect(on.observed.length).toBeGreaterThan(FIRST.length)
+    expect(on.observed).toEqual(off.observed)
+    expect(on.frames).toEqual(off.frames)
+  })
+
   unverified("is a frame built whole when the scroller runs its inline axis from the right, which puts a box that names no left there", () => {
     const options = { rtl: true }
     const on = runRows(true, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
     const off = runRows(false, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], options)
     expect(on.translated).toEqual([false])
+    heldFor(on, "Edited", 1)
     expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
     expect(on.frames).toEqual(off.frames)
   })
@@ -522,6 +550,8 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     const on = runRows(true, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], { selectedZ: 3 })
     const off = runRows(false, "absolute", FIRST, [{ by: 3, rows: [0, 1, 2, 3, 4] }], { selectedZ: 3 })
     expect(on.translated).toEqual([false])
+    heldFor(on, "Edited", 1)
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt).toBe(0)
     expect(on.frames).toEqual(off.frames)
   })
 

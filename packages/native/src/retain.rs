@@ -2318,6 +2318,13 @@ impl Retain {
         self.entry_starts.insert(parent, EntryStart { start, shape, epoch: self.entry_frame });
     }
 
+    /// Forgets what the children of `parent` were built from, for a build of `parent` that finds children it is noted for again.
+    pub(crate) fn forget_entry_start(&mut self, parent: u64) {
+        if !self.entry_starts.is_empty() {
+            self.entry_starts.remove(&parent);
+        }
+    }
+
     /// What a child that comes in under `parent` is built from: the start a sibling was built from, and the shape of `parent`.
     pub(crate) fn entry_start(&self, parent: u64) -> Option<(&crate::renderer::BuildStart, u64)> {
         self.entry_starts.get(&parent).map(|known| (&known.start, known.shape))

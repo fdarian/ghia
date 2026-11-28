@@ -53,13 +53,13 @@ pub(crate) fn groups(tree: &RetainedTree, window: gpui::WindowId, added: &[(u64,
         }
         // The horizontal place of a box that names none is where its parent's content begins, when the parent is a block and the
         // inline axis runs from the left (a right-to-left parent puts it at the other end).
+        let right_to_left = is_right_to_left(tree, parent)?;
         let auto_left = tree
             .elements
             .get(&parent)
-            .and_then(|holder| holder.style.as_deref())
-            .is_none_or(|style| matches!(style.display.as_deref(), None | Some("block")))
-            .then_some(bounds.padding_left)
-            .filter(|_| !is_right_to_left(tree, parent));
+            .filter(|holder| is_block_container(holder))
+            .map(|_| bounds.padding_left)
+            .filter(|_| !right_to_left);
         let holder = (
             bounds.x + bounds.client_left,
             bounds.y + bounds.client_top,
@@ -133,24 +133,39 @@ fn placed(element: &RetainedElement, holder: (f64, f64, f64, f64), auto_left: Op
     })
 }
 
-/// Whether the inline axis of `from` runs from the right, as `direction` inherits.
-fn is_right_to_left(tree: &RetainedTree, from: u64) -> bool {
+/// Whether the inline axis of `from` runs from the right, as `direction` inherits; `None` when an element of the way up is not in the
+/// tree.
+fn is_right_to_left(tree: &RetainedTree, from: u64) -> Option<bool> {
     let mut at = Some(from);
     while let Some(id) = at {
-        let Some(element) = tree.elements.get(&id) else { return false };
+        let element = tree.elements.get(&id)?;
         if let Some(direction) = element.style.as_deref().and_then(|style| style.direction) {
-            return direction.is_rtl();
+            return Some(direction.is_rtl());
         }
         at = element.parent;
     }
-    false
+    Some(false)
+}
+
+/// Whether `element` is a block that lays out the boxes in its flow one under the other, with the absolute ones that name no left
+/// put where its content begins: `display: block`, or no `display` on an element that is one by what it is.
+fn is_block_container(element: &RetainedElement) -> bool {
+    match element.style.as_deref().and_then(|style| style.display.as_deref()) {
+        Some("block") => true,
+        None => is_block_type(element),
+        Some(_) => false,
+    }
+}
+
+fn is_block_type(element: &RetainedElement) -> bool {
+    matches!(element.element_type.as_str(), "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "ul" | "ol" | "li")
 }
 
 /// Whether the box of `element` is block-level, as the box it would be in the flow of its parent is.
 fn is_block_level(element: &RetainedElement, style: &StyleDesc) -> bool {
     match style.display.as_deref() {
         Some("block" | "flex" | "grid") => true,
-        None => matches!(element.element_type.as_str(), "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "ul" | "ol" | "li"),
+        None => is_block_type(element),
         Some(_) => false,
     }
 }
@@ -244,5 +259,38 @@ impl GpuixView {
         self.emit_css_events(&callback, &tree);
         crate::renderer::emit_layout_events(&callback, &tree, self.layout_flips.take_events());
         built
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tree(json: &str) -> RetainedTree {
+        let mut tree = RetainedTree::new();
+        crate::batch::test_json::apply(&mut tree, json).expect("valid batch");
+        tree
+    }
+
+    fn block_container(json: &str) -> bool {
+        is_block_container(tree(json).elements.get(&1).expect("element 1"))
+    }
+
+    #[test]
+    fn only_a_block_puts_a_box_that_names_no_left_where_its_content_begins() {
+        assert!(block_container(r##"[["createElement",1,"div"],["setRoot",1]]"##));
+        assert!(block_container(r##"[["createElement",1,"span"],["setStyle",1,{"display":"block"}],["setRoot",1]]"##));
+        assert!(!block_container(r##"[["createElement",1,"span"],["setRoot",1]]"##), "no display on an inline element");
+        assert!(!block_container(r##"[["createElement",1,"div"],["setStyle",1,{"display":"flex"}],["setRoot",1]]"##));
+        assert!(!block_container(r##"[["createElement",1,"div"],["setStyle",1,{"display":"inline-block"}],["setRoot",1]]"##));
+    }
+
+    #[test]
+    fn the_direction_is_inherited_and_unknown_for_an_element_that_is_not_in_the_tree() {
+        let ltr = tree(r##"[["createElement",1,"div"],["createElement",2,"div"],["appendChild",1,2],["setRoot",1]]"##);
+        assert_eq!(is_right_to_left(&ltr, 2), Some(false));
+        let rtl = tree(r##"[["createElement",1,"div"],["setStyle",1,{"direction":"rtl"}],["createElement",2,"div"],["appendChild",1,2],["setRoot",1]]"##);
+        assert_eq!(is_right_to_left(&rtl, 2), Some(true));
+        assert_eq!(is_right_to_left(&rtl, 99), None);
     }
 }

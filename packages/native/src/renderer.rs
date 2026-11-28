@@ -13730,6 +13730,10 @@ fn build_content(
         }
     }
 
+    // A parent that is no longer inside a `div` scroller, or no longer has an absolute child placed by it, is found out by a build
+    // that does not note it again.
+    ctx.retain.forget_entry_start(element.id);
+    ctx.tree.forget_scroll_content_parent(element.id);
     // Children. Consecutive inline children are one paragraph, see
     // `text::inline`; the rest are elements of their own.
     if !crate::layout::generated::childless(ctx.tree, element) {
