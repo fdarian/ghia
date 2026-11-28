@@ -13,8 +13,6 @@ pub(crate) struct Placed {
     /// Where its box is, as the layout of the page puts it (the scroll has not moved it).
     pub origin: gpui::ScrollEnteredOrigin,
     pub size: (f64, f64),
-    /// The width of the padding box of the parent, which the child is laid out in.
-    pub available_width: f64,
 }
 
 /// Children that came in under `parent` and follow one another in the tree, beside the root `neighbor` that stays.
@@ -161,7 +159,6 @@ fn placed(element: &RetainedElement, holder: &Holder, auto_left: Option<f64>) ->
     (inside && width > 0.0 && height > 0.0).then_some(Placed {
         origin: gpui::ScrollEnteredOrigin::InHolder(gpui::ScrollEnteredInHolder { holder: holder.node, top: declared_top, left: declared_left }),
         size: (width, height),
-        available_width: holder.area_width,
     })
 }
 
