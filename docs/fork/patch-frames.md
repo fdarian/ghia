@@ -1254,7 +1254,7 @@ that holds is counted in `held`, so what else would stop the frame is known too:
 | `Hover` | the pointer moved since the frame shown. A pointer that did not move is not a reason whatever rows come under it: a scroll does not recompute the hover, which follows when the scroll ends ([scroll.md](scroll.md#the-hover-under-a-still-pointer)). `hoverOnly` counts the `Hover` frames that nothing else stops: eligible with the pointer where the frame shown had it |
 | `Place`, `Region`, `Clip` | `Recorded::place` would not put a row there (a `Region` or `Clip` miss of a row that stays is built again in the translate when the list has a builder, which Ghia's lists have, though since [slice G4a](#a-row-of-a-list-is-recorded-for-its-travel-slice-g4a) a row of a list does not miss `Region` while it shows, so for them only `Place` holds the frame, [slice G3d](#overdraw-measured-and-rows-built-again-slice-g3d)): what it reads of its surroundings differs in more than the offset (a scale factor that is not a power of two, an exact or rounded clip around, a general transform), the region the row was recorded in no longer covers the clip around it, or a rounded clip in it meets the clip differently (`ReplayKey::relocates_by`, `RelocationInfo::fits`, asked of the recording by `RetainedState::would_place`). `held` also counts `Region.top`, `Region.bottom` and `Region.side`: the edge of the clip the moved region leaves bare (the rows moved up by more than the overscan leave the bottom bare) |
 | `Focus` | the frame shown, or a layout there, builds a row outside the viewport for the focus it holds |
-| `A11y` | the accessibility tree is being built |
+| `A11y` | the frame shown has no accessibility tree to edit, or a screen reader came or went since it: the platform is told of a tree that is built or of none by a frame built whole ([the tree](#the-accessibility-tree)). A tree that is built is no reason; and a `div` scroller's frame is still held by it (it has no row runs to say which nodes its offset moves) |
 | `ScrollAnimation` | a smooth scroll, or a scrollbar that thickens or fades and is not a list's (a list's fades by thumb repaints, which the owner does not say), has frames of its own (the owner says it) |
 | `Clock` | something that follows the clock has a frame to draw: a tick was requested for this draw (`Window::request_tick`: a transition, a keyframe animation, a motion value, the blink of a caret, a hover paint), or the owner says its last frame asked for another (`ClockAsked`, published by the frame that ran: a transition, animation or motion running, a motion value that wants frames). A translate builds nothing, and `draw` takes the tick (`patch.tick`) before it classifies, so a translate that took it would leave nothing to ask for the next frame and what runs would stand still until a frame built whole. The tick is kept as a flag of the draw (`ScrollPatchWindow::ticked`) and refused, not left set, so the tick is drawn by the frame that is built whole |
 | `Thumb` | the thumb of a bar cannot be put where the scroll puts it ([The thumb](#the-thumb)): the bar of a list would be painted at another alpha, size or track than the frame shown painted it, would appear where the frame shown painted none, or is painted in a way that cannot be moved in place; or a bar of a scroll container is due a frame (`scrollbar::container_bar_stale`, said by the owner's gate). `held` also counts `Thumb.size`, `Thumb.alpha`, `Thumb.appear` and `Thumb.track` |
@@ -1289,7 +1289,7 @@ count and the translate off. The pixels, boxes and hits are the same either way 
 - **The three coincide.** Rows come in every 72 px, the pointer meets a new row every 72 px and a row has traveled 360 px (five rows) every 72 px: in this proxy `Membership`, `Hover` and `Region` hold on the same frames, so `Membership` alone is 382 frames, `Membership` or `Hover` 386 (`Hover` alone adds 4, both 296), and `Membership` or `Hover` or `Region` 392. `Region` is the first reason of 6 frames only. With the old `Hover` (`HitboxChain`) the union with `Membership` is all 720. A row coming in at an edge (`Membership`) is what stops the other 382, and a translate that builds that row is the next step.
 - With the pointer in the scrollbar gutter of the list (`SCROLL_X=637`, outside the hover-styled boxes of the rows) `Hover` holds for 1 frame, and 323 are eligible: the scrollbar fade made 9 of the frames `ScrollAnimation` first (19 held), measured before a step of the fade became a thumb repaint.
 
-With the test window's pretend screen reader on (`A11Y` unset) `A11y` holds for all 720 and none is eligible; the rest is the same. Instructions per tick (whole `drawFrame` plus input, two runs each back to back): 11.83M and 11.82M on, 11.58M and 11.63M with `GPUIX_SCROLL_PATCH_OFF=1`: the recording and the classification cost about 0.2M a tick (1.9%), the hit tests of the hover included.
+With the test window's pretend screen reader on (`A11Y` unset), `A11y` used to hold 719 of the 720 and none was eligible (instructions per tick: mean 6.770M, median 5.272M); since [the translate edits the accessibility tree](#the-accessibility-tree) the screen reader is no reason: 693 of 720 are patched, as with `A11Y=0`, `applyDeclines` is empty, mean 5.491M, median 3.670M (`A11Y=0`: 5.297M and 3.521M), and the tree after each step is the one a frame built whole has (`scroll-patch-a11y.test.tsx`, `membership_patch_tests.rs`, both under the verifier). Without a screen reader, instructions per tick (whole `drawFrame` plus input, two runs each back to back): 11.83M and 11.82M on, 11.58M and 11.63M with `GPUIX_SCROLL_PATCH_OFF=1`: the recording and the classification cost about 0.2M a tick (1.9%), the hit tests of the hover included.
 
 ### The translate
 
@@ -1324,7 +1324,7 @@ what the frame shown cut moved by the offset would be. So for each row it makes 
 
 Everything that can decline is checked before anything is written (the plan keeps, for each row, the recording it holds by reference, and the writes are made from it). A row whose state or recording is gone, that hands elements to a stacking context, or
 whose operations or hitboxes are not as many as it recorded (a hidden row records none) declines the whole translate
-(`applyDeclines`: `Recording`, `Operations`, `Hitboxes`, `Runs`, `Window`), and the frame is built whole in the same draw, with the
+(`applyDeclines`: `Recording`, `Operations`, `Hitboxes`, `Runs`, `Window`, `A11y`), and the frame is built whole in the same draw, with the
 prediction still checked afterwards. `Window` is a draw that is a layout pass, measures, or runs inside the dispatch of an input.
 
 **Layout and reads (what was chosen).** A bounds read after a translate does not lay out again and sees the moved rows: the registries
@@ -1336,6 +1336,40 @@ wrote for a root it built are moved where they are kept), the matrices of the te
 where it is), and the replays that have not been read. The paragraphs and the text layouts move by their handles. A registry that gains
 a writer has to be shifted here. The alternative (leave the window dirty so that the next read lays out) was not taken: a dirty window is
 drawn again whole by the frame loop.
+
+### The accessibility tree
+
+With a screen reader connected a frame sends the platform a whole `TreeUpdate`, and a translate builds no tree, so for a long time `A11y`
+held every frame (719 of 720 wheel ticks of the mailbox proxy with the test window's pretend screen reader, none translated: VoiceOver users
+had no translate). A translate now edits the tree the frame shown sent (`window/a11y/scroll.rs`), as it edits the scene and the hitboxes:
+
+- **What the frame shown has.** The tree a frame sent is kept (`A11yDebug::last_tree_update`, which the debug dump reads), and `A11y::tree_sent`
+  says the last frame sent it. The classifier holds `A11y` (`A11y::can_follow_scroll`) only when no tree is there to edit: a screen reader
+  came or went since the frame shown (`would_be_active` differs from what that frame built), which a frame built whole tells the platform of
+  (activation also asks for a refresh). A measure pass is no frame and leaves it alone.
+- **A row's share of the tree** is in its recording, which a replay writes: the prepaint's `A11yRecording` holds the nodes (with bounds as
+  recorded) and their `top_children`; the paint's holds the action listeners of the nodes.
+  `RetainedState::a11y_parts` gives both, and a row with no recording of them (it was recorded while no tree was built) declines the translate
+  as `applyDeclines.A11y`.
+- **A row that stays** has the bounds a replay gives it: the node of the tree with its bounds set from the recorded node moved by the total
+  delta (`moved_bounds`, the arithmetic of `A11yRecording::replay`, so the tree is the same to the bit), and `node_bounds`, which
+  `ScrollIntoView` and a press are answered from, moved by the same delta. **A row that leaves** is cut out of the tree, its entries out of
+  `node_bounds`, `focus_ids` and `action_listeners`. **A row that comes in** (or a row that stays and is built again) is built in the scratch
+  frame with its own tree builder and maps (`A11y::begin_rows_scratch`, which puts away the ones of the frame shown), so its recordings are
+  made with a tree on, and what they hold is written when the translate is. The rows' nodes are one contiguous block of the retained vector
+  (the order a frame built whole pushes them in, so the debug dump numbers the nodes as the build does), which is replaced; the node the rows
+  hang off lists its new children, in the order of the list. That node is found in the tree and not in the recordings (a row built in the
+  scratch frame hung off the scratch builder's root, and hangs off the tree's node now): the first node after the block that lists the
+  first of the rows' top children.
+- **What is not a translate:** the tree is checked before anything is written (`plan_scroll`, `applyDeclines.A11y`), after the rows that come
+  in were built and forgotten: a row that leaves or comes in holds the focus or the active descendant, claims an author id or names a
+  relation (these resolve against the whole tree), the rows' nodes are not where the tree has them in the order of the list, they hang off more
+  than one node, or the node they hang off is not found.
+- **The platform** is told of what changed in an update of its own, with no `tree` (the nodes that moved, the nodes that came in and the node
+  that lists the children); what the root no longer reaches is dropped by the adapter. `getShownA11yTree` (test renderer) reads the retained tree
+  without the flush that `getA11yTree` makes and that draws a frame built whole over it.
+- **The verifier** compares the tree the translate left (`A11y::describe_shown`: the nodes in order and the focus) with the frame built whole
+  after it, with the maps (`describe_whole`) it already compared.
 
 **The thumb** (`Window::paint_scroll_thumb`, zed `window/scroll_patch.rs`; Ghia `scrollbar.rs`). A list's overlay scrollbar paints its thumb
 over the rows, and a scroll moves it. The bar paints the thumb through `paint_scroll_thumb(list, quad, plan, moved)`, which paints the quad and

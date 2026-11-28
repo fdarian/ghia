@@ -11387,7 +11387,9 @@ move the clock with `clockAdvance(ms)` before each `drawFrame()`. `clockFastForw
 also tells the window, so the frame after it is built whole and never a tick.
 
 `setA11yActive(false)` removes the pretend screen reader the test window starts
-with. Set `GPUIX_RETAIN_OFF=1` (or call `setRetainEnabled(false)` on one window)
+with. `getA11yTree()` flushes and so draws a frame built whole; `getShownA11yTree()`
+returns the tree of the frame drawn last as it is, which after a wheel over a
+`<virtual-list>` is the tree the translate of its rows edited. Set `GPUIX_RETAIN_OFF=1` (or call `setRetainEnabled(false)` on one window)
 to build every frame in full, for timing, `GPUIX_PATCH_OFF=1` (or
 `setPatchEnabled(false)` on one window) to draw every tick of an animation whole
 instead of patching it, `getPatchCounters().scrollPatch` for how the frames after a
