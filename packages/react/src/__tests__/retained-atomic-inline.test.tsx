@@ -271,6 +271,32 @@ describeNative("rows that each hold an atomic inline", { timeout: TIMEOUT }, () 
     expect(on.rows.length).toBe(3)
   })
 
+  it("moves the focus along the buttons of the rows and shows the ring a build shows", () => {
+    const focus = (retain: boolean) => {
+      const opened = open({ inline: "button" }, retain)
+      const renderer = opened.renderer
+      try {
+        const shown: unknown[] = []
+        for (const key of ["Tab", "Tab", "Shift+Tab", "Tab"]) {
+          renderer.simulateKeystrokes(key)
+          renderer.drawFrame()
+          shown.push(seen(renderer, points))
+        }
+        tick(renderer, 20)
+        shown.push(seen(renderer, points))
+        renderer.simulateKeystrokes("Tab")
+        renderer.drawFrame()
+        shown.push(seen(renderer, points))
+        return { shown, mismatches: renderer.getRetainedCounters().mismatches }
+      } finally {
+        opened.unmount()
+      }
+    }
+    const on = focus(true)
+    expect(on.mismatches).toBe(0)
+    expect(on.shown).toEqual(focus(false).shown)
+  })
+
   it("a row whose button changes is built again and the others are replayed, as a build shows them", () => {
     const edit = (retain: boolean) => {
       const opened = open({ inline: "button" }, retain)
