@@ -2900,18 +2900,23 @@ impl Retain {
         self.plan.patch_root_ids.contains(&id)
     }
 
-    /// Whether a root the frame holds as a patch root is above the element `id`. A frame built whole builds what is in a patch root
-    /// whole and records no root of its own in it (`begin_patch_root`), so a root that a late build of that patch root skipped is no
-    /// patch root of the next frame: a patch of it would be of a retained root that the frame built whole after it does not make.
-    pub(crate) fn is_under_patch_root(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
+    /// Whether the patch root `id`, which the frame skipped, is registered as one. gpui builds a root late when it cannot
+    /// replay it, and the roots in it that nothing changed are skipped by that build; a frame built whole builds them inside
+    /// the patch root and records none, so a patch of one would name a retained root that the frame built whole after it (the
+    /// verifier's reference, or the next frame) does not make. Such a root, with a registered patch root above it, is none.
+    /// Only a late build skips inside a patch root, so the walk up is for those.
+    pub(crate) fn registers_skipped_patch_root(&self, tree: &crate::retained_tree::RetainedTree, id: u64) -> bool {
+        if !self.deferred {
+            return true;
+        }
         let mut up = tree.elements.get(&id).and_then(|element| element.parent);
         while let Some(above) = up {
             if self.plan.patch_root_ids.contains(&above) {
-                return true;
+                return false;
             }
             up = tree.elements.get(&above).and_then(|element| element.parent);
         }
-        false
+        true
     }
 
     /// Keeps the root that a patch repaints, for the ticks that follow the frame.
@@ -4807,6 +4812,30 @@ mod tests {
         // The walk from 4 used to stop at 3, which the frame before had left in `unbuilt`.
         frame_of(&mut retain, &tree, &[4], &[1, 2]);
         assert_eq!(sorted(&retain.deltas.spine), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_patch_root_a_late_build_skipped_inside_a_patch_root_is_not_registered() {
+        // 1 > 2 > 3, and 4 beside 2: 1 is a registered patch root whose late build skips 2, 3 and 4.
+        let tree = tree_of(&[
+            (1, None, "div", None),
+            (2, Some(1), "div", None),
+            (3, Some(2), "div", None),
+            (4, Some(1), "div", None),
+            (5, None, "div", None),
+        ]);
+        let mut retain = Retain::new();
+        retain.set_planning(true);
+        retain.plan.patch_root_ids.insert(1);
+        // A frame that skips a root enters nothing in it, so what it skips is registered whatever is above it.
+        assert!(retain.registers_skipped_patch_root(&tree, 3));
+        retain.begin_deferred(false, false);
+        assert!(!retain.registers_skipped_patch_root(&tree, 2), "2 is in the patch root 1");
+        assert!(!retain.registers_skipped_patch_root(&tree, 3), "3 is below 2, which is below 1");
+        assert!(!retain.registers_skipped_patch_root(&tree, 4));
+        assert!(retain.registers_skipped_patch_root(&tree, 5), "5 has no patch root above it");
+        assert!(retain.registers_skipped_patch_root(&tree, 1), "a root is not above itself");
+        retain.finish_deferred();
     }
 
     #[test]

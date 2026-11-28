@@ -11637,7 +11637,7 @@ fn retained_root(
         retained = retained.lift_z(z);
     }
     if skip.patch_root {
-        if !ctx.retain.is_under_patch_root(ctx.tree, id) {
+        if ctx.retain.registers_skipped_patch_root(ctx.tree, id) {
             retained = if skip.box_root { retained.patchable_relayout() } else { retained.patchable() };
             ctx.retain.add_patch_root(crate::retain::Unit { id, env: patch_root_env });
             if skip.box_root {
