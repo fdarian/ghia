@@ -105,6 +105,14 @@ impl PropKey {
         }
     }
 
+    /// Whether this animates a colour: a style colour or the paint of an SVG shape.
+    fn is_colour(self) -> bool {
+        match self {
+            Self::Style(prop) => prop.is_colour(),
+            Self::Svg(attr) => attr.is_colour(),
+        }
+    }
+
     /// Whether a change of what this animates can move a box or a line of text.
     fn changes_layout(self) -> bool {
         match self {

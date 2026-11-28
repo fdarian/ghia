@@ -7713,12 +7713,16 @@ mod tests {
         // The row 2 forms a context at 0.5 and takes the dot, unless its hover builds it at opacity 1.
         let scan = scan_of([(2, style_of(r##"{"opacity":0.5,"hover":{"backgroundColor":"#eee"}}"##)), (3, dot()), (4, plain())]);
         assert!(!scan.lifts_out, "a hover that paints only leaves the context");
+        // A colour that a `var()` gives is paint too: what it resolves to is checked when the hover happens.
+        let row = crate::css::var_substitution::parse(br##"{"opacity":0.5,"hover":{"backgroundColor":"var(--on)"}}"##).expect("a style");
+        let scan = scan_of([(2, row), (3, dot()), (4, plain())]);
+        assert!(!scan.lifts_out, "a hover that paints only through a var() leaves the context");
         for row in [
             r##"{"opacity":0.5,"hover":{"backgroundColor":"#eee","opacity":1}}"##,
             r##"{"opacity":0.5,"hasHover":{"opacity":1}}"##,
-            r##"{"opacity":0.5,"hover":{"backgroundColor":"var(--on)"}}"##,
+            r##"{"opacity":0.5,"hover":{"opacity":"var(--on)"}}"##,
         ] {
-            // As the retained tree parses it: a `var()` in a state is held by the state, not read as a colour.
+            // As the retained tree parses it: a `var()` in a state is held by the state, not read as a number.
             let row = crate::css::var_substitution::parse(row.as_bytes()).expect("a style");
             let scan = scan_of([(2, row), (3, dot()), (4, plain())]);
             assert!(scan.lifts_out, "the row may form no context while hovered");

@@ -9,6 +9,7 @@ pub mod element_drag;
 pub mod file_drag;
 pub(crate) mod hover_after_scroll;
 pub(crate) mod hover_paint;
+pub(crate) mod hover_vars;
 pub mod ids;
 pub mod inline_target;
 pub(crate) mod input_state;
