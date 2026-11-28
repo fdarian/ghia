@@ -8463,6 +8463,15 @@ impl GpuixView {
         self.retain.forget_left_rows(&left, &tree.lock().unwrap());
     }
 
+    /// A frame that moved the content of a scroller drew the tree as it is: the children a commit took out of it are out of the
+    /// frame shown, so the frame shown is the frame of this revision, as after a patch.
+    pub(crate) fn note_removals_drawn(&mut self) {
+        let tree = self.tree.lock().unwrap();
+        tree.take_restyles();
+        tree.take_structure();
+        self.retain.note_patched(tree.root_revision());
+    }
+
     /// A frame moved the content of the scroller `translated` in place: the offset the next frame is compared with is the one it left.
     pub(crate) fn note_scrolls_translated(&mut self, translated: gpui::ScrollKey) {
         self.retain.note_scrolls_translated(&self.scroll_handles, translated);

@@ -1046,6 +1046,14 @@ pub struct RetainedTree {
     /// The parent each detached element left, so that putting it under another one counts as a
     /// reparent as well. Gone once the element is attached again or destroyed.
     detached_from: FxHashMap<u64, u64>,
+    /// The elements taken out of the tree, and the parent each left, since the frame that last took the changes
+    /// (`take_structure`), that changed nothing but their parent's children: out of flow, and under no anchor. A scroll
+    /// that moves what holds them can take them out of the frame it shows ([`Self::pure_removals_since`]).
+    removed: std::cell::RefCell<Vec<(u64, u64)>>,
+    /// The revision of the last change in the frame that is not one of `removed`.
+    other_revision: u64,
+    /// A change of `removed` is being made, which takes a revision that is no `other_revision`.
+    removal_open: bool,
 }
 
 // `init_threaded` moves the tree into a thread: nothing kept on an element may be `Rc`.
@@ -1105,6 +1113,9 @@ impl RetainedTree {
             removals: 0,
             reparents: 0,
             detached_from: FxHashMap::default(),
+            removed: Default::default(),
+            other_revision: 0,
+            removal_open: false,
         }
     }
 
@@ -1147,7 +1158,7 @@ impl RetainedTree {
     pub fn take_dirty(&mut self) -> Dirty {
         let dirty = std::mem::take(&mut self.dirty);
         let unattributed = std::mem::take(&mut self.unattributed_dirty);
-        if dirty == Dirty::Layout && !unattributed && self.structure_attributed() {
+        if dirty == Dirty::Layout && !unattributed && self.structure_attributed() && !self.only_removals_pending() {
             return Dirty::LayoutPatchable;
         }
         dirty
@@ -1247,7 +1258,82 @@ impl RetainedTree {
 
     /// Hands the elements of `pending_structure` over: a frame built whole drew them, or a patch did.
     pub fn take_structure(&self) -> Vec<u64> {
+        self.removed.borrow_mut().clear();
         std::mem::take(&mut *self.structure.borrow_mut())
+    }
+
+    /// Whether the changes since a frame took them are children taken out of the tree and nothing else, which no anchor
+    /// follows: the next frame is a frame built whole, or a scroll that moves what held them (`pure_removals_since`).
+    fn only_removals_pending(&self) -> bool {
+        let removed = self.removed.borrow();
+        !removed.is_empty()
+            && self.restyled.borrow().is_empty()
+            && self.structure.borrow().iter().all(|id| removed.iter().any(|(_, parent)| parent == id))
+    }
+
+    /// The elements taken out of the tree since the frame shown, if that frame was built at `revision` and nothing else
+    /// changed since: out of flow, so that what stays is where it was, and under no anchor. `None` for any other change.
+    /// Each is given with the parent it left.
+    pub(crate) fn pure_removals_since(&self, revision: u64) -> Option<Vec<(u64, u64)>> {
+        let removed = self.removed.borrow();
+        (!removed.is_empty() && self.other_revision <= revision && self.restyled.borrow().is_empty()).then(|| removed.clone())
+    }
+
+    /// `removed`, and the children each parent has left, which a removal moves nearer the start of the document: `None` when a
+    /// parent is not in the tree any more.
+    pub(crate) fn what_stays_of(&self, removed: &[(u64, u64)]) -> Option<(Vec<(u64, u64)>, Vec<u64>)> {
+        let mut parents: Vec<u64> = removed.iter().map(|(_, parent)| *parent).collect();
+        parents.sort_unstable();
+        parents.dedup();
+        let mut survivors = Vec::new();
+        for parent in parents {
+            survivors.extend(self.elements.get(&parent)?.children.iter().copied());
+        }
+        Some((removed.to_vec(), survivors))
+    }
+
+    /// Whether taking `child` out of `parent` changes nothing a frame that keeps the rest of the content where it is cannot
+    /// draw: `child` is out of flow, nothing in it can take focus, and no anchor follows `parent`, whose patch is the better
+    /// frame for it.
+    fn removal_leaves_the_rest(&self, child: u64, parent: u64) -> bool {
+        if !self.commit_patching || self.outside_the_frame(parent) || self.anchor_holding(parent).is_some() {
+            return false;
+        }
+        let Some(element) = self.elements.get(&child) else {
+            return false;
+        };
+        if !matches!(self.position_of(element), containing_block::Position::Absolute | containing_block::Position::Fixed) {
+            return false;
+        }
+        // Generated content after the child is text that no root wrote, which its place in the document is not renumbered for.
+        if self.elements.get(&parent).is_none_or(|parent| parent.pseudo_matches().is_some()) {
+            return false;
+        }
+        if self.focusable_ids.is_empty() {
+            return true;
+        }
+        let mut pending = vec![child];
+        while let Some(id) = pending.pop() {
+            if self.focusable_ids.contains(&id) {
+                return false;
+            }
+            if let Some(element) = self.elements.get(&id) {
+                pending.extend(element.children.iter().copied());
+            }
+        }
+        true
+    }
+
+    /// `mark_changed(parent)` for `child` that is taken out of it.
+    fn mark_removed(&mut self, child: u64, parent: u64, leaves_the_rest: bool) {
+        if !leaves_the_rest {
+            self.mark_changed(parent);
+            return;
+        }
+        self.removal_open = true;
+        self.mark_changed(parent);
+        self.removal_open = false;
+        self.removed.get_mut().push((child, parent));
     }
 
     /// Classifies paint-only restyles for patch frames from now on, or stops.
@@ -1470,6 +1556,7 @@ impl RetainedTree {
         self.dirty = self.dirty.max(Dirty::Layout);
         let revision = self.next_revision;
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
+        self.other_revision = revision;
         revision
     }
 
@@ -1491,6 +1578,9 @@ impl RetainedTree {
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
         if dirty != Dirty::PaintPatchable && !followed {
             self.patch_barrier = revision;
+        }
+        if !self.removal_open {
+            self.other_revision = revision;
         }
         revision
     }
@@ -1579,11 +1669,12 @@ impl RetainedTree {
     /// Unlinks from the parent before removing, then marks the parent chain
     /// changed so caches cannot serve text that is no longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
+        let parent_id = self.elements.get(&id).and_then(|element| element.parent);
+        let leaves_the_rest = parent_id.is_some_and(|parent| self.removal_leaves_the_rest(id, parent));
         self.list_unlinking(id);
         if self.sheets.enabled {
             self.sheets_unlinking(id);
         }
-        let parent_id = self.elements.get(&id).and_then(|element| element.parent);
         // An element taken out of its parent by `detach_child` was noted then, and one that was never
         // in the tree is in no frame.
         let detached = parent_id.is_none() && self.detached_from.contains_key(&id);
@@ -1611,7 +1702,7 @@ impl RetainedTree {
             self.root_id = None;
         }
         if let Some(parent_id) = parent_id {
-            self.mark_changed(parent_id);
+            self.mark_removed(id, parent_id, leaves_the_rest);
         }
         destroyed
     }
@@ -1672,6 +1763,7 @@ impl RetainedTree {
         let Some(parent_id) = self.elements.get(&id).and_then(|element| element.parent) else {
             return;
         };
+        let leaves_the_rest = self.removal_leaves_the_rest(id, parent_id);
         self.list_unlinking(id);
         if self.sheets.enabled {
             self.sheets_unlinking(id);
@@ -1690,7 +1782,7 @@ impl RetainedTree {
         if self.editable_count > 0 {
             self.track_focusable_subtree(id);
         }
-        self.mark_changed(parent_id);
+        self.mark_removed(id, parent_id, leaves_the_rest);
         self.relations.restructured();
     }
 
@@ -4590,5 +4682,75 @@ mod tests {
         apply(&mut tree, r##"[["detachChild",3],["appendChild",2,3]]"##);
         assert_eq!(tree.reparents(), start + 1);
         assert!(tree.detached_from.is_empty());
+    }
+
+    /// A scroller (1) that holds a box (2), which holds two absolute rows (3, 4) and a row in the flow (5).
+    fn rows_in_a_box() -> RetainedTree {
+        let mut tree = RetainedTree::new();
+        tree.set_commit_patching(true);
+        apply(
+            &mut tree,
+            r##"[["createElement",1,"div"],["createElement",2,"div"],["createElement",3,"div"],["createElement",4,"div"],["createElement",5,"div"],
+                ["setStyle",3,{"position":"absolute"}],["setStyle",4,{"position":"absolute"}],
+                ["appendChild",1,2],["appendChild",2,3],["appendChild",2,4],["appendChild",2,5],["setRoot",1]]"##,
+        );
+        tree.take_dirty();
+        tree.take_structure();
+        tree.take_restyles();
+        tree
+    }
+
+    #[test]
+    fn taking_absolute_rows_out_is_a_removal_the_frame_shown_can_follow() {
+        let mut tree = rows_in_a_box();
+        let shown = tree.root_revision();
+        apply(&mut tree, r##"[["detachChild",3],["detachChild",4]]"##);
+        assert_ne!(tree.root_revision(), shown);
+        assert_eq!(tree.pure_removals_since(shown), Some(vec![(3, 2), (4, 2)]));
+        let (removed, stays) = tree.what_stays_of(&[(3, 2), (4, 2)]).unwrap();
+        assert_eq!(removed, vec![(3, 2), (4, 2)]);
+        assert_eq!(stays, vec![5], "what is left of the box that held them");
+        // Destroying what was detached changes nothing more, and a frame that takes the changes forgets them.
+        apply(&mut tree, r#"[["destroyElement",3]]"#);
+        assert_eq!(tree.pure_removals_since(shown).map(|removed| removed.len()), Some(2));
+        tree.take_structure();
+        assert_eq!(tree.pure_removals_since(shown), None);
+    }
+
+    #[test]
+    fn a_removal_is_no_removal_when_anything_else_changed_since_the_frame_shown() {
+        let mut tree = rows_in_a_box();
+        let shown = tree.root_revision();
+        apply(&mut tree, r##"[["detachChild",3],["setStyle",1,{"opacity":0.5}]]"##);
+        assert_eq!(tree.pure_removals_since(shown), None);
+        let mut tree = rows_in_a_box();
+        let shown = tree.root_revision();
+        apply(&mut tree, r##"[["setStyle",1,{"opacity":0.5}],["detachChild",3]]"##);
+        assert_eq!(tree.pure_removals_since(shown), None);
+        let mut tree = rows_in_a_box();
+        let shown = tree.root_revision();
+        apply(&mut tree, r##"[["detachChild",3],["createElement",6,"div"],["appendChild",2,6]]"##);
+        assert_eq!(tree.pure_removals_since(shown), None, "a row that comes in is a build");
+    }
+
+    #[test]
+    fn a_row_in_the_flow_moves_what_is_after_it_so_it_is_no_removal() {
+        let mut tree = rows_in_a_box();
+        let shown = tree.root_revision();
+        apply(&mut tree, r##"[["detachChild",5]]"##);
+        assert_eq!(tree.pure_removals_since(shown), None);
+    }
+
+    #[test]
+    fn a_commit_that_only_removes_rows_is_a_layout_no_patch_asks_for() {
+        let mut tree = rows_in_a_box();
+        tree.set_anchors([99].into_iter().collect(), tree.root_revision());
+        apply(&mut tree, r##"[["detachChild",3]]"##);
+        assert_eq!(tree.take_dirty(), Dirty::Layout, "no anchor holds the box, whatever anchors the page has");
+        let mut tree = rows_in_a_box();
+        tree.set_anchors([1].into_iter().collect(), tree.root_revision());
+        apply(&mut tree, r##"[["detachChild",3]]"##);
+        assert_eq!(tree.take_dirty(), Dirty::LayoutPatchable, "an anchor that holds the box lays it out again");
+        assert_eq!(tree.pure_removals_since(0), None, "a removal that an anchor follows is that patch's");
     }
 }

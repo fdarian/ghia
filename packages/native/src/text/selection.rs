@@ -68,6 +68,35 @@ impl DocPath {
 }
 
 impl DocPath {
+    /// Whether the position is not inside a paragraph that hosts it.
+    pub fn is_plain(&self) -> bool {
+        self.hosts.is_empty()
+    }
+
+    /// This path once the element at `removed` was taken out of the document: what comes after it among its siblings is one
+    /// place nearer the start, in the path and in the paragraphs that host it. `None` when nothing of it comes after.
+    pub fn after_removal_of(&self, removed: &DocPath) -> Option<DocPath> {
+        let (index, parent) = removed.path.split_last()?;
+        let up = |path: &Arc<[u32]>| -> Option<Arc<[u32]>> {
+            match path.strip_prefix(parent) {
+                Some([sibling, ..]) if sibling > index => {
+                    let mut moved = path.to_vec();
+                    moved[parent.len()] -= 1;
+                    Some(moved.into())
+                }
+                _ => None,
+            }
+        };
+        let (path, hosts): (Option<Arc<[u32]>>, Vec<Option<Arc<[u32]>>>) = (up(&self.path), self.hosts.iter().map(|host| up(&host.path)).collect());
+        if path.is_none() && hosts.iter().all(Option::is_none) {
+            return None;
+        }
+        Some(DocPath {
+            hosts: self.hosts.iter().zip(hosts).map(|(host, moved)| Host { path: moved.unwrap_or_else(|| host.path.clone()), ..host.clone() }).collect(),
+            path: path.unwrap_or_else(|| self.path.clone()),
+        })
+    }
+
     /// This path as seen from `root`, the path of an element it is inside: what `root` has in
     /// common with it is left out, so the result stays the same when something is inserted before
     /// `root`. [`Self::under`] puts it back.
@@ -1084,6 +1113,20 @@ mod tests {
         );
         assert_eq!(selection.wash_range("first"), Some(6..10));
         assert_eq!(selection.wash_range("third"), Some(0..5));
+    }
+
+    #[test]
+    fn what_comes_after_a_removed_element_among_its_siblings_is_one_place_nearer_the_start() {
+        let removed = DocPath::from(Arc::<[u32]>::from([0, 4, 7]));
+        let path = |path: &[u32]| DocPath::from(Arc::<[u32]>::from(path));
+        let moved = path(&[0, 4, 9, 1]).after_removal_of(&removed).expect("a later sibling moves");
+        assert_eq!(DocPos::new(moved, 0), DocPos::new(Arc::<[u32]>::from([0, 4, 8, 1]), 0));
+        assert!(path(&[0, 4, 6, 1]).after_removal_of(&removed).is_none(), "an earlier sibling stays");
+        assert!(path(&[0, 4, 7]).after_removal_of(&removed).is_none(), "and the element is not after itself");
+        assert!(path(&[0, 5, 9]).after_removal_of(&removed).is_none(), "nor is what is under another parent");
+        let hosted = DocPath::new(path(&[0, 1]).host(0, 3), Arc::from([0, 4, 9, 2]));
+        let moved = hosted.after_removal_of(&removed).expect("a text in a paragraph is put where its path is");
+        assert_eq!(DocPos::new(moved, 0), DocPos::new(DocPath::new(path(&[0, 1]).host(0, 3), Arc::from([0, 4, 8, 2])), 0));
     }
 
     #[test]
