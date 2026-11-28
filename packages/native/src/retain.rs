@@ -992,6 +992,8 @@ struct Deltas {
 struct Compared {
     all: bool,
     changed: Vec<u64>,
+    /// Which of `changed` are the scrolls of scrollers that are no list.
+    scroll_ids: std::ops::Range<usize>,
     scrolled: FxHashSet<u64>,
     scrolling: bool,
     scrolls: FxHashMap<u64, (u32, u32)>,
@@ -1903,6 +1905,7 @@ impl Retain {
             }
         }
 
+        let scroll_from = changed.len();
         let mut scrolled = FxHashSet::default();
         let scrolls = scroll_bits(sources.scrolls);
         let mut scrolling = false;
@@ -1919,6 +1922,7 @@ impl Retain {
             scrolled.insert(*id);
         }
         changed.extend(seen.scrolls.keys().filter(|id| !scrolls.contains_key(id)));
+        let scroll_ids = scroll_from..changed.len();
 
         let mut customs = FxHashMap::default();
         for (id, state) in &sources.customs {
@@ -1929,20 +1933,38 @@ impl Retain {
         }
         changed.extend(seen.customs.keys().filter(|id| !customs.contains_key(id)));
 
-        Compared { all, changed, scrolled, scrolling, scrolls, customs }
+        Compared { all, changed, scroll_ids, scrolled, scrolling, scrolls, customs }
     }
 
-    /// Whether something differs from the frame shown that a frame that only moves the rows of a list would
+    /// A frame moved the content of the scroller `translated` in place, which builds nothing: the offset it left is what the
+    /// frame shown has, so a tick or a build after it does not find the scroller moved again (`Unpatchable::Sourced`). The
+    /// other scrollers are as the frame shown has them: one that script moved meanwhile is moved for the next frame that builds.
+    pub(crate) fn note_scrolls_translated(&mut self, scrolls: &HashMap<u64, gpui::ScrollHandle>, translated: gpui::ScrollKey) {
+        for (id, handle) in scrolls {
+            if handle.scroll_key() == translated {
+                self.seen.scrolls.insert(*id, offset_bits(handle));
+            }
+        }
+    }
+
+    /// Whether something differs from the frame shown that a frame that only moves the content of a scroller would
     /// leave as it was: a source `compute_deltas` finds for a tick (a press, the focus, a selection, a custom
-    /// element, the scroll of a scroller that is no list: the list is not among `Sources::scrolls`), a
-    /// measurement, a link, a command or a hover restyled by paint that no frame has drawn. A peek, as `preview` is.
-    pub(crate) fn sources_changed(&self, sources: &Sources) -> bool {
+    /// element), a measurement, a link, a command or a hover restyled by paint that no frame has drawn. The scroll of
+    /// the scroller `translating` is not one: it is the one gpui moves the content of, if the frame can be that
+    /// (`Window::note_scroll_moved`). Any other scroller that moved is, because gpui knows no scroller inside a recorded
+    /// root: a translate would leave it where the frame shown has it. A peek, as `preview` is.
+    pub(crate) fn sources_changed(&self, sources: &Sources, translating: Option<gpui::ScrollKey>) -> bool {
         if !self.seen.known {
             return true;
         }
         let compared = self.compare_sources(sources, true);
+        let other_sources = compared.changed.len() - compared.scroll_ids.len();
+        let scrolled_elsewhere = compared.changed[compared.scroll_ids.clone()]
+            .iter()
+            .any(|id| sources.scrolls.get(id).is_none_or(|handle| Some(handle.scroll_key()) != translating));
         compared.all
-            || !compared.changed.is_empty()
+            || other_sources > 0
+            || scrolled_elsewhere
             || !sources.measured.is_empty()
             || !sources.links.is_empty()
             || !sources.commanded.is_empty()
@@ -4162,13 +4184,12 @@ fn for_each_unseen_element(
 
 /// The scroll offsets of the scrollers, as the bits that tell one frame's from another's.
 fn scroll_bits(scrolls: &HashMap<u64, gpui::ScrollHandle>) -> FxHashMap<u64, (u32, u32)> {
-    scrolls
-        .iter()
-        .map(|(id, handle)| {
-            let offset = handle.offset();
-            (*id, (f32::from(offset.x).to_bits(), f32::from(offset.y).to_bits()))
-        })
-        .collect()
+    scrolls.iter().map(|(id, handle)| (*id, offset_bits(handle))).collect()
+}
+
+fn offset_bits(handle: &gpui::ScrollHandle) -> (u32, u32) {
+    let offset = handle.offset();
+    (f32::from(offset.x).to_bits(), f32::from(offset.y).to_bits())
 }
 
 /// The ids that are in one of `before` and `now`, not in both, added to `changed`.
@@ -6593,6 +6614,43 @@ mod tests {
     }
 
     #[test]
+    fn a_scroller_whose_content_a_frame_moved_in_place_is_where_the_next_frame_finds_it() {
+        let mut page = Units::new();
+        page.scrolls.insert(2, gpui::ScrollHandle::new());
+        page.page(&[], Some(true), None);
+        page.page(&[], Some(true), None);
+        assert_eq!(page.preview(&[], false), Ok(vec![2]));
+        // A wheel moves the content and a frame that builds nothing shows it.
+        page.scrolls[&2].set_offset(gpui::point(gpui::px(0.0), gpui::px(-40.0)));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Sourced), "the frame shown has the scroller where it was");
+        let key = page.scrolls[&2].scroll_key();
+        page.retain.note_scrolls_translated(&page.scrolls, key);
+        assert_eq!(page.preview(&[], false), Ok(vec![2]), "the scroll is the frame shown's now");
+        // The offset that moves again is a change again.
+        page.scrolls[&2].set_offset(gpui::point(gpui::px(0.0), gpui::px(-80.0)));
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Sourced));
+    }
+
+    #[test]
+    fn a_translate_notes_the_scroller_it_moved_and_not_another_so_the_next_frame_finds_the_other_moved() {
+        let mut page = Units::new();
+        page.scrolls.insert(2, gpui::ScrollHandle::new());
+        page.scrolls.insert(3, gpui::ScrollHandle::new());
+        page.page(&[], Some(true), None);
+        page.page(&[], Some(true), None);
+        // A wheel moves the scroller 2, and a script the scroller 3, inside a root gpui records and knows nothing of.
+        page.scrolls[&2].set_offset(gpui::point(gpui::px(0.0), gpui::px(-40.0)));
+        page.scrolls[&3].set_offset(gpui::point(gpui::px(0.0), gpui::px(-12.0)));
+        let key = page.scrolls[&2].scroll_key();
+        assert!(page.retain.sources_changed(&page.sources(), Some(key)), "the scroll of the other is an edit");
+        page.retain.note_scrolls_translated(&page.scrolls, key);
+        assert_eq!(page.retain.seen.scrolls[&2], offset_bits(&page.scrolls[&2]), "the scroller the translate moved is the frame shown's now");
+        assert_ne!(page.retain.seen.scrolls[&3], offset_bits(&page.scrolls[&3]), "the other keeps the offset the frame shown had");
+        assert!(page.retain.sources_changed(&page.sources(), Some(key)), "a translate does not show it");
+        assert_eq!(page.preview(&[], false), Err(Unpatchable::Sourced), "and the next frame finds it moved");
+    }
+
+    #[test]
     fn a_tick_that_only_runs_the_animation_of_a_unit_previews_that_unit() {
         let mut page = Units::new();
         page.page(&[], Some(true), None);
@@ -8374,21 +8432,21 @@ mod tests {
         let mut page = Units::new();
         page.page(&[], None, None);
         page.page(&[], None, None);
-        assert!(!page.retain.sources_changed(&page.sources()), "nothing but time and the scroll of a list differs");
+        assert!(!page.retain.sources_changed(&page.sources(), None), "nothing but time and the scroll of a scroller differs");
 
         // The pointer is the classifier's: a hover chain that moved is no source here.
         let moved = [3, 2, 1];
         let mut sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &moved, false);
-        assert!(!page.retain.sources_changed(&sources));
+        assert!(!page.retain.sources_changed(&sources, None));
         // What a tick treats as a source is one: a press, the focus, a selection, a measurement, a link, a command, a
         // relevance, a hover restyled by paint that no frame drew, a custom element, the scroll of a scroller.
         let pressed = [3];
         sources = page.sources();
         sources.active = &pressed;
-        assert!(page.retain.sources_changed(&sources), "the active chain");
+        assert!(page.retain.sources_changed(&sources, None), "the active chain");
         sources = page.sources();
         sources.selection = 7;
-        assert!(page.retain.sources_changed(&sources), "the selection");
+        assert!(page.retain.sources_changed(&sources, None), "the selection");
         for (what, edit) in [
             ("a measurement", (|sources: &mut Sources| sources.measured = vec![3]) as fn(&mut Sources)),
             ("a link", |sources| sources.links = vec![3]),
@@ -8399,22 +8457,25 @@ mod tests {
         ] {
             sources = page.sources();
             edit(&mut sources);
-            assert!(page.retain.sources_changed(&sources), "{what}");
+            assert!(page.retain.sources_changed(&sources, None), "{what}");
         }
         page.focus.within = Arc::from([5]);
-        assert!(page.retain.sources_changed(&page.sources()), "the focus");
+        assert!(page.retain.sources_changed(&page.sources(), None), "the focus");
         page.focus.within = Arc::from([]);
-        assert!(!page.retain.sources_changed(&page.sources()));
+        assert!(!page.retain.sources_changed(&page.sources(), None));
         page.scrolls.insert(2, gpui::ScrollHandle::new());
         page.scrolls[&2].set_offset(gpui::point(gpui::px(0.0), gpui::px(-40.0)));
-        assert!(page.retain.sources_changed(&page.sources()), "a scroller that is no list scrolled");
+        let key = page.scrolls[&2].scroll_key();
+        assert!(!page.retain.sources_changed(&page.sources(), Some(key)), "the scroll of the scroller gpui moves is the classifier's");
+        assert!(page.retain.sources_changed(&page.sources(), None), "gpui moves no scroller's content");
+        assert!(page.retain.sources_changed(&page.sources(), Some(gpui::ScrollHandle::new().scroll_key())), "another scroller moved: gpui knows none inside a recorded root");
     }
 
     #[test]
     fn the_sources_of_a_frame_that_was_never_built_are_a_change() {
         let page = Units::new();
         let sources = sources_of(&page.tree, &page.focus, &page.handles, &page.scrolls, &[], false);
-        assert!(page.retain.sources_changed(&sources));
+        assert!(page.retain.sources_changed(&sources, None));
     }
 
     /// The page with 1, 2 and 3 holding a hover that paints (3 declares it), whose roots a frame records.

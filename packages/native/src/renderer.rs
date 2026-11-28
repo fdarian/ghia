@@ -8463,6 +8463,11 @@ impl GpuixView {
         self.retain.forget_left_rows(&left, &tree.lock().unwrap());
     }
 
+    /// A frame moved the content of the scroller `translated` in place: the offset the next frame is compared with is the one it left.
+    pub(crate) fn note_scrolls_translated(&mut self, translated: gpui::ScrollKey) {
+        self.retain.note_scrolls_translated(&self.scroll_handles, translated);
+    }
+
     pub(crate) fn scroll_virtual_list_to_item(
         &self,
         window: gpui::WindowId,
@@ -8549,6 +8554,8 @@ impl GpuixView {
 /// `cx` stay separate parameters: they are `&mut` and gpui reborrows them.
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
+    /// The tree as the view holds it, for what runs after the build (`scroll::translated`).
+    pub tree_handle: Arc<Mutex<RetainedTree>>,
     /// The list item being built whose `inside` marker takes room at the start of its first
     /// paragraph, and the room it takes once its element is laid out.
     pub inside_marker: Option<(u64, crate::layout::list_marker_paint::Room)>,
@@ -9908,6 +9915,7 @@ impl GpuixView {
         fonts.sync_faces(&tree.sheets.font_faces);
         BuildCtx {
             tree,
+            tree_handle: self.tree.clone(),
             inside_marker: None,
             fonts,
             event_callback: callback,
@@ -11663,6 +11671,14 @@ pub(crate) fn retained_id(id: u64) -> gpui::ElementId {
     gpui::ElementId::NamedInteger(gpui::SharedString::new_static("gpuix-retained"), id)
 }
 
+/// The element a retained root of [`retained_id`] was built for.
+pub(crate) fn retained_root_of(id: &gpui::GlobalElementId) -> Option<u64> {
+    match id.last()? {
+        gpui::ElementId::NamedInteger(name, element) if name.as_ref() == "gpuix-retained" => Some(*element),
+        _ => None,
+    }
+}
+
 /// What a replay of the retained root `id` does outside the frame: the registries it wrote are
 /// written again from its tape. `doc` is where the visit that makes the hook found the root in the document. The hook does not
 /// keep it: gpui keeps a lifted root that is no relocatable as a hole in the recording of the root around it, and paints the
@@ -13265,6 +13281,9 @@ pub(crate) fn build_host_container(
     }
     el = crate::layout::table::apply(el, ctx.tree, element, style, &ctx.inherited.table, &ctx.collapsed);
     el = crate::scroll::apply_container(el, window.window_handle().window_id(), element.id, style, &ctx.inherited.colors, ctx.scroll_handles);
+    if ctx.scroll_handles.contains_key(&element.id) {
+        el = crate::scroll::on_translated(el, window.window_handle().window_id(), element.id, ctx.tree_handle.clone());
+    }
     let outer_scroller = ctx.scroller;
     if let Some(handle) = ctx.scroll_handles.get(&element.id) {
         // Its offset is part of what the build read (the key sees it move), and so is where its

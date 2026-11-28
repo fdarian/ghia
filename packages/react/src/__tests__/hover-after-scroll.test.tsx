@@ -3,8 +3,9 @@
  * The hover under a pointer that stays follows a scroll on Chrome's schedule (Blink's `MarkHoverStateDirty`): a scroll that moves
  * rows under the pointer does not recompute it. It follows once the wheel has been quiet for 500 ms, 100 ms after a trackpad lift,
  * at the next frame after code scrolled (a write, `scrollIntoView`, a key; a smooth scroll when it ends), or at the next frame after
- * a build that changed the page or ran an animation of the layout. Motion that moves no box (a color, an opacity) changes nothing
- * under the pointer, so it does not make the hover follow.
+ * a build that changed the page or ran an animation of the layout when no wheel is in flight. A build while a wheel goes on (the
+ * commit of the rows its offset needs) is part of the scroll and the hover follows when the wheel is quiet. Motion that moves no box
+ * (a color, an opacity) changes nothing under the pointer, so it does not make the hover follow.
  */
 
 import React from "react"
@@ -218,15 +219,37 @@ describeNative("the hover under a still pointer, over a scroll", { timeout: TIME
         }
       })
 
-      it("follows at the next frame after a build that adds rows during the scroll", () => {
+      it("holds the hover over a build that adds rows while the wheel goes on, and follows when it is quiet", () => {
         const page = open(kind)
         try {
+          page.log.length = 0
           page.wheel(ROW)
           page.wheel(ROW)
           expect(page.hovered(), "the wheel left it").toEqual([1])
           page.draw(1)
           page.frames()
-          expect(page.hovered(), "a commit changed the page").toEqual([3])
+          expect(page.hovered(), "a commit while the wheel goes on is part of the scroll").toEqual([1])
+          expect(page.log).toEqual([])
+          page.wait(499)
+          expect(page.hovered()).toEqual([1])
+          page.wait(1)
+          expect(page.hovered(), "500 ms after the last tick").toEqual([3])
+          expect(page.log, "the boundary events fire once").toEqual(["leave 1", "enter 3"])
+        } finally {
+          page.unmount()
+        }
+      })
+
+      it("follows at the next frame after a build that adds rows when no wheel is in flight", () => {
+        const page = open(kind)
+        try {
+          page.wheel(ROW)
+          page.wait(500)
+          expect(page.hovered(), "the wheel's end").toEqual([2])
+          page.renderer.scrollTo(page.scroller, 0, 3 * ROW)
+          page.draw(1)
+          page.frames()
+          expect(page.hovered(), "a commit and a write").toEqual([4])
         } finally {
           page.unmount()
         }
@@ -298,22 +321,20 @@ describeNative("the hover under a still pointer, over a scroll", { timeout: TIME
         }
       })
 
-      for (const [slides, follows] of [["backgroundColor", false], ["width", true]] as const) {
-        it(`${follows ? "makes" : "does not make"} the hover follow while a transition of ${slides === "width" ? "a width" : "a color"} runs beside it`, () => {
+      for (const slides of ["backgroundColor", "width"] as const) {
+        it(`holds the hover over the commit that starts a transition of ${slides === "width" ? "a width" : "a color"} while the wheel goes on, and follows when it is quiet`, () => {
           const page = open(kind, { slides })
           try {
-            // The commit that starts the transition is a build that changed the page: the hover follows it. What is left is the
-            // transition that runs for 5 s.
             page.wheel(ROW)
             page.draw(0, 100)
             page.frames()
-            expect(page.hovered(), "the commit").toEqual([2])
+            expect(page.hovered(), "the commit is part of the scroll").toEqual([1])
             page.wheel(ROW)
             page.wait(50)
             expect(page.rowUnder()).toBe(3)
-            expect(page.hovered(), follows ? "a width moves boxes: the hover follows each frame" : "a color moves nothing under the pointer").toEqual(
-              follows ? [3] : [2],
-            )
+            expect(page.hovered(), "a layout animation beside the scroll does not follow while the wheel goes on").toEqual([1])
+            page.wait(450)
+            expect(page.hovered(), "500 ms after the last tick").toEqual([3])
           } finally {
             page.unmount()
           }

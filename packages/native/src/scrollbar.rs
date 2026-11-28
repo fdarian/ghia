@@ -17,9 +17,10 @@
 //! an overlay (`paint_overlay`), so it never takes part in what the container can scroll. Its
 //! hitbox exists only where the bar is visible, so it blocks nothing otherwise.
 //!
-//! A virtual list's bar also tells gpui how a scroll moves its thumb (`paint_scroll_thumb`), so a
-//! frame that moves the rows of the frame shown moves the thumb too and builds nothing: see
-//! [`plan_thumb`] and [`move_thumb`].
+//! The bar of a virtual list or of a `div` scroller also tells gpui how a scroll moves its thumb
+//! (`paint_scroll_thumb`), so a frame that moves the content of the frame shown moves the thumb
+//! too and builds nothing: see [`plan_thumb`] and [`move_thumb`]. Only a list's bar is repainted
+//! when its thumb fades with no scroll ([`repaint_thumb`]); a scroller's fade is built.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -466,6 +467,9 @@ pub(crate) struct State {
     needs_frames: bool,
     /// The bar is a virtual list's.
     list: bool,
+    /// The last frame that painted the bar noted its thumbs, so that a frame that moves the content plans them
+    /// (`plan_thumb`), and the clock's end of the hold is no reason to build one.
+    planned: Cell<bool>,
     /// The frames the bar asks for are steps of the alpha of its thumb alone (no thickening, no
     /// gutter to settle), which `repaint_thumb` writes over the frame shown: they are ticks, and no
     /// frame is built for them.
@@ -585,7 +589,7 @@ pub(crate) fn container_bar_stale(window: gpui::WindowId) -> bool {
     STATES.with(|states| {
         states.borrow().of(window).values().any(|state| {
             let st = state.borrow();
-            st.seen == frame && !st.list && st.stale_at(now)
+            st.seen == frame && !st.planned.get() && st.stale_at(now)
         })
     })
 }
@@ -1040,10 +1044,9 @@ fn bar_rect(axis: &AxisLayout, vertical: bool, start: f32, len: f32, thickness: 
     }
 }
 
-/// What a list's bar painted, which a scroll that moves the rows is planned against.
+/// What a bar painted along one axis, which a scroll that moves the content is planned against.
 #[derive(Clone, Copy)]
 struct ShownBar {
-    /// The bar of the vertical axis, the only one a list has.
     layout: Option<AxisLayout>,
     alpha: f32,
     grow: f32,
@@ -1058,6 +1061,7 @@ fn plan_thumb(
     source: &Source,
     look: Look,
     bounds: gpui::Bounds<gpui::Pixels>,
+    axis: usize,
     shown: &ShownBar,
     drawn: Option<gpui::Bounds<gpui::Pixels>>,
 ) -> Result<Option<gpui::Bounds<gpui::Pixels>>, gpui::ScrollThumbMiss> {
@@ -1073,20 +1077,25 @@ fn plan_thumb(
     if activity.alpha != shown.alpha {
         return Err(Miss::Alpha);
     }
-    let (Some(painted), Some(placed)) = (shown.layout, lay_out(source, look, bounds).layout[1]) else {
-        return Err(Miss::Size);
+    let placed = match (shown.layout, lay_out(source, look, bounds).layout[axis]) {
+        // An axis that has no bar, and still has none: nothing was painted and nothing moves.
+        (None, None) => return Ok(None),
+        (Some(painted), Some(placed)) => {
+            if !placed.same_track(&painted) {
+                return Err(Miss::Track);
+            }
+            if placed.thumb_len != painted.thumb_len || st.grow[axis].value(now) != shown.grow {
+                return Err(Miss::Size);
+            }
+            placed
+        }
+        _ => return Err(Miss::Size),
     };
-    if !placed.same_track(&painted) {
-        return Err(Miss::Track);
-    }
-    if placed.thumb_len != painted.thumb_len || st.grow[1].value(now) != shown.grow {
-        return Err(Miss::Size);
-    }
     let (rest, hover) = look.thickness();
     let thickness = rest + (hover - rest) * shown.grow;
     // Against where the thumb is drawn now, which is not where the frame shown painted it once a
     // translate moved it: a scroll that brings it back there moves it back.
-    let thumb = bar_rect(&placed, true, placed.thumb_start, placed.thumb_len, thickness);
+    let thumb = bar_rect(&placed, axis == 1, placed.thumb_start, placed.thumb_len, thickness);
     Ok((drawn != Some(thumb)).then_some(thumb))
 }
 
@@ -1206,24 +1215,39 @@ fn paint(
         (st.layout, st.empty_tracks.clone(), st.hitboxes.clone(), st.alpha, st.painted)
     };
     let view = window.current_view();
-    // A list tells gpui how a scroll moves its thumb, whether or not it paints one.
-    let note_thumb = |window: &mut gpui::Window, thumb: Option<gpui::PaintQuad>| {
-        let Source::List(list, _) = source else { return };
+    // A list and a scroller tell gpui how a scroll moves their thumbs, whether or not they paint one. A list has the one bar
+    // along its vertical axis.
+    let (key, noted_axes): (gpui::ScrollKey, &[usize]) = match source {
+        Source::List(list, _) => (list.scroll_key(), &[1]),
+        Source::Container { handle, .. } => (handle.scroll_key(), &[0, 1]),
+    };
+    let note_thumb = |window: &mut gpui::Window, axis: usize, thumb: Option<gpui::PaintQuad>| {
         // The alpha the frame shows the thumb at, which a repaint of the thumb changes.
         let shown_alpha = Rc::new(Cell::new(alpha));
-        let shown = ShownBar { layout: layout[1], alpha, grow: painted.grow[1] };
+        let shown = ShownBar { layout: layout[axis], alpha, grow: painted.grow[axis] };
         let plan = {
             let (state, source, shown_alpha) = (state.clone(), source.clone(), shown_alpha.clone());
             Rc::new(move |_: &gpui::Window, drawn| {
                 let shown = ShownBar { alpha: shown_alpha.get(), ..shown };
-                plan_thumb(&state, &source, look, bounds, &shown, drawn)
+                plan_thumb(&state, &source, look, bounds, axis, &shown, drawn)
             })
         };
-        let repaint = {
-            let (state, source, shown_alpha) = (state.clone(), source.clone(), shown_alpha.clone());
-            Rc::new(move |window: &gpui::Window, drawn| {
-                repaint_thumb(&state, &source, look, bounds, &shown, &shown_alpha, view, window, drawn)
-            })
+        let repaint: gpui::ScrollThumbRepainter = match source {
+            Source::List(..) => {
+                let (state, source, shown_alpha) = (state.clone(), source.clone(), shown_alpha.clone());
+                Rc::new(move |window: &gpui::Window, drawn| {
+                    repaint_thumb(&state, &source, look, bounds, &shown, &shown_alpha, view, window, drawn)
+                })
+            }
+            // The fade of a scroller's bar is built, not repainted: a thumb whose alpha is not the one painted is a miss.
+            Source::Container { .. } => {
+                let (state, source) = (state.clone(), source.clone());
+                Rc::new(move |_: &gpui::Window, _| {
+                    let (_, offset) = source.extent();
+                    let alpha_now = state.borrow().activity(offset, repaint_now(), look.classic()).alpha;
+                    if alpha_now == alpha { Ok(None) } else { Err(gpui::ScrollThumbMiss::Alpha) }
+                })
+            }
         };
         let moved = {
             let (state, source) = (state.clone(), source.clone());
@@ -1231,14 +1255,18 @@ fn paint(
                 move_thumb(&state, &source, look, bounds, view, window, cx)
             })
         };
-        let noted = window.paint_scroll_thumb(list, thumb, plan, moved, repaint);
+        let noted = window.paint_scroll_thumb(key, thumb, plan, moved, repaint);
         // A window that does not note thumbs (its scroll patch is off) has nothing to repaint: the bar's steps are builds.
+        let st = state.borrow();
+        st.planned.set(noted);
         if !noted {
-            state.borrow().steps_thumb.set(false);
+            st.steps_thumb.set(false);
         }
     };
     if alpha <= 0.0 {
-        note_thumb(window, None);
+        for axis in noted_axes {
+            note_thumb(window, *axis, None);
+        }
         return;
     }
 
@@ -1266,12 +1294,17 @@ fn paint(
     for track in &empty_tracks {
         paint_rect(window, *track, 0.0, scaled(track_color, 1.0));
     }
-    let mut thumb_noted = false;
     {
         let st = state.borrow();
         let now = now();
+        // The thumbs are noted x then y every frame, shown or not: gpui finds one by its place among the thumbs the scroller noted.
         for (index, vertical) in [(0, false), (1, true)] {
-            let Some(axis) = layout[index] else { continue };
+            let Some(axis) = layout[index] else {
+                if noted_axes.contains(&index) {
+                    note_thumb(window, index, None);
+                }
+                continue;
+            };
             let grown = st.grow[index].value(now);
             let thickness = rest + (hover - rest) * grown;
             let rect = |start: f32, len: f32, thickness: f32| bar_rect(&axis, vertical, start, len, thickness);
@@ -1290,17 +1323,12 @@ fn paint(
                 thickness / 2.0,
                 scaled(thumb_color, 1.0),
             );
-            // A list's one bar is along the vertical axis.
-            if vertical && matches!(source, Source::List(..)) {
-                note_thumb(window, Some(thumb));
-                thumb_noted = true;
+            if noted_axes.contains(&index) {
+                note_thumb(window, index, Some(thumb));
             } else {
                 window.paint_quad(thumb);
             }
         }
-    }
-    if !thumb_noted {
-        note_thumb(window, None);
     }
 
     window.on_mouse_event({
