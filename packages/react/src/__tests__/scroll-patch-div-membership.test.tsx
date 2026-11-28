@@ -71,6 +71,14 @@ type Options = {
   absoluteFrom?: number
   /** `content-visibility: hidden` on the box that holds the rows: its build skips them. */
   skipHolder?: boolean
+  /** The rows are the children of the scroller itself, which is the box that places them (`position: relative`). */
+  inScroller?: boolean
+  /** The height of a row in px, and so how far each is from the top of the box that holds them (`ROW` when unset). */
+  rowHeight?: number
+  /** `top` is a percentage of the height of the box that holds the rows, which is `rowHeight` times the number of rows. */
+  percentTop?: boolean
+  /** The device pixels per px of the window. */
+  scale?: number
 }
 
 function measureRow(log: Log, index: number, instance, read: boolean) {
@@ -107,12 +115,19 @@ function Page(props: { log: Log; layout: Layout } & Options) {
         onClick={() => props.log.clicks.push(index)}
         style={{
           position: layout === "flow" || index === props.flowRow || index < (props.absoluteFrom ?? 0) ? undefined : "absolute",
-          top: layout === "absolute" ? index * ROW : layout === "transform" ? 0 : undefined,
-          ...(layout === "transform" ? { transform: `translateY(${index * ROW}px)` } : {}),
+          top:
+            layout === "absolute"
+              ? props.percentTop
+                ? `${((index * (props.rowHeight ?? ROW)) / (COUNT * (props.rowHeight ?? ROW))) * 100}%`
+                : index * (props.rowHeight ?? ROW)
+              : layout === "transform"
+                ? 0
+                : undefined,
+          ...(layout === "transform" ? { transform: `translateY(${index * (props.rowHeight ?? ROW)}px)` } : {}),
           ...(index === 3 && props.selectedZ !== undefined ? { zIndex: props.selectedZ } : {}),
           ...(index === props.transformRow ? { top: 0, transform: `translateY(${props.transformBy}px)` } : {}),
           width: ROW_WIDTH,
-          height: index === props.tallerRow ? undefined : ROW,
+          height: index === props.tallerRow ? undefined : (props.rowHeight ?? ROW),
           flexShrink: 0,
           backgroundColor: index % 2 === 0 ? "#223344" : "#334455",
           ...(props.hover ? { hover: { backgroundColor: "#664422" } } : {}),
@@ -133,13 +148,14 @@ function Page(props: { log: Log; layout: Layout } & Options) {
         scrollbarWidth: "none",
         ...(props.tint ? { backgroundColor: "#101820" } : {}),
         ...(props.rtl ? { direction: "rtl" } : {}),
+        ...(props.inScroller ? { position: "relative" } : {}),
       }}
     >
       {props.sheet === undefined ? null : <style>{props.sheet}</style>}
-      {layout !== "flow" ? (
+      {layout !== "flow" && !props.inScroller ? (
         <div
           testId="inner"
-          style={{ position: "relative", width: "100%", height: props.spacerHeight ?? COUNT * ROW, ...(props.skipHolder ? { contentVisibility: "hidden" } : {}) }}
+          style={{ position: "relative", width: "100%", height: props.spacerHeight ?? COUNT * (props.rowHeight ?? ROW), ...(props.skipHolder ? { contentVisibility: "hidden" } : {}) }}
         >
           {rows}
         </div>
@@ -152,7 +168,7 @@ function Page(props: { log: Log; layout: Layout } & Options) {
 
 function open(translate: boolean, layout: Layout, options: Options = {}) {
   const log: Log = { clicks: [], nodes: {}, measured: [], observed: [] }
-  const root = createTestRoot({ width: 300, height: 200 })
+  const root = createTestRoot({ width: 300, height: 200, scaleFactor: options.scale })
   const renderer = root.renderer
   renderer.clockPause()
   root.render(<Page log={log} layout={layout} {...options} />)
@@ -541,6 +557,56 @@ describeNative("a wheel step over a div scroller whose commit puts rows in it", 
     expect(on.observed).toEqual(off.observed)
     expect(on.frames).toEqual(off.frames)
   })
+
+  unverified("is no translate when the rows are the children of the scroller itself, which does not scroll its own box", () => {
+    // The scroller is the box that places the rows, and its box stays where it is while the rows move in it: the origin a row comes in
+    // at would miss the scroll offset. Rows of the first 100px (the scroller's box) are the ones that could be put down by a scroll.
+    const all = Array.from({ length: 10 }, (_, index) => index)
+    const without = (...out: number[]) => all.filter((index) => !out.includes(index))
+    const inScroller = { inScroller: true }
+    const rowSteps: RowStep[] = [
+      { by: 3, rows: without(1) },
+      { by: 2, rows: all },
+      { by: 4 },
+      { by: -2, rows: without(0) },
+      { by: -3, rows: all },
+      { by: 5, rows: without(0, 1) },
+      { by: -9, rows: all },
+    ]
+    const on = runRows(true, "absolute", all, rowSteps, inScroller)
+    const off = runRows(false, "absolute", all, rowSteps, inScroller)
+    expect(on.frames).toEqual(off.frames)
+    expect(on.clicks).toEqual(off.clicks)
+    expect(on.counters.rowsBuilt - on.before.rowsBuilt, "no row is built by a translate").toBe(0)
+  })
+
+  for (const [what, options] of [
+    ["rows of 16.8px", { rowHeight: 16.8 }],
+    ["rows of 16.8px at a scale of 2", { rowHeight: 16.8, scale: 2 }],
+    ["rows of 16.75px, a percentage from the top, at a scale of 2", { rowHeight: 16.75, percentTop: true, scale: 2 }],
+    ["rows of 17.3px, a percentage from the top, at a scale of 4", { rowHeight: 17.3, percentTop: true, scale: 4 }],
+  ] as const) {
+    unverified(`is a translate whose rows come in where the layout of the page puts them, with ${what}`, () => {
+      const first = [0, 1, 2, 3, 4, 5, 6, 7]
+      const rowsFrom = (from: number) => Array.from({ length: 8 }, (_, index) => from + index)
+      const fractionalSteps: RowStep[] = [
+        { by: 3, rows: rowsFrom(0).concat(8) },
+        { by: 5, rows: rowsFrom(1).concat(9) },
+        { by: 8, rows: rowsFrom(2).concat(10) },
+        { by: -4, rows: rowsFrom(1).concat(10) },
+        { by: 6, rows: rowsFrom(3).concat(11) },
+        { by: 2 },
+        { by: 7, rows: rowsFrom(4).concat(12) },
+        { by: -12, rows: rowsFrom(0) },
+      ]
+      const on = runRows(true, "absolute", first, fractionalSteps, options)
+      const off = runRows(false, "absolute", first, fractionalSteps, options)
+      expect(on.counters.mispredicted).toBe(0)
+      expect(on.counters.rowsBuilt - on.before.rowsBuilt, "rows came in by translates").toBeGreaterThan(0)
+      expect(on.frames).toEqual(off.frames)
+      expect(on.clicks).toEqual(off.clicks)
+    })
+  }
 
   unverified("is a frame built whole when the box that held the absolute rows holds none any more, and gets a row", () => {
     // A frame that found rows in the flow only forgets the box as a parent a scroll builds for: a row that comes in under it is a

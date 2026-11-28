@@ -40,6 +40,9 @@ pub struct ElementBounds {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    /// What `x`, `y`, `width` and `height` were cut off of the box layout measured, in 1/512 of a device pixel (each below 8, the
+    /// size of a layout unit): [`Self::unquantized`] puts it back. A scroll that puts a box in reads where taffy has its parent.
+    pub finer: [u8; 4],
     /// Where the border box is painted, which the pointer's `offsetX` and `offsetY` are measured from.
     pub painted_x: f64,
     pub painted_y: f64,
@@ -93,6 +96,15 @@ fn layout_units(value: Pixels, scale: f32) -> f64 {
     (denoised * LAYOUT_UNITS_PER_DEVICE_PX).floor() / LAYOUT_UNITS_PER_DEVICE_PX / scale
 }
 
+/// What [`layout_units`] cut off of `value`, in 1/512 of a device pixel.
+fn below_layout_unit(value: Pixels, scale: f32) -> u8 {
+    const PER_UNIT: f64 = NOISE_UNITS_PER_DEVICE_PX / LAYOUT_UNITS_PER_DEVICE_PX;
+    let device = f64::from(f32::from(value)) * f64::from(scale);
+    let denoised = (device * NOISE_UNITS_PER_DEVICE_PX).round();
+    let kept = (denoised / PER_UNIT).floor() * PER_UNIT;
+    (denoised - kept) as u8
+}
+
 impl ElementBounds {
     /// `painted` is where the box is when snapped to device pixels.
     fn from_gpui(layout: LaidOut, painted: Point<Pixels>, insets: LayoutInsets) -> Self {
@@ -101,6 +113,12 @@ impl ElementBounds {
             y: layout_units(layout.border_box.origin.y, layout.scale),
             width: layout_units(layout.border_box.size.width, layout.scale),
             height: layout_units(layout.border_box.size.height, layout.scale),
+            finer: [
+                below_layout_unit(layout.border_box.origin.x, layout.scale),
+                below_layout_unit(layout.border_box.origin.y, layout.scale),
+                below_layout_unit(layout.border_box.size.width, layout.scale),
+                below_layout_unit(layout.border_box.size.height, layout.scale),
+            ],
             content_width: layout_units(layout.content.width, layout.scale),
             content_height: layout_units(layout.content.height, layout.scale),
             painted_x: f64::from(f32::from(painted.x)),
@@ -118,6 +136,18 @@ impl ElementBounds {
             to_window: layout.to_window,
             faces_away: layout.faces_away,
         }
+    }
+
+    /// The border box as layout measured it, before it was cut down to layout units (to 1/512 of a device pixel, which takes the noise
+    /// of single precision off): `(x, y, width, height)`, in the pixels of a window of `scale`.
+    pub fn unquantized(&self, scale: f32) -> (f64, f64, f64, f64) {
+        let finer = |value: f64, below: u8| value + f64::from(below) / NOISE_UNITS_PER_DEVICE_PX / f64::from(scale);
+        (
+            finer(self.x, self.finer[0]),
+            finer(self.y, self.finer[1]),
+            finer(self.width, self.finer[2]),
+            finer(self.height, self.finer[3]),
+        )
     }
 
     /// A transform of the window moves or deforms the box, so that it is not where `x` and `y` say.
@@ -211,6 +241,7 @@ impl ElementBounds {
             y,
             width,
             height,
+            finer: [0; 4],
             painted_x: x,
             painted_y: y,
             content_width: width,
@@ -1455,6 +1486,26 @@ mod tests {
         assert_eq!(layout_units(px(10.01), 2.0), 10.0078125);
         assert_eq!(layout_units(px(100.4), 2.0), 100.3984375);
         assert_eq!(layout_units(px(0.4), 2.0), 0.3984375);
+    }
+
+    #[test]
+    fn what_the_layout_unit_cut_off_is_put_back_by_unquantized() {
+        for scale in [1.0_f32, 1.5, 2.0] {
+            // Fractions that are no multiple of 1/64 of a device pixel at any of these scales, and one that is.
+            for value in [16.8_f32, 33.6, 100.4, 17.3, 0.1, 16.75] {
+                let layout = LaidOut::of_box(
+                    gpui::Bounds::new(point(px(value), px(value * 3.0)), gpui::size(px(value * 2.0), px(value))),
+                    scale,
+                );
+                let bounds = ElementBounds::from_gpui(layout, point(px(0.0), px(0.0)), LayoutInsets::default());
+                let (x, y, width, height) = bounds.unquantized(scale);
+                for (back, measured) in [(x, value), (y, value * 3.0), (width, value * 2.0), (height, value)].map(|(back, measured)| (back, f64::from(measured))) {
+                    // Within the 1/512 of a device pixel the noise of single precision is taken off at, where the cut is up to 1/64.
+                    assert!((back * f64::from(scale) - measured * f64::from(scale)).abs() <= 1.0 / 1024.0 + 1e-6, "{value} at {scale}: {back} for {measured}");
+                }
+                assert!(bounds.finer.iter().all(|below| *below < 8));
+            }
+        }
     }
 
     /// A box of 80 x 40 at (10, 20), turned a quarter around its middle (50, 40) and moved 5 right.

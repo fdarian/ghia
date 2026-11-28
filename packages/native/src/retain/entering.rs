@@ -28,7 +28,10 @@ pub(crate) struct Group {
 }
 
 /// The groups the children `added` (each with its parent) make, or `None` when one of them cannot be built by a scroll.
-pub(crate) fn groups(tree: &RetainedTree, window: gpui::WindowId, added: &[(u64, u64)]) -> Option<Vec<Group>> {
+///
+/// The boxes are those layout measured (`ElementBounds::unquantized`, in the pixels of a window of `scale`), so that the origin a child
+/// is put at, and a `top` that is a percentage of its parent, are where the layout of the page has them.
+pub(crate) fn groups(tree: &RetainedTree, window: gpui::WindowId, scale: f32, added: &[(u64, u64)]) -> Option<Vec<Group>> {
     let mut parents: Vec<u64> = added.iter().map(|(_, parent)| *parent).collect();
     parents.sort_unstable();
     parents.dedup();
@@ -60,12 +63,8 @@ pub(crate) fn groups(tree: &RetainedTree, window: gpui::WindowId, added: &[(u64,
             .filter(|holder| is_block_container(holder))
             .map(|_| bounds.padding_left)
             .filter(|_| !right_to_left);
-        let holder = (
-            bounds.x + bounds.client_left,
-            bounds.y + bounds.client_top,
-            bounds.width - bounds.client_left - bounds.border_right,
-            bounds.height - bounds.client_top - bounds.border_bottom,
-        );
+        let (x, y, width, height) = bounds.unquantized(scale);
+        let holder = (x + bounds.client_left, y + bounds.client_top, width - bounds.client_left - bounds.border_right, height - bounds.client_top - bounds.border_bottom);
         let mut at = 0;
         while at < siblings.len() {
             if !came(&siblings[at]) {
@@ -222,6 +221,11 @@ fn has_a_box_of_its_own_size(style: &StyleDesc) -> bool {
 }
 
 impl GpuixView {
+    /// Whether `id` scrolls its own content (it has a scroll handle).
+    pub(crate) fn is_scroll_container(&self, id: u64) -> bool {
+        self.scroll_handles.contains_key(&id)
+    }
+
     /// What the children of `parent` that are absolute and placed by it inside a scroller were built from.
     pub(crate) fn retain_entry_start(&self, parent: u64) -> Option<(&BuildStart, u64)> {
         self.retain.entry_start(parent)
